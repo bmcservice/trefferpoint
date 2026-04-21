@@ -1,0 +1,5 @@
+# Versionierte Backup-Dateien lokal behalten, nicht ins Repo
+trefferpoint_v*.html
+
+# Temporäres
+*.crdownload
