@@ -794,7 +794,7 @@ async function checkForUpdate() {
             white-space:nowrap;`;
         banner.innerHTML = `
             <span>⬆ Update v${latest} verfügbar</span>
-            <button onclick="window.location.href='${UPDATE_URL}/'" style="
+            <button onclick="applyUpdate()" style="
                 background:#c8a84b;color:#000;border:none;
                 font-family:'Share Tech Mono',monospace;font-size:11px;
                 padding:4px 12px;cursor:pointer;font-weight:700">
@@ -805,6 +805,18 @@ async function checkForUpdate() {
                 font-size:16px;cursor:pointer;padding:0 4px">✕</button>`;
         document.body.appendChild(banner);
     } catch(e) { /* offline oder Server nicht erreichbar — still */ }
+}
+
+async function applyUpdate() {
+    try {
+        if ('serviceWorker' in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map(r => r.unregister()));
+            const keys = await caches.keys();
+            await Promise.all(keys.map(k => caches.delete(k)));
+        }
+    } catch(e) {}
+    location.reload();
 }
 
 // --- DSB Scheibennormen ---
