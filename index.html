@@ -936,6 +936,14 @@ function runDemo() {
         return;
     }
 
+    // Android: speechSynthesis nur im User-Gesture-Kontext aktivierbar
+    if (window.speechSynthesis) {
+        const primer = new SpeechSynthesisUtterance('');
+        primer.volume = 0;
+        speechSynthesis.speak(primer);
+        speechSynthesis.cancel();
+    }
+
     resetSession();
 
     const disc = DISCS[document.getElementById('discSel').value] || DISCS.kk25;
@@ -1938,6 +1946,7 @@ function setRef() {
 
 function speak(text) {
     if (!window.speechSynthesis) return;
+    if (speechSynthesis.paused) speechSynthesis.resume();
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'de-DE';
