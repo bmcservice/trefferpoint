@@ -4,7 +4,7 @@
   "description": "Digitale Echtzeit-Schussauswertung für DSB-Schützen",
   "start_url": "./",
   "display": "fullscreen",
-  "orientation": "landscape",
+  "orientation": "any",
   "background_color": "#080a0d",
   "theme_color": "#c8a84b",
   "icons": [
