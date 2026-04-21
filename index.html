@@ -710,7 +710,7 @@
             <button class="btn" id="btnNewSpiegel" disabled>↺ Neuer Spiegel</button>
             <button class="btn" id="btnDetect" disabled>⚡ Erkennung starten</button>
             <div style="display:flex;gap:6px;margin-bottom:7px">
-                <button class="btn" id="btnSpeech" style="flex:1;padding:5px;font-size:11px">🔇 Ansage</button>
+                <button class="btn btn-active" id="btnSpeech" style="flex:1;padding:5px;font-size:11px">🔊 Ansage</button>
                 <button class="btn" id="btnDebug" style="flex:1;padding:5px;font-size:11px">⬛ Debug</button>
             <button class="btn" id="btnDemo">▶ Demo (10 Schuss)</button>
             </div>
@@ -893,7 +893,7 @@ const DISCS = {
 let appState = 'IDLE'; // IDLE | READY | CALIB_CTR | CALIB_EDGE | CALIBRATED | DETECTING
 let refWarmup = 0;
 let pendingHit = null;
-let speechEnabled = false;
+let speechEnabled = true;
 let debugMode = false;
 let camRotation = 0; // 0 | 90 | 180 | 270
 let mediaStream = null;
