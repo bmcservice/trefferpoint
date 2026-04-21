@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>TrefferPoint v2.0.7 — Digitale Schussauswertung</title>
+    <title>TrefferPoint v2.0.8 — Digitale Schussauswertung</title>
     <meta name="theme-color" content="#c8a84b">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="./manifest.json">
@@ -550,7 +550,7 @@
 
 <header>
     <div class="logo">◎ TREFFERPOINT</div>
-    <div class="logo-sub">Digitale Schussauswertung · v2.0.7</div>
+    <div class="logo-sub">Digitale Schussauswertung · v2.0.8</div>
     <div class="view-tabs">
         <button class="view-tab active" id="tabCam">📷 Kamera</button>
         <button class="view-tab" id="tabTreffer">📊 Treffer</button>
@@ -712,6 +712,7 @@
             <div style="display:flex;gap:6px;margin-bottom:7px">
                 <button class="btn" id="btnSpeech" style="flex:1;padding:5px;font-size:11px">🔇 Ansage</button>
                 <button class="btn" id="btnDebug" style="flex:1;padding:5px;font-size:11px">⬛ Debug</button>
+            <button class="btn" id="btnDemo">▶ Demo (10 Schuss)</button>
             </div>
             <div class="sens-row">
                 <span class="sens-label">Empfindlichkeit</span>
@@ -761,7 +762,16 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.7';
+const APP_VERSION = '2.0.8';
+
+function versionGt(a, b) {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+        if ((pa[i]||0) > (pb[i]||0)) return true;
+        if ((pa[i]||0) < (pb[i]||0)) return false;
+    }
+    return false;
+}
 
 async function checkForUpdate() {
     if (!UPDATE_URL || !navigator.onLine) return;
@@ -770,7 +780,7 @@ async function checkForUpdate() {
         if (!res.ok) return;
         const data = await res.json();
         const latest = data.version || '';
-        if (!latest || latest === APP_VERSION) return;
+        if (!latest || !versionGt(latest, APP_VERSION)) return;
 
         // Neuere Version verfügbar → Banner anzeigen
         const banner = document.createElement('div');
@@ -896,7 +906,104 @@ let lastFpsTime = 0;
 let displayFps = 0;
 let lastHitTimer = null;
 let lastHitFlashTimer = null;
+let demoTimer = null;
 
+
+// ================================================================
+//  DEMO-MODUS
+// ================================================================
+function runDemo() {
+    const btn = document.getElementById('btnDemo');
+
+    // Stop wenn Demo läuft
+    if (demoTimer !== null) {
+        clearTimeout(demoTimer);
+        demoTimer = null;
+        btn.textContent = '▶ Demo (10 Schuss)';
+        btn.classList.remove('btn-danger');
+        return;
+    }
+
+    resetSession();
+
+    const disc = DISCS[document.getElementById('discSel').value] || DISCS.kk25;
+    const W = 1280, H = 720;
+    const CX = W / 2, CY = H / 2;
+    const ppm = (H * 0.22) / disc.outer_mm;
+
+    canvas.width = W;
+    canvas.height = H;
+    calib = { cx:CX, cy:CY, outerPx:disc.outer_mm*ppm,
+              pxPerMm:ppm, a:disc.outer_mm*ppm, b:disc.outer_mm*ppm, angle:0 };
+
+    function redraw() {
+        ctx.fillStyle = '#1a1a18';
+        ctx.fillRect(0, 0, W, H);
+        const outerR = disc.ringe[disc.ringe.length-1].radius * ppm;
+        const g = ctx.createRadialGradient(CX,CY,outerR*0.6,CX,CY,outerR*1.3);
+        g.addColorStop(0,'rgba(240,235,210,0.12)'); g.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+        drawSyntheticTarget(ctx, disc, CX, CY, ppm, {showLabels:true, fillBackground:true});
+        const v = ctx.createRadialGradient(CX,CY,H*0.38,CX,CY,H*0.75);
+        v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(1,'rgba(0,0,0,0.82)');
+        ctx.fillStyle = v; ctx.fillRect(0,0,W,H);
+        hits.forEach((h,i) => drawHit(h, i+1, i===hits.length-1));
+    }
+
+    // Box-Muller Normalverteilung
+    function randN() {
+        return Math.sqrt(-2*Math.log(Math.random())) * Math.cos(2*Math.PI*Math.random());
+    }
+
+    const spread = disc.outer_mm * 0.18; // Streuradius in mm
+
+    redraw();
+    setMsg('');
+    btn.textContent = '⏹ Demo stoppen';
+    btn.classList.add('btn-danger');
+    setStatus('Demo läuft — 10 Schuss...', 'warn');
+
+    let shotNum = 0;
+
+    function fireNext() {
+        if (shotNum >= 10) {
+            demoTimer = null;
+            btn.textContent = '▶ Demo (10 Schuss)';
+            btn.classList.remove('btn-danger');
+            setStatus('Demo abgeschlossen — ' + hits.length + ' Treffer', 'ok');
+            return;
+        }
+
+        const dx = randN() * spread * ppm;
+        const dy = randN() * spread * ppm;
+        const hx = Math.max(20, Math.min(W-20, CX + dx));
+        const hy = Math.max(20, Math.min(H-20, CY + dy));
+
+        const distMm = Math.sqrt(dx*dx + dy*dy) / ppm;
+        const scoreDist = distMm - disc.kaliber / 2;
+        let ring = 0;
+        for (const rng of disc.ringe) {
+            if (scoreDist <= rng.radius) { ring = rng.r; break; }
+        }
+
+        const deg = hitDeg(hx, hy);
+        hits.push({x:hx, y:hy, ring, distMm:distMm.toFixed(1), deg});
+        updateScore();
+        showPop(ring, distMm.toFixed(1));
+        addHitRow(ring, distMm.toFixed(1), hits.length, deg);
+        redraw();
+
+        if (speechEnabled) {
+            const clock = clockPos(hx, hy);
+            speak(ring > 0 ? ring + ' auf ' + clock + ' Uhr' : 'Fehlschuss auf ' + clock + ' Uhr');
+        }
+
+        shotNum++;
+        demoTimer = setTimeout(fireNext, 3500);
+    }
+
+    demoTimer = setTimeout(fireNext, 400);
+}
 // --- View Toggle ---
 function setView(v) {
     document.body.classList.toggle('view-treffer', v === 'treffer');
@@ -2207,6 +2314,7 @@ document.getElementById('btnReset').addEventListener('click', resetSession);
 
 document.getElementById('btnAutoOpt').addEventListener('click', autoOptimizeCamera);
 
+document.getElementById('btnDemo').addEventListener('click', runDemo);
 document.getElementById('tabCam').addEventListener('click', () => setView('cam'));
 document.getElementById('tabTreffer').addEventListener('click', () => setView('treffer'));
 
