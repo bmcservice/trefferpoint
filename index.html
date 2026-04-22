@@ -771,7 +771,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.13';
+const APP_VERSION = '2.0.14';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2281,7 +2281,23 @@ async function startStream() {
                 setMsg('URL-Format: http://admin:admin@' + (parsedHost || 'IP:Port') + '/video');
                 return;
             }
-            if (r.ok && r.body) { resp = r; workUrl = tryUrl; break; }
+            if (r.status === 503) {
+                // Server sagt explizit: Stream nicht bereit (z.B. Kamera nicht geöffnet).
+                // Body des Servers an User zeigen statt zum nächsten Pfad weiterzuspringen.
+                const errText = await r.text().catch(() => '');
+                setStatus('\u26a0 Kamera nicht bereit', 'warn');
+                setMsg(errText || 'Server antwortet mit 503 — Kamera nicht verbunden');
+                return;
+            }
+            if (r.ok && r.body) {
+                // Content-Type prüfen: nur multipart/* oder image/* sind echte Streams.
+                // HTML (z.B. Webviewer auf /) NICHT als Stream akzeptieren — sonst hängt der Decoder.
+                const ct = (r.headers.get('Content-Type') || '').toLowerCase();
+                if (ct.includes('multipart/') || ct.includes('image/')) {
+                    resp = r; workUrl = tryUrl; break;
+                }
+                // Andernfalls: weiter zum nächsten Pfad probieren (r wird verworfen).
+            }
         } catch(e) {
             if (ac.signal.aborted) return;
         }
