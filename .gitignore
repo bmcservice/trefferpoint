@@ -3,3 +3,7 @@ trefferpoint_v*.html
 
 # Temporäres
 *.crdownload
+
+# Claude Code / tooling
+.claude/
+apk_download/
