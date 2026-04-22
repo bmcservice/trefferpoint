@@ -1,10 +1,13 @@
 package de.bmcservice.trefferpoint
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
+import android.webkit.PermissionRequest
 import android.util.Log
 import android.view.WindowManager
 import android.webkit.WebChromeClient
@@ -76,9 +79,24 @@ class MainActivity : AppCompatActivity() {
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
         webView.webViewClient = WebViewClient()
-        webView.webChromeClient = WebChromeClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            // WebView -> App: Erlaube getUserMedia für eingebaute Kameras + Mikro
+            override fun onPermissionRequest(request: PermissionRequest) {
+                val allowed = request.resources.filter {
+                    it == PermissionRequest.RESOURCE_VIDEO_CAPTURE ||
+                    it == PermissionRequest.RESOURCE_AUDIO_CAPTURE
+                }.toTypedArray()
+                AppLog.i(TAG, "WebView Permission Request: ${request.resources.joinToString()} → grant ${allowed.joinToString()}")
+                request.grant(allowed)
+            }
+        }
         WebView.setWebContentsDebuggingEnabled(true)
         webView.loadUrl("http://127.0.0.1:$MJPEG_PORT/")
+
+        // Runtime-Permission für eingebaute Kamera (für den "Kamera"-Tab in TrefferPoint)
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.CAMERA), 1001)
+        }
 
         UVCUtils.init(this)
         initCamera()
