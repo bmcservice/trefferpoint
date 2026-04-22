@@ -49,16 +49,16 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
 
-        Log.i(TAG, "=== onCreate — TrefferPoint startet ===")
-        Log.i(TAG, "Launch intent: ${intent?.action}")
+        AppLog.i(TAG, "=== onCreate — TrefferPoint startet ===")
+        AppLog.i(TAG, "Launch intent: ${intent?.action}")
 
         // MJPEG-Server ZUERST — die WebView lädt HTML UND Stream davon
         mjpegServer = MjpegServer(MJPEG_PORT, applicationContext)
         try {
             mjpegServer.start()
-            Log.i(TAG, "MJPEG server läuft auf 127.0.0.1:$MJPEG_PORT")
+            AppLog.i(TAG, "MJPEG server läuft auf 127.0.0.1:$MJPEG_PORT")
         } catch (e: Exception) {
-            Log.e(TAG, "MJPEG server konnte nicht starten", e)
+            AppLog.e(TAG, "MJPEG server konnte nicht starten", e)
         }
 
         webView = findViewById(R.id.webview)
@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        Log.i(TAG, "onNewIntent: ${intent.action}")
+        AppLog.i(TAG, "onNewIntent: ${intent.action}")
         handleUsbIntent(intent)
     }
 
@@ -105,14 +105,14 @@ class MainActivity : AppCompatActivity() {
         @Suppress("DEPRECATION")
         val device: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
         if (device == null) {
-            Log.w(TAG, "USB_DEVICE_ATTACHED Intent aber kein Device im Extra")
+            AppLog.w(TAG, "USB_DEVICE_ATTACHED Intent aber kein Device im Extra")
             return
         }
-        Log.i(TAG, "USB-Intent Device: ${device.productName} VID=${device.vendorId} PID=${device.productId}")
+        AppLog.i(TAG, "USB-Intent Device: ${device.productName} VID=${device.vendorId} PID=${device.productId}")
         try {
             cameraHelper?.selectDevice(device)
         } catch (e: Exception) {
-            Log.e(TAG, "selectDevice via Intent fehlgeschlagen", e)
+            AppLog.e(TAG, "selectDevice via Intent fehlgeschlagen", e)
         }
     }
 
@@ -121,22 +121,22 @@ class MainActivity : AppCompatActivity() {
         if (cameraOpened) return
         try {
             val devices = helper.deviceList
-            Log.i(TAG, "onResume enumerate — ${devices?.size ?: 0} USB-Device(s) sichtbar")
+            AppLog.i(TAG, "onResume enumerate — ${devices?.size ?: 0} USB-Device(s) sichtbar")
             devices?.forEachIndexed { i, d ->
-                Log.i(TAG, "  [$i] ${d.productName} VID=${d.vendorId} PID=${d.productId} class=${d.deviceClass} iface=${d.interfaceCount}")
+                AppLog.i(TAG, "  [$i] ${d.productName} VID=${d.vendorId} PID=${d.productId} class=${d.deviceClass} iface=${d.interfaceCount}")
             }
             val uvcDevice = devices?.firstOrNull { isLikelyUvcCamera(it) }
             if (uvcDevice != null) {
-                Log.i(TAG, "Starte bereits verbundene UVC-Kamera: ${uvcDevice.productName}")
+                AppLog.i(TAG, "Starte bereits verbundene UVC-Kamera: ${uvcDevice.productName}")
                 helper.selectDevice(uvcDevice)
             } else if (!devices.isNullOrEmpty()) {
-                Log.i(TAG, "Keine UVC-Heuristik getroffen — probiere erstes Gerät: ${devices[0].productName}")
+                AppLog.i(TAG, "Keine UVC-Heuristik getroffen — probiere erstes Gerät: ${devices[0].productName}")
                 helper.selectDevice(devices[0])
             } else {
-                Log.w(TAG, "Keine USB-Geräte sichtbar. Kamera nicht angesteckt oder von anderer App beansprucht?")
+                AppLog.w(TAG, "Keine USB-Geräte sichtbar. Kamera nicht angesteckt oder von anderer App beansprucht?")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "attachAlreadyConnectedCamera fehlgeschlagen", e)
+            AppLog.e(TAG, "attachAlreadyConnectedCamera fehlgeschlagen", e)
         }
     }
 
@@ -154,46 +154,46 @@ class MainActivity : AppCompatActivity() {
         cameraHelper = CameraHelper().also { helper ->
             helper.setStateCallback(object : ICameraHelper.StateCallback {
                 override fun onAttach(device: UsbDevice?) {
-                    Log.i(TAG, "→ onAttach: ${device?.productName} VID=${device?.vendorId} PID=${device?.productId}")
+                    AppLog.i(TAG, "→ onAttach: ${device?.productName} VID=${device?.vendorId} PID=${device?.productId}")
                     device?.let { helper.selectDevice(it) }
                 }
 
                 override fun onDeviceOpen(device: UsbDevice?, isFirstOpen: Boolean) {
-                    Log.i(TAG, "→ onDeviceOpen: ${device?.productName} firstOpen=$isFirstOpen")
+                    AppLog.i(TAG, "→ onDeviceOpen: ${device?.productName} firstOpen=$isFirstOpen")
                     try {
                         helper.openCamera(UVCParam())
                     } catch (e: Exception) {
-                        Log.e(TAG, "openCamera() Exception", e)
+                        AppLog.e(TAG, "openCamera() Exception", e)
                     }
                 }
 
                 override fun onCameraOpen(device: UsbDevice?) {
                     val size = helper.previewSize
-                    Log.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${size?.width}x${size?.height} — startPreview()")
+                    AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${size?.width}x${size?.height} — startPreview()")
                     cameraOpened = true
                     try {
                         helper.startPreview()
                     } catch (e: Exception) {
-                        Log.e(TAG, "startPreview() Exception", e)
+                        AppLog.e(TAG, "startPreview() Exception", e)
                     }
                 }
 
                 override fun onCameraClose(device: UsbDevice?) {
-                    Log.i(TAG, "→ onCameraClose")
+                    AppLog.i(TAG, "→ onCameraClose")
                     cameraOpened = false
                 }
 
                 override fun onDeviceClose(device: UsbDevice?) {
-                    Log.i(TAG, "→ onDeviceClose")
+                    AppLog.i(TAG, "→ onDeviceClose")
                 }
 
                 override fun onDetach(device: UsbDevice?) {
-                    Log.i(TAG, "→ onDetach")
+                    AppLog.i(TAG, "→ onDetach")
                     cameraOpened = false
                 }
 
                 override fun onCancel(device: UsbDevice?) {
-                    Log.w(TAG, "→ onCancel (USB-Permission vom User abgelehnt?) ${device?.productName}")
+                    AppLog.w(TAG, "→ onCancel (USB-Permission vom User abgelehnt?) ${device?.productName}")
                 }
             })
 
@@ -208,12 +208,12 @@ class MainActivity : AppCompatActivity() {
                         frame.get(bytes)
                         val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, w, h)
                         if (!logged) {
-                            Log.i(TAG, "Erster Frame empfangen: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
+                            AppLog.i(TAG, "Erster Frame empfangen: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
                             logged = true
                         }
                         mjpegServer.pushFrame(jpeg)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
+                        AppLog.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
                     }
                 }
             }, UVCCamera.PIXEL_FORMAT_NV21)

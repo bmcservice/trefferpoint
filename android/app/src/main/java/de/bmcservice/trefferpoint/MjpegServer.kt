@@ -42,6 +42,7 @@ class MjpegServer(port: Int, private val appContext: Context?) : NanoHTTPD("127.
             uri == "/video" || uri == "/video.mjpg" || uri == "/stream" || uri == "/mjpeg" -> serveMjpeg()
             uri == "/snapshot" || uri == "/jpg" -> serveSnapshot()
             uri == "/status" -> serveStatus()
+            uri == "/log" -> serveLog()
             uri == "/" || uri == "/index.html" -> serveAsset("trefferpoint/index.html", "text/html; charset=utf-8")
             uri == "/manifest.json" -> serveAsset("trefferpoint/manifest.json", "application/json")
             uri.endsWith(".html") -> serveAsset("trefferpoint${uri}", "text/html; charset=utf-8")
@@ -68,9 +69,16 @@ class MjpegServer(port: Int, private val appContext: Context?) : NanoHTTPD("127.
             resp.addHeader("Cache-Control", "no-cache")
             resp
         } catch (e: IOException) {
-            Log.e(TAG, "Asset $assetPath nicht gefunden", e)
+            AppLog.e(TAG, "Asset $assetPath nicht gefunden", e)
             newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Asset nicht gefunden: $assetPath")
         }
+    }
+
+    private fun serveLog(): Response {
+        val resp = newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", AppLog.snapshot())
+        resp.addHeader("Access-Control-Allow-Origin", "*")
+        resp.addHeader("Cache-Control", "no-cache")
+        return resp
     }
 
     private fun serveStatus(): Response {
@@ -97,7 +105,7 @@ class MjpegServer(port: Int, private val appContext: Context?) : NanoHTTPD("127.
 
     private fun serveMjpeg(): Response {
         if (lastFrame == null) {
-            Log.w(TAG, "MJPEG angefragt aber keine Kamera-Frames vorhanden → 503")
+            AppLog.w(TAG, "MJPEG angefragt aber keine Kamera-Frames vorhanden → 503")
             val msg = "Keine Kamera verbunden. USB-C Kamera anstecken und App neu öffnen."
             val resp = newFixedLengthResponse(Response.Status.SERVICE_UNAVAILABLE, "text/plain", msg)
             resp.addHeader("Access-Control-Allow-Origin", "*")
@@ -107,7 +115,7 @@ class MjpegServer(port: Int, private val appContext: Context?) : NanoHTTPD("127.
         val pipeIn = PipedInputStream(64 * 1024)
         val pipeOut = PipedOutputStream(pipeIn)
         clients.add(pipeOut)
-        Log.i(TAG, "MJPEG Client verbunden (${clients.size} gesamt)")
+        AppLog.i(TAG, "MJPEG Client verbunden (${clients.size} gesamt)")
 
         lastFrame?.let { writeFrameTo(pipeOut, it) }
 
@@ -134,7 +142,7 @@ class MjpegServer(port: Int, private val appContext: Context?) : NanoHTTPD("127.
         if (dead.isNotEmpty()) {
             clients.removeAll(dead)
             dead.forEach { try { it.close() } catch (_: Exception) {} }
-            Log.i(TAG, "${dead.size} Client(s) getrennt (${clients.size} übrig)")
+            AppLog.i(TAG, "${dead.size} Client(s) getrennt (${clients.size} übrig)")
         }
     }
 

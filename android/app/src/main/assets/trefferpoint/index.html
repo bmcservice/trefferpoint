@@ -155,8 +155,12 @@
             font-family: 'Share Tech Mono', monospace;
             font-size: 13px;
             letter-spacing: 0.08em;
-            pointer-events: none;
-            white-space: nowrap;
+            pointer-events: auto;
+            white-space: pre-wrap;
+            text-align: left;
+            max-width: 90%;
+            max-height: 70vh;
+            overflow: auto;
             display: none;
         }
 
@@ -771,7 +775,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.15';
+const APP_VERSION = '2.0.16';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2286,11 +2290,20 @@ async function startStream() {
                 return;
             }
             if (r.status === 503) {
-                // Server sagt explizit: Stream nicht bereit (z.B. Kamera nicht geöffnet).
-                // Body des Servers an User zeigen statt zum nächsten Pfad weiterzuspringen.
                 const errText = await r.text().catch(() => '');
                 setStatus('\u26a0 Kamera nicht bereit', 'warn');
-                setMsg(errText || 'Server antwortet mit 503 — Kamera nicht verbunden');
+                // In Android-APK: Diagnose-Log automatisch anzeigen
+                if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
+                    try {
+                        const logR = await fetch(location.origin + '/log', { cache: 'no-store' });
+                        const logTxt = logR.ok ? await logR.text() : '';
+                        setMsg((errText || 'Kamera nicht verbunden') + '\n\n--- App-Log ---\n' + logTxt);
+                    } catch(e) {
+                        setMsg(errText || 'Kamera nicht verbunden');
+                    }
+                } else {
+                    setMsg(errText || 'Server antwortet mit 503 — Kamera nicht verbunden');
+                }
                 return;
             }
             if (r.ok && r.body) {
