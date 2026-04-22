@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>TrefferPoint — Digitale Schussauswertung</title>
@@ -522,11 +522,12 @@
         select { min-height: 40px; }
 
         .statusbar {
-            height: 32px;
+            min-height: 32px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 0 16px;
+            padding-bottom: max(8px, env(safe-area-inset-bottom));
             background: var(--surface);
             border-top: 1px solid var(--border);
             flex-shrink: 0;
@@ -749,7 +750,12 @@
         <div class="dot" id="statusDot"></div>
         <span class="status-txt" id="statusTxt">Bereit</span>
     </div>
-    <span class="status-fps" id="statusFps"></span>
+    <div style="display:flex;align-items:center;gap:10px">
+        <span class="status-fps" id="statusFps"></span>
+        <button id="btnFullscreen" title="Vollbild" onclick="toggleFullscreen()"
+            style="background:none;border:none;color:var(--text-dim);font-size:16px;
+                   cursor:pointer;padding:2px 4px;line-height:1;opacity:0.7">⛶</button>
+    </div>
 </div>
 
 <script>
@@ -764,7 +770,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.11';
+const APP_VERSION = '2.0.12';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2162,6 +2168,24 @@ function addHitRow(ring, dist, n, deg) {
     if (lastHitFlashTimer) clearTimeout(lastHitFlashTimer);
     lastHitFlashTimer = setTimeout(() => lr.classList.remove('tv-hit-flash'), 1500);
 }
+
+function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+        document.getElementById('btnFullscreen').textContent = '✕';
+        document.getElementById('btnFullscreen').title = 'Vollbild beenden';
+    } else {
+        document.exitFullscreen().catch(() => {});
+        document.getElementById('btnFullscreen').textContent = '⛶';
+        document.getElementById('btnFullscreen').title = 'Vollbild';
+    }
+}
+document.addEventListener('fullscreenchange', () => {
+    const btn = document.getElementById('btnFullscreen');
+    if (!document.fullscreenElement) {
+        btn.textContent = '⛶'; btn.title = 'Vollbild';
+    }
+});
 
 function setStatus(msg, type) {
     document.getElementById('statusTxt').textContent = msg;
