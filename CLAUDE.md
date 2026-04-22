@@ -2,16 +2,38 @@
 
 ## Projektübersicht
 
-TrefferPoint ist eine browserbasierte PWA (Progressive Web App) zur Echtzeit-Treffererkennung und Ringzählung für Sportschützen (DSB/ISSF). Die App läuft komplett offline auf einem Android-Tablet oder Handy.
+TrefferPoint ist eine Echtzeit-Treffererkennung und Ringzählung für Sportschützen (DSB/ISSF). Es gibt zwei Varianten:
+- **Native Android-APK** (empfohlen für Tablet mit USB-C Okularkamera, ab v2.1.0)
+- **Web/PWA** (für PC/Laptop mit USB-Webcam in Chrome, oder externe Stream-Quellen)
+
+Gemeinsame TrefferPoint-Logik (Erkennung, Kalibrierung, Trefferauswertung) in `index.html` — im APK als Asset eingebettet.
 
 ## Hardware-Setup
 
-- **Kamera:** USB-C Okularkamera (UVC, 1920×1080, 26fps) angeschlossen an Tablet/Laptop
+- **Kamera:** USB-C Okularkamera (Mustcam 20x Digital Telescope, UVC, 1920×1080)
 - **Optik:** Spektiv mit Okularkamera-Aufsatz, auf Schießscheibe ausgerichtet
-- **Gerät:** Android-Tablet (primär) oder Handy mit Simple HTTP Server App
-- **Alternativ:** WiFi-Stream via IP Webcam / DroidCam (nur Anzeige, keine Erkennung wegen CORS)
+- **Primärgerät:** Samsung Android-Tablet mit **TrefferPoint-APK** (Zero-Config Plug-and-Play)
+- **Alternative:** Windows-Laptop mit USB-Kamera direkt an Chrome
 
-## Aktueller Stand (v2.0.6)
+## Aktueller Stand (v2.1.0)
+
+**Architektur — Native APK (Android):**
+- `android/app/src/main/java/de/bmcservice/trefferpoint/MainActivity.kt` — UVC-Kamera via `com.herohan:UVCAndroid`
+- Frames: NV21 → JPEG → Base64 → `webView.evaluateJavascript("window.tpReceiveFrame(...)")`
+- `AppLog.kt` Ring-Buffer für Diagnose-Logs ohne ADB
+- `@JavascriptInterface TrefferPointBridge`: `getLog()`, `getStatus()`, `getVersion()`, `isAndroidApp()`
+- WebView lädt `file:///android_asset/trefferpoint/index.html` — komplette TrefferPoint-Logik
+- Build via GitHub Actions (`.github/workflows/build-android.yml`), fester Signing-Keystore committed
+- Bei Git-Tag `vX.Y.Z` → automatisches GitHub Release mit APK
+
+**Architektur — Web/PWA:**
+- Selbe `index.html`, gehostet auf `https://bmcservice.github.io/trefferpoint`
+- Kamera-Input via `getUserMedia` (USB/Webcam) oder externer MJPEG-Stream via URL
+- Service Worker für Offline-Cache (nicht im APK — unter file:// nicht unterstützt)
+
+## Legacy / historisch relevant (alle abgelöst)
+
+Vor v2.1.0 waren wir bei einer HTML-Einzeldatei + Simple HTTP Server + USB Dual Cam (3 Apps) bzw. kurz bei einer APK mit internem NanoHTTPD (fragil wegen WebView↔HTTP-Race-Conditions). Die JS-Bridge in v2.1.0 hat das beides ersetzt.
 
 Die App ist eine einzelne HTML-Datei (`trefferpoint_v2.0.6.html`) mit:
 - Kamera-Input via getUserMedia (USB-C UVC) oder Stream-URL (MJPEG)
