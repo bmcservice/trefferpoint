@@ -410,6 +410,12 @@
         body.view-treffer .panel { display: none; }
         body.view-treffer .treffer-view { display: flex; }
 
+        /* ANZEIGE-VIEW: Kameraseite maximiert, Seitenpanel aus */
+        body.view-anzeige .panel { display: none; }
+        body.view-anzeige .camera-wrap { flex: 1; }
+        body.view-anzeige .overlay-msg { display: none; }
+        body.view-anzeige .last-hit-pop { display: flex; }
+
         .tv-scores {
             display: flex;
             gap: 1px;
@@ -559,6 +565,7 @@
     <div style="display:flex;align-items:center;gap:6px">
         <div class="view-tabs">
             <button class="view-tab active" id="tabCam">📷 Kamera</button>
+            <button class="view-tab" id="tabAnzeige">🖼 Anzeige</button>
             <button class="view-tab" id="tabTreffer">📊 Treffer</button>
         </div>
         <button id="btnInfo" title="App-Info & Log" onclick="showInfo()"
@@ -810,7 +817,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.2.1';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1082,7 +1089,9 @@ function runDemo() {
 // --- View Toggle ---
 function setView(v) {
     document.body.classList.toggle('view-treffer', v === 'treffer');
+    document.body.classList.toggle('view-anzeige', v === 'anzeige');
     document.getElementById('tabCam').classList.toggle('active', v === 'cam');
+    document.getElementById('tabAnzeige').classList.toggle('active', v === 'anzeige');
     document.getElementById('tabTreffer').classList.toggle('active', v === 'treffer');
 }
 
@@ -2721,6 +2730,7 @@ document.getElementById('btnAutoOpt').addEventListener('click', autoOptimizeCame
 
 document.getElementById('btnDemo').addEventListener('click', runDemo);
 document.getElementById('tabCam').addEventListener('click', () => setView('cam'));
+document.getElementById('tabAnzeige').addEventListener('click', () => setView('anzeige'));
 document.getElementById('tabTreffer').addEventListener('click', () => setView('treffer'));
 
 document.getElementById('sens').addEventListener('input', e => {
