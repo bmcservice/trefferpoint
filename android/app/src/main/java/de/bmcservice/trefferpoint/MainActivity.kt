@@ -42,6 +42,7 @@ class MainActivity : AppCompatActivity() {
 
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
+    private var deviceSelected = false  // verhindert mehrfaches selectDevice auf dasselbe Gerät
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -109,8 +110,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         AppLog.i(TAG, "USB-Intent Device: ${device.productName} VID=${device.vendorId} PID=${device.productId}")
+        if (deviceSelected) { AppLog.i(TAG, "  (schon selected — überspringe)"); return }
         try {
             cameraHelper?.selectDevice(device)
+            deviceSelected = true
         } catch (e: Exception) {
             AppLog.e(TAG, "selectDevice via Intent fehlgeschlagen", e)
         }
@@ -118,7 +121,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun attachAlreadyConnectedCamera() {
         val helper = cameraHelper ?: return
-        if (cameraOpened) return
+        if (cameraOpened || deviceSelected) return
         try {
             val devices = helper.deviceList
             AppLog.i(TAG, "onResume enumerate — ${devices?.size ?: 0} USB-Device(s) sichtbar")
@@ -128,10 +131,10 @@ class MainActivity : AppCompatActivity() {
             val uvcDevice = devices?.firstOrNull { isLikelyUvcCamera(it) }
             if (uvcDevice != null) {
                 AppLog.i(TAG, "Starte bereits verbundene UVC-Kamera: ${uvcDevice.productName}")
-                helper.selectDevice(uvcDevice)
+                helper.selectDevice(uvcDevice); deviceSelected = true
             } else if (!devices.isNullOrEmpty()) {
                 AppLog.i(TAG, "Keine UVC-Heuristik getroffen — probiere erstes Gerät: ${devices[0].productName}")
-                helper.selectDevice(devices[0])
+                helper.selectDevice(devices[0]); deviceSelected = true
             } else {
                 AppLog.w(TAG, "Keine USB-Geräte sichtbar. Kamera nicht angesteckt oder von anderer App beansprucht?")
             }
@@ -155,7 +158,8 @@ class MainActivity : AppCompatActivity() {
             helper.setStateCallback(object : ICameraHelper.StateCallback {
                 override fun onAttach(device: UsbDevice?) {
                     AppLog.i(TAG, "→ onAttach: ${device?.productName} VID=${device?.vendorId} PID=${device?.productId}")
-                    device?.let { helper.selectDevice(it) }
+                    if (deviceSelected) { AppLog.i(TAG, "  (schon selected — überspringe)"); return }
+                    device?.let { helper.selectDevice(it); deviceSelected = true }
                 }
 
                 override fun onDeviceOpen(device: UsbDevice?, isFirstOpen: Boolean) {
@@ -169,10 +173,18 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onCameraOpen(device: UsbDevice?) {
                     val size = helper.previewSize
-                    AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${size?.width}x${size?.height} — startPreview()")
+                    AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${size?.width}x${size?.height}")
                     cameraOpened = true
+                    // Frame-Callback MUSS nach onCameraOpen gesetzt werden (vorher ist mUsbDevice noch null)
+                    try {
+                        helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_NV21)
+                        AppLog.i(TAG, "   setFrameCallback(NV21) gesetzt")
+                    } catch (e: Exception) {
+                        AppLog.e(TAG, "setFrameCallback Exception", e)
+                    }
                     try {
                         helper.startPreview()
+                        AppLog.i(TAG, "   startPreview() aufgerufen")
                     } catch (e: Exception) {
                         AppLog.e(TAG, "startPreview() Exception", e)
                     }
@@ -190,6 +202,7 @@ class MainActivity : AppCompatActivity() {
                 override fun onDetach(device: UsbDevice?) {
                     AppLog.i(TAG, "→ onDetach")
                     cameraOpened = false
+                    deviceSelected = false
                 }
 
                 override fun onCancel(device: UsbDevice?) {
@@ -197,26 +210,29 @@ class MainActivity : AppCompatActivity() {
                 }
             })
 
-            helper.setFrameCallback(object : IFrameCallback {
-                private var logged = false
-                override fun onFrame(frame: ByteBuffer) {
-                    try {
-                        val size = helper.previewSize
-                        val w = size?.width ?: PREVIEW_WIDTH
-                        val h = size?.height ?: PREVIEW_HEIGHT
-                        val bytes = ByteArray(frame.remaining())
-                        frame.get(bytes)
-                        val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, w, h)
-                        if (!logged) {
-                            AppLog.i(TAG, "Erster Frame empfangen: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
-                            logged = true
-                        }
-                        mjpegServer.pushFrame(jpeg)
-                    } catch (e: Exception) {
-                        AppLog.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
-                    }
+            // Frame-Callback wird erst in onCameraOpen gesetzt (da mUsbDevice vorher null)
+        }
+    }
+
+    private val frameCallback = object : IFrameCallback {
+        private var logged = false
+        override fun onFrame(frame: ByteBuffer) {
+            try {
+                val helper = cameraHelper ?: return
+                val size = helper.previewSize
+                val w = size?.width ?: PREVIEW_WIDTH
+                val h = size?.height ?: PREVIEW_HEIGHT
+                val bytes = ByteArray(frame.remaining())
+                frame.get(bytes)
+                val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, w, h)
+                if (!logged) {
+                    AppLog.i(TAG, "Erster Frame empfangen: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
+                    logged = true
                 }
-            }, UVCCamera.PIXEL_FORMAT_NV21)
+                mjpegServer.pushFrame(jpeg)
+            } catch (e: Exception) {
+                AppLog.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
+            }
         }
     }
 
