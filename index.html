@@ -657,6 +657,7 @@
             <div id="modeStream" style="display:none">
                 <input type="text" id="streamUrl"
                     placeholder="http://192.168.178.62:8081"
+                    inputmode="url" autocomplete="url" enterkeyhint="go"
                     style="width:100%;padding:7px 10px;background:var(--surface2);
                            border:1px solid var(--border);color:var(--text);
                            font-family:'Share Tech Mono',monospace;font-size:11px;
@@ -2198,6 +2199,7 @@ function resetSession() {
 async function startStream() {
     const url = document.getElementById('streamUrl').value.trim();
     if (!url) { setStatus('Bitte Stream-URL eingeben', 'warn'); return; }
+    localStorage.setItem('tp_stream_url', url);
 
     inputMode = 'stream';
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
@@ -2341,6 +2343,11 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     inputMode = 'stream';
 });
 
+// Stream-URL aus localStorage wiederherstellen
+(function() {
+    const saved = localStorage.getItem('tp_stream_url');
+    if (saved) document.getElementById('streamUrl').value = saved;
+})();
 document.getElementById('btnStream').addEventListener('click', startStream);
 
 // Stream-URL per Enter starten
