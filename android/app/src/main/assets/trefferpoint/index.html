@@ -775,7 +775,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.23';
+const APP_VERSION = '2.0.24';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2564,13 +2564,20 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         const localUrl = location.protocol + '//' + location.host;
         document.getElementById('streamUrl').value = localUrl;
         localStorage.setItem('tp_stream_url', localUrl);
-        // Stream-Modus UI aktivieren und automatisch starten
-        setTimeout(() => {
-            try {
-                document.getElementById('btnModeStream')?.click();
-                document.getElementById('btnStream')?.click();
-            } catch (e) {}
-        }, 500);
+        // Stream-Modus UI aktivieren und automatisch starten — robuster: wartet bis Events gebunden sind
+        const tryAutoStart = () => {
+            const btnMode = document.getElementById('btnModeStream');
+            const btnStart = document.getElementById('btnStream');
+            if (btnMode && btnStart && typeof startStream === 'function') {
+                btnMode.click();
+                // kleine Verzögerung damit UI-Wechsel abgeschlossen ist
+                setTimeout(() => startStream(), 100);
+            } else {
+                // Fallback: nochmal versuchen nach weiteren 500ms
+                setTimeout(tryAutoStart, 500);
+            }
+        };
+        setTimeout(tryAutoStart, 700);
     }
 })();
 document.getElementById('btnStream').addEventListener('click', startStream);
@@ -2663,7 +2670,14 @@ document.getElementById('sens').addEventListener('input', e => {
 // PWA Manifest: siehe manifest.json
 
 // --- Init ---
-setMsg('Kamera verbinden → "Kamera starten" klicken');
+(function() {
+    const isLocal = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+    if (isLocal) {
+        setMsg('USB-C Kamera anstecken → Stream startet automatisch');
+    } else {
+        setMsg('Kamera verbinden → "Kamera starten" · oder Stream-URL eingeben');
+    }
+})();
 // Angezeigte Version aus APP_VERSION setzen (verhindert Drift zwischen Anzeige und Logik)
 document.title = 'TrefferPoint v' + APP_VERSION + ' — Digitale Schussauswertung';
 document.getElementById('logoSub').textContent = 'Digitale Schussauswertung · v' + APP_VERSION;
