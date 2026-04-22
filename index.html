@@ -2203,6 +2203,13 @@ async function startStream() {
     if (!url) { setStatus('Bitte Stream-URL eingeben', 'warn'); return; }
     localStorage.setItem('tp_stream_url', url);
 
+    // Mixed-Content-Warnung: HTTPS-Seite kann keine HTTP-Streams laden
+    if (location.protocol === 'https:' && url.startsWith('http:')) {
+        setStatus('⚠ Mixed Content: HTTPS → HTTP blockiert', 'warn');
+        setMsg('Lösung: TrefferPoint über http://localhost:8080 öffnen (nicht als PWA) — dann funktioniert http://localhost:8081');
+        return;
+    }
+
     inputMode = 'stream';
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
     if (mjpegAbort) { mjpegAbort.abort(); mjpegAbort = null; }
