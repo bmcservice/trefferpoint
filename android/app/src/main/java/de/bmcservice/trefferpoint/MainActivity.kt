@@ -17,6 +17,8 @@ import com.serenegiant.usb.IFrameCallback
 import com.serenegiant.usb.UVCCamera
 import com.serenegiant.usb.UVCParam
 import com.serenegiant.utils.UVCUtils
+import android.graphics.SurfaceTexture
+import android.view.Surface
 import java.nio.ByteBuffer
 
 /**
@@ -43,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
     private var deviceSelected = false  // verhindert mehrfaches selectDevice auf dasselbe Gerät
+    private var dummySurface: Surface? = null
+    private var dummySurfaceTex: SurfaceTexture? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -173,15 +177,31 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onCameraOpen(device: UsbDevice?) {
                     val size = helper.previewSize
-                    AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${size?.width}x${size?.height}")
+                    val w = size?.width ?: PREVIEW_WIDTH
+                    val h = size?.height ?: PREVIEW_HEIGHT
+                    AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${w}x${h}")
                     cameraOpened = true
-                    // Frame-Callback MUSS nach onCameraOpen gesetzt werden (vorher ist mUsbDevice noch null)
+
+                    // Dummy-Surface: manche UVC-Libraries brauchen einen Preview-Target
+                    // damit die Kamera-Pipeline überhaupt streamt (sogar wenn wir per Callback lesen)
+                    try {
+                        val tex = SurfaceTexture(0).apply { setDefaultBufferSize(w, h) }
+                        val surf = Surface(tex)
+                        dummySurfaceTex = tex
+                        dummySurface = surf
+                        helper.addSurface(surf, false)
+                        AppLog.i(TAG, "   dummy Surface hinzugefügt (${w}x${h})")
+                    } catch (e: Exception) {
+                        AppLog.e(TAG, "addSurface Exception", e)
+                    }
+
                     try {
                         helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_NV21)
                         AppLog.i(TAG, "   setFrameCallback(NV21) gesetzt")
                     } catch (e: Exception) {
                         AppLog.e(TAG, "setFrameCallback Exception", e)
                     }
+
                     try {
                         helper.startPreview()
                         AppLog.i(TAG, "   startPreview() aufgerufen")
@@ -250,6 +270,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try { dummySurface?.release() } catch (_: Exception) {}
+        try { dummySurfaceTex?.release() } catch (_: Exception) {}
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
         try { cameraHelper?.release() } catch (_: Exception) {}
         mjpegServer.stop()
