@@ -568,6 +568,10 @@
             <button class="view-tab" id="tabAnzeige">🖼 Anzeige</button>
             <button class="view-tab" id="tabTreffer">📊 Treffer</button>
         </div>
+        <button id="btnUpdateCheck" title="Nach Update suchen" onclick="manualUpdateCheck()"
+            style="background:none;border:1px solid var(--border);color:var(--text-dim);
+                   font-size:14px;cursor:pointer;padding:4px 8px;border-radius:6px;
+                   line-height:1;opacity:0.8;min-height:32px">⟳</button>
         <button id="btnInfo" title="App-Info & Log" onclick="showInfo()"
             style="background:none;border:1px solid var(--border);color:var(--text-dim);
                    font-size:14px;cursor:pointer;padding:4px 9px;border-radius:6px;
@@ -817,7 +821,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.2.1';
+const APP_VERSION = '2.2.2';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -970,6 +974,7 @@ let rafId = null;
 
 let softwareZoom = 1.0;    // Software-Zoom: <1.0 = rauszoomen, >1.0 = reinzoomen
 let calib = null;          // { cx, cy, outerPx, pxPerMm }
+let calibFailFlashUntil = 0;  // Zeitpunkt bis zu dem ein roter Fehler-Flash gezeigt wird
 let calibPt1 = null;       // temp center point during calibration
 let refFrame = null;       // ImageData reference
 let hits = [];
@@ -1794,6 +1799,21 @@ function loop() {
         hits.forEach((h, i) => drawHit(h, i + 1, i === hits.length - 1));
     }
 
+    // Roter Fehler-Flash nach fehlgeschlagener Kalibrierung
+    if (calibFailFlashUntil > Date.now()) {
+        const remain = calibFailFlashUntil - Date.now();
+        const alpha = Math.min(1, remain / 400); // Letzte 400ms ausblenden
+        ctx.save();
+        ctx.strokeStyle = 'rgba(232,64,64,' + (0.6 + 0.35 * Math.sin(Date.now() / 100)) + ')';
+        ctx.lineWidth = 8;
+        ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+        ctx.fillStyle = 'rgba(232,64,64,' + (0.85 * alpha) + ')';
+        ctx.font = 'bold ' + Math.max(24, canvas.width / 30) + "px 'Share Tech Mono', monospace";
+        ctx.textAlign = 'center';
+        ctx.fillText('✗ Kalibrierung fehlgeschlagen', canvas.width / 2, canvas.height / 2);
+        ctx.restore();
+    }
+
     // Manueller Pointer einzeichnen
     if (manualPointer) drawManualPointer();
 
@@ -1849,6 +1869,10 @@ function drawOverlay() {
             rng.r >= 9 ? 'rgba(200,168,75,0.85)' : 'rgba(200,168,75,0.4)',
             rng.r >= 9 ? 1.5 : 1, null);
     });
+
+    // ✓ Grüne Ziel-Erfassungsmarkierung — zeigt dass Kalibrierung aktiv ist
+    const outerRadius = disc.ringe[0].radius * 1.04;
+    drawEllipseRing(ctx, outerRadius, 'rgba(62,207,142,0.9)', 3, null);
 
     // Fadenkreuz
     ctx.strokeStyle = 'rgba(200,168,75,0.9)';
@@ -1909,6 +1933,7 @@ function autoCalib() {
             if (darkPixels.length < 100) {
                 setMsg('⚠ Keine Scheibe erkannt — Kontrast prüfen oder manuell kalibrieren');
                 setStatus('Auto-Kalibrierung fehlgeschlagen', 'warn');
+                calibFailFlashUntil = Date.now() + 2500;
                 return;
             }
 
@@ -1982,6 +2007,7 @@ function autoCalib() {
         } catch(e) {
             setMsg('⚠ Auto-Kalibrierung fehlgeschlagen: ' + e.message);
             setStatus('Fehler', 'warn');
+            calibFailFlashUntil = Date.now() + 2500;
         }
     }, 150);
 }
@@ -2220,6 +2246,40 @@ function addHitRow(ring, dist, n, deg) {
     lr.classList.add('tv-hit-flash');
     if (lastHitFlashTimer) clearTimeout(lastHitFlashTimer);
     lastHitFlashTimer = setTimeout(() => lr.classList.remove('tv-hit-flash'), 1500);
+}
+
+async function manualUpdateCheck() {
+    const btn = document.getElementById('btnUpdateCheck');
+    btn.textContent = '⟳';
+    btn.style.opacity = '0.4';
+    const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
+        window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
+    try {
+        // In Android-App: GitHub-Release-Info fetchen (APK-Update via Download)
+        // Im Web: dieselbe version.json wie der Auto-Check
+        const url = inAndroidApp
+            ? 'https://api.github.com/repos/bmcservice/trefferpoint/releases/latest'
+            : (UPDATE_URL ? UPDATE_URL + '/version.json' : './version.json');
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const latest = inAndroidApp ? (data.tag_name || '').replace(/^v/, '') : (data.version || '');
+        if (!latest) throw new Error('Keine Version gefunden');
+        if (versionGt(latest, APP_VERSION)) {
+            if (inAndroidApp) {
+                alert('Neue Version verfügbar: v' + latest + '\n\nAPK herunterladen:\nhttps://github.com/bmcservice/trefferpoint/releases/latest');
+            } else if (confirm('Neue Version v' + latest + ' verfügbar — jetzt laden?')) {
+                applyUpdate();
+            }
+        } else {
+            setStatus('✓ TrefferPoint ist aktuell (v' + APP_VERSION + ')', 'ok');
+            setTimeout(() => { if (appState === 'READY') setStatus('Stream aktiv', 'ok'); }, 3000);
+        }
+    } catch (e) {
+        setStatus('⚠ Update-Check fehlgeschlagen: ' + e.message, 'warn');
+    } finally {
+        btn.style.opacity = '0.8';
+    }
 }
 
 function showInfo() {
