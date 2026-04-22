@@ -64,6 +64,16 @@ class MjpegServer(port: Int) : NanoHTTPD("127.0.0.1", port) {
     }
 
     private fun serveMjpeg(): Response {
+        // Wenn noch KEINE Frames angekommen sind → 503 statt endlos hängen.
+        // TrefferPoint zeigt dann eine saubere Fehlermeldung.
+        if (lastFrame == null) {
+            Log.w(TAG, "MJPEG angefragt aber keine Kamera-Frames vorhanden → 503")
+            val msg = "Keine Kamera verbunden. USB-C Kamera anstecken und App neu öffnen."
+            val resp = newFixedLengthResponse(Response.Status.SERVICE_UNAVAILABLE, "text/plain", msg)
+            resp.addHeader("Access-Control-Allow-Origin", "*")
+            return resp
+        }
+
         val pipeIn = PipedInputStream(64 * 1024)
         val pipeOut = PipedOutputStream(pipeIn)
         clients.add(pipeOut)
