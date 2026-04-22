@@ -647,7 +647,8 @@
 
             <!-- USB/Gerät Modus -->
             <div id="modeUsb">
-                <select id="camSel"></select>
+                <select id="camSel" style="flex:1"></select>
+                <button class="btn" id="btnEnumCam" title="Kameraliste aktualisieren">🔄</button>
                 <button class="btn btn-primary" id="btnCam">▶ Kamera starten</button>
             </div>
             <button class="btn" id="btnRotateCam" style="display:none">↻ Bild drehen (0°)</button>
@@ -1034,10 +1035,19 @@ function setView(v) {
 // --- Camera Enumeration ---
 async function enumCameras() {
     const sel = document.getElementById('camSel');
-    sel.innerHTML = '<option value="">Kamera wählen...</option>';
+    sel.innerHTML = '<option value="">⏳ Suche Kameras...</option>';
     try {
+        // Blinder Aufruf um Android/Chrome zur Freigabe der Geräteliste zu bewegen
+        // (ohne diesen Schritt liefert enumerateDevices() keine Labels)
+        let tmp;
+        try {
+            tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+            tmp.getTracks().forEach(t => t.stop());
+        } catch(e) {}
+
         const devs = await navigator.mediaDevices.enumerateDevices();
         const cams = devs.filter(d => d.kind === 'videoinput');
+        sel.innerHTML = '<option value="">Kamera wählen...</option>';
         cams.forEach(d => {
             const o = document.createElement('option');
             o.value = d.deviceId;
@@ -1045,17 +1055,20 @@ async function enumCameras() {
             sel.appendChild(o);
         });
 
-        // Auto-Auswahl: Digital Telescope → Rückkamera → erste Kamera
+        // Auto-Auswahl: USB/UVC → Digital Telescope → Rückkamera → erste Kamera
         const labels = Array.from(sel.options).map(o => o.text.toLowerCase());
-        const telescope = labels.findIndex(l => l.includes('digital') || l.includes('telescope'));
+        const usb  = labels.findIndex(l => l.includes('usb') || l.includes('uvc') || l.includes('capture'));
+        const tele = labels.findIndex(l => l.includes('digital') || l.includes('telescope'));
         const back = labels.findIndex(l => l.includes('back') || l.includes('rück') || l.includes('environment') || l.includes('rear'));
-        const first = sel.options.length > 1 ? 1 : 0; // Index 0 = "Kamera wählen"
 
-        if (telescope > 0) sel.selectedIndex = telescope;
+        if (usb  > 0) sel.selectedIndex = usb;
+        else if (tele > 0) sel.selectedIndex = tele;
         else if (back > 0) sel.selectedIndex = back;
         else if (sel.options.length > 1) sel.selectedIndex = 1;
 
-    } catch(e) {}
+    } catch(e) {
+        sel.innerHTML = '<option value="">Keine Kamera gefunden</option>';
+    }
 }
 
 async function startCamera() {
@@ -1070,7 +1083,7 @@ async function startCamera() {
 
         const constraints = devId
             ? { video: { deviceId: { exact: devId }, width: { ideal: 1920 }, height: { ideal: 1080 } } }
-            : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+            : { video: { width: { ideal: 1920 }, height: { ideal: 1080 } } };
 
         mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
         videoEl.srcObject = mediaStream;
@@ -2279,6 +2292,7 @@ document.getElementById('swZoom').addEventListener('input', e => {
 });
 
 document.getElementById('btnCam').addEventListener('click', startCamera);
+document.getElementById('btnEnumCam').addEventListener('click', enumCameras);
 
 document.getElementById('btnAutoCalib').addEventListener('click', autoCalib);
 document.getElementById('btnCalib').addEventListener('click', startCalib);
