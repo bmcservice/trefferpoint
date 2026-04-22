@@ -200,31 +200,31 @@ class MainActivity : AppCompatActivity() {
                     AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${w}x${h}")
                     cameraOpened = true
 
-                    // Dummy-Surface: manche UVC-Libraries brauchen einen Preview-Target
-                    // damit die Kamera-Pipeline überhaupt streamt (sogar wenn wir per Callback lesen)
+                    // Reihenfolge laut offiziellem shiyinghan/UVCAndroid SetFrameCallbackActivity-Demo:
+                    // 1) startPreview()  2) addSurface()  3) setFrameCallback()
+                    try {
+                        helper.startPreview()
+                        AppLog.i(TAG, "   1) startPreview() aufgerufen")
+                    } catch (e: Exception) {
+                        AppLog.e(TAG, "startPreview() Exception", e)
+                    }
+
                     try {
                         val tex = SurfaceTexture(0).apply { setDefaultBufferSize(w, h) }
                         val surf = Surface(tex)
                         dummySurfaceTex = tex
                         dummySurface = surf
                         helper.addSurface(surf, false)
-                        AppLog.i(TAG, "   dummy Surface hinzugefügt (${w}x${h})")
+                        AppLog.i(TAG, "   2) dummy Surface hinzugefügt (${w}x${h})")
                     } catch (e: Exception) {
                         AppLog.e(TAG, "addSurface Exception", e)
                     }
 
                     try {
                         helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_NV21)
-                        AppLog.i(TAG, "   setFrameCallback(NV21) gesetzt")
+                        AppLog.i(TAG, "   3) setFrameCallback(NV21) gesetzt")
                     } catch (e: Exception) {
                         AppLog.e(TAG, "setFrameCallback Exception", e)
-                    }
-
-                    try {
-                        helper.startPreview()
-                        AppLog.i(TAG, "   startPreview() aufgerufen")
-                    } catch (e: Exception) {
-                        AppLog.e(TAG, "startPreview() Exception", e)
                     }
                 }
 
