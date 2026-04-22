@@ -40,9 +40,10 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
 
-    // UVC-Kamera (USB Video Class) via AndroidUSBCamera (AUSBC) by jiangdongguo
-    implementation 'com.github.jiangdongguo.AndroidUSBCamera:libausbc:3.3.3'
-
     // MJPEG-Server auf localhost für WebView
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
+
+    // TODO: UVC-Kamera — wird in Schritt 2 hinzugefügt
+    // Kandidaten: AUSBC (multi-module Jitpack issue), saki4510t/UVCCamera (AARs),
+    // oder direkt via UsbManager + eigener UVC-Parser
 }
