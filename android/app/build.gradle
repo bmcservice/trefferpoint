@@ -15,7 +15,25 @@ android {
         versionName "2.0.13"
     }
 
+    signingConfigs {
+        debugFixed {
+            def ks = file("trefferpoint.keystore")
+            if (ks.exists()) {
+                storeFile ks
+                storePassword "trefferpoint123"
+                keyAlias "trefferpoint"
+                keyPassword "trefferpoint123"
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            // Fester Keystore: APK-Updates ohne Deinstallation (stabile Signatur)
+            if (file("trefferpoint.keystore").exists()) {
+                signingConfig signingConfigs.debugFixed
+            }
+        }
         release {
             minifyEnabled false
         }
