@@ -771,7 +771,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.14';
+const APP_VERSION = '2.0.15';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -784,6 +784,10 @@ function versionGt(a, b) {
 
 async function checkForUpdate() {
     if (!UPDATE_URL || !navigator.onLine) return;
+    // In der Android-APK (TrefferPoint läuft auf 127.0.0.1) KEIN Update-Banner —
+    // Updates kommen per APK, nicht per Webseite. Sonst navigiert der Banner die
+    // WebView weg von localhost und der lokale MJPEG-Stream wäre unerreichbar.
+    if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') return;
     try {
         const res = await fetch(UPDATE_URL + '/version.json', { cache: 'no-store' });
         if (!res.ok) return;
@@ -2425,6 +2429,21 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
 (function() {
     const saved = localStorage.getItem('tp_stream_url');
     if (saved) document.getElementById('streamUrl').value = saved;
+
+    // Wenn wir in der Android-APK laufen (localhost:8888), URL automatisch
+    // setzen, Stream-Modus aktivieren und Stream starten — Zero-Config.
+    if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
+        const localUrl = location.protocol + '//' + location.host;
+        document.getElementById('streamUrl').value = localUrl;
+        localStorage.setItem('tp_stream_url', localUrl);
+        // Stream-Modus UI aktivieren und automatisch starten
+        setTimeout(() => {
+            try {
+                document.getElementById('btnModeStream')?.click();
+                document.getElementById('btnStream')?.click();
+            } catch (e) {}
+        }, 500);
+    }
 })();
 document.getElementById('btnStream').addEventListener('click', startStream);
 
