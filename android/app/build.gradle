@@ -12,7 +12,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 1
-        versionName "2.0.13"
+        versionName "2.0.25"
     }
 
     signingConfigs {
@@ -50,6 +50,7 @@ android {
 
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 }
 
@@ -58,9 +59,6 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
 
-    // MJPEG-Server auf localhost für WebView
-    implementation 'org.nanohttpd:nanohttpd:2.3.1'
-
-    // UVC-Kamera (USB Video Class) via shiyinghan/UVCAndroid (Maven Central, clean packaging)
+    // UVC-Kamera (USB Video Class) via shiyinghan/UVCAndroid
     implementation 'com.herohan:UVCAndroid:1.0.6'
 }

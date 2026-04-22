@@ -775,7 +775,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.24';
+const APP_VERSION = '2.0.25';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2265,7 +2265,72 @@ async function startStream() {
 
     const fetchHdrs = authHeader ? { 'Authorization': authHeader } : {};
 
-    // ── Android-APK / localhost: zuerst /status pollen, dann nativen <img>-Tag für MJPEG ──
+    // ── Android-APK via JS-Bridge: keine HTTP-Schicht, Frames kommen direkt aus Kotlin ──
+    if (typeof window.tpBridge !== 'undefined' && window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp()) {
+        setStatus('Warte auf erstes Frame\u2026', 'warn');
+        setMsg('Kamera-Frames kommen über Native-Bridge');
+        imgEl = new Image();
+        let firstFrameDone = false;
+        imgEl.onload = () => {
+            if (firstFrameDone) return;
+            firstFrameDone = true;
+            if (imgEl.naturalWidth > 0) {
+                canvas.width = imgEl.naturalWidth;
+                canvas.height = imgEl.naturalHeight;
+            }
+            appState = 'READY';
+            document.getElementById('btnRotateCam').style.display = '';
+            document.getElementById('btnCalib').disabled = false;
+            document.getElementById('btnAutoCalib').disabled = false;
+            document.getElementById('btnRef').disabled = false;
+            document.getElementById('btnDetect').disabled = false;
+            document.getElementById('camControlsSection').style.display = '';
+            setStatus('Stream aktiv \u00b7 native Bridge', 'ok');
+            setMsg('Auto-Erkennung \u2192 Button klicken');
+            if (!rafId) startLoop();
+        };
+
+        // Kotlin ruft window.tpReceiveFrame(base64) pro Frame
+        window.tpReceiveFrame = function(b64) {
+            try {
+                // base64 → Uint8Array → Blob → URL
+                const bin = atob(b64);
+                const arr = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                const blob = new Blob([arr], { type: 'image/jpeg' });
+                const old = imgEl.src;
+                const url = URL.createObjectURL(blob);
+                if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
+                imgEl.src = url;
+            } catch (e) {
+                console.error('tpReceiveFrame Fehler', e);
+            }
+        };
+
+        // Diagnose: Kamera-Status alle 2s prüfen, falls nach 20s nichts → Log anzeigen
+        let checkCount = 0;
+        const checkTimer = setInterval(() => {
+            checkCount++;
+            if (firstFrameDone) { clearInterval(checkTimer); return; }
+            try {
+                const st = JSON.parse(window.tpBridge.getStatus());
+                setMsg('Warte auf Kamera\u2026\ncameraConnected=' + st.cameraConnected + ', frameCount=' + st.frameCount);
+            } catch(e) {}
+            if (checkCount >= 10) {
+                clearInterval(checkTimer);
+                if (!firstFrameDone) {
+                    setStatus('\u26a0 Keine Frames nach 20s', 'warn');
+                    try {
+                        const log = window.tpBridge.getLog();
+                        setMsg('--- App-Log ---\n' + log);
+                    } catch(e) {}
+                }
+            }
+        }, 2000);
+        return;
+    }
+
+    // ── Legacy-Localhost-Pfad (nur noch für Fallback, normalerweise nicht erreicht) ──
     if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
         const localVideoUrl = (cleanUrl.replace(/\/+$/, '')) + '/video';
         const statusUrl = location.origin + '/status';
@@ -2558,22 +2623,20 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     const saved = localStorage.getItem('tp_stream_url');
     if (saved) document.getElementById('streamUrl').value = saved;
 
-    // Wenn wir in der Android-APK laufen (localhost:8888), URL automatisch
-    // setzen, Stream-Modus aktivieren und Stream starten — Zero-Config.
-    if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
-        const localUrl = location.protocol + '//' + location.host;
-        document.getElementById('streamUrl').value = localUrl;
-        localStorage.setItem('tp_stream_url', localUrl);
-        // Stream-Modus UI aktivieren und automatisch starten — robuster: wartet bis Events gebunden sind
+    // Android-APK: Zero-Config auto-start via JS-Bridge
+    const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
+        window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
+    const isLocalhost = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+    if (inAndroidApp || isLocalhost) {
+        // Dummy-URL damit startStream() nicht auf "Bitte Stream-URL eingeben" prüft
+        document.getElementById('streamUrl').value = inAndroidApp ? 'android://tpBridge' : location.origin;
+        localStorage.setItem('tp_stream_url', document.getElementById('streamUrl').value);
         const tryAutoStart = () => {
             const btnMode = document.getElementById('btnModeStream');
-            const btnStart = document.getElementById('btnStream');
-            if (btnMode && btnStart && typeof startStream === 'function') {
+            if (btnMode && typeof startStream === 'function') {
                 btnMode.click();
-                // kleine Verzögerung damit UI-Wechsel abgeschlossen ist
                 setTimeout(() => startStream(), 100);
             } else {
-                // Fallback: nochmal versuchen nach weiteren 500ms
                 setTimeout(tryAutoStart, 500);
             }
         };
@@ -2682,8 +2745,8 @@ document.getElementById('sens').addEventListener('input', e => {
 document.title = 'TrefferPoint v' + APP_VERSION + ' — Digitale Schussauswertung';
 document.getElementById('logoSub').textContent = 'Digitale Schussauswertung · v' + APP_VERSION;
 setTimeout(checkForUpdate, 2000);
-// --- Service Worker ---
-if ('serviceWorker' in navigator) {
+// --- Service Worker (nur im Web-Kontext; unter file:// oder Android-APK skippen) ---
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && typeof window.tpBridge === 'undefined') {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
             .then(reg => {

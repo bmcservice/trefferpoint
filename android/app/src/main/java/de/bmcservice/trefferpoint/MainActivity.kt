@@ -4,12 +4,15 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Bundle
-import android.webkit.PermissionRequest
-import android.util.Log
+import android.util.Base64
+import android.view.Surface
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
+import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -20,38 +23,39 @@ import com.serenegiant.usb.IFrameCallback
 import com.serenegiant.usb.UVCCamera
 import com.serenegiant.usb.UVCParam
 import com.serenegiant.utils.UVCUtils
-import android.graphics.SurfaceTexture
-import android.view.Surface
 import java.nio.ByteBuffer
 
 /**
- * TrefferPoint Android App
+ * TrefferPoint Android App — Architektur via JavaScriptInterface (kein HTTP-Server mehr).
  *
  *   USB-C Kamera (UVC) → CameraHelper (shiyinghan/UVCAndroid)
- *        → setFrameCallback → NV21 Frames
- *        → JPEG-Konvertierung
- *        → MjpegServer auf 127.0.0.1:8888 (HTML + Stream, same origin)
- *        → WebView zeigt TrefferPoint von localhost
+ *        → NV21 Frames → JPEG-Konvertierung
+ *        → Base64 → WebView.evaluateJavascript("window.tpReceiveFrame(...)")
+ *        → JS erzeugt Blob-URL → imgEl.src → Canvas → Detection
+ *
+ * WebView lädt index.html direkt aus assets (file://).
+ * JS-Brücke `tpBridge` erlaubt TrefferPoint Zugriff auf getLog(), getStatus(), getVersion().
  */
 class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "TrefferPoint"
-        private const val MJPEG_PORT = 8888
         private const val PREVIEW_WIDTH = 1280
         private const val PREVIEW_HEIGHT = 720
     }
 
     private lateinit var webView: WebView
-    private lateinit var mjpegServer: MjpegServer
 
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
-    private var deviceSelected = false  // verhindert mehrfaches selectDevice auf dasselbe Gerät
+    private var deviceSelected = false
     private var dummySurface: Surface? = null
     private var dummySurfaceTex: SurfaceTexture? = null
 
-    @SuppressLint("SetJavaScriptEnabled")
+    @Volatile private var frameCount: Long = 0
+    @Volatile private var lastFrameSize: Int = 0
+
+    @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -60,15 +64,6 @@ class MainActivity : AppCompatActivity() {
         AppLog.i(TAG, "=== onCreate — TrefferPoint startet ===")
         AppLog.i(TAG, "Launch intent: ${intent?.action}")
 
-        // MJPEG-Server ZUERST — die WebView lädt HTML UND Stream davon
-        mjpegServer = MjpegServer(MJPEG_PORT, applicationContext)
-        try {
-            mjpegServer.start()
-            AppLog.i(TAG, "MJPEG server läuft auf 127.0.0.1:$MJPEG_PORT")
-        } catch (e: Exception) {
-            AppLog.e(TAG, "MJPEG server konnte nicht starten", e)
-        }
-
         webView = findViewById(R.id.webview)
         webView.settings.apply {
             javaScriptEnabled = true
@@ -76,11 +71,12 @@ class MainActivity : AppCompatActivity() {
             mediaPlaybackRequiresUserGesture = false
             allowFileAccess = true
             allowContentAccess = true
+            allowFileAccessFromFileURLs = true
+            allowUniversalAccessFromFileURLs = true
             mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
         webView.webViewClient = WebViewClient()
         webView.webChromeClient = object : WebChromeClient() {
-            // WebView -> App: Erlaube getUserMedia für eingebaute Kameras + Mikro
             override fun onPermissionRequest(request: PermissionRequest) {
                 val allowed = request.resources.filter {
                     it == PermissionRequest.RESOURCE_VIDEO_CAPTURE ||
@@ -91,17 +87,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
         WebView.setWebContentsDebuggingEnabled(true)
-        webView.loadUrl("http://127.0.0.1:$MJPEG_PORT/")
 
-        // Runtime-Permission für eingebaute Kamera (für den "Kamera"-Tab in TrefferPoint)
+        // JavaScript-Bridge: JS greift via window.tpBridge auf App-Infos zu
+        webView.addJavascriptInterface(TrefferPointBridge(), "tpBridge")
+
+        // TrefferPoint-HTML aus Assets laden
+        webView.loadUrl("file:///android_asset/trefferpoint/index.html")
+
+        // Runtime-Kamera-Permission für den "Kamera"-Tab
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.CAMERA), 1001)
         }
 
         UVCUtils.init(this)
         initCamera()
-
-        // Kamera aus Launch-Intent abgreifen (falls via USB_DEVICE_ATTACHED gestartet)
         handleUsbIntent(intent)
     }
 
@@ -113,14 +112,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Fallback: auch ohne Intent proaktiv nach Geräten suchen
         attachAlreadyConnectedCamera()
     }
 
-    /**
-     * Wenn Android die App via USB_DEVICE_ATTACHED startet, liegt das UsbDevice
-     * im Intent. Direkt an CameraHelper übergeben — schneller als auf onAttach-Event warten.
-     */
+    // ── USB-Device-Verwaltung ────────────────────────────────────────────────
+
     private fun handleUsbIntent(intent: Intent?) {
         intent ?: return
         if (intent.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) return
@@ -148,39 +144,25 @@ class MainActivity : AppCompatActivity() {
             val devices = helper.deviceList
             AppLog.i(TAG, "onResume enumerate — ${devices?.size ?: 0} USB-Device(s) sichtbar")
             devices?.forEachIndexed { i, d ->
-                AppLog.i(TAG, "  [$i] ${d.productName} VID=${d.vendorId} PID=${d.productId} class=${d.deviceClass} iface=${d.interfaceCount}")
+                AppLog.i(TAG, "  [$i] ${d.productName} VID=${d.vendorId} PID=${d.productId}")
             }
-            val uvcDevice = devices?.firstOrNull { isLikelyUvcCamera(it) }
-            if (uvcDevice != null) {
-                AppLog.i(TAG, "Starte bereits verbundene UVC-Kamera: ${uvcDevice.productName}")
-                helper.selectDevice(uvcDevice); deviceSelected = true
-            } else if (!devices.isNullOrEmpty()) {
-                AppLog.i(TAG, "Keine UVC-Heuristik getroffen — probiere erstes Gerät: ${devices[0].productName}")
-                helper.selectDevice(devices[0]); deviceSelected = true
-            } else {
-                AppLog.w(TAG, "Keine USB-Geräte sichtbar. Kamera nicht angesteckt oder von anderer App beansprucht?")
-            }
+            val first = devices?.firstOrNull() ?: return
+            AppLog.i(TAG, "Starte Kamera: ${first.productName}")
+            helper.selectDevice(first)
+            deviceSelected = true
         } catch (e: Exception) {
             AppLog.e(TAG, "attachAlreadyConnectedCamera fehlgeschlagen", e)
         }
     }
 
-    private fun isLikelyUvcCamera(device: UsbDevice): Boolean {
-        if (device.deviceClass == 239) return true
-        if (device.deviceClass == 14) return true
-        for (i in 0 until device.interfaceCount) {
-            val iface = device.getInterface(i)
-            if (iface.interfaceClass == 14) return true
-        }
-        return false
-    }
+    // ── Kamera-Lifecycle ─────────────────────────────────────────────────────
 
     private fun initCamera() {
         cameraHelper = CameraHelper().also { helper ->
             helper.setStateCallback(object : ICameraHelper.StateCallback {
                 override fun onAttach(device: UsbDevice?) {
-                    AppLog.i(TAG, "→ onAttach: ${device?.productName} VID=${device?.vendorId} PID=${device?.productId}")
-                    if (deviceSelected) { AppLog.i(TAG, "  (schon selected — überspringe)"); return }
+                    AppLog.i(TAG, "→ onAttach: ${device?.productName}")
+                    if (deviceSelected) return
                     device?.let { helper.selectDevice(it); deviceSelected = true }
                 }
 
@@ -197,17 +179,12 @@ class MainActivity : AppCompatActivity() {
                     val size = helper.previewSize
                     val w = size?.width ?: PREVIEW_WIDTH
                     val h = size?.height ?: PREVIEW_HEIGHT
-                    AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — Size=${w}x${h}")
+                    AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — ${w}x${h}")
                     cameraOpened = true
 
-                    // Reihenfolge laut offiziellem shiyinghan/UVCAndroid SetFrameCallbackActivity-Demo:
-                    // 1) startPreview()  2) addSurface()  3) setFrameCallback()
-                    try {
-                        helper.startPreview()
-                        AppLog.i(TAG, "   1) startPreview() aufgerufen")
-                    } catch (e: Exception) {
-                        AppLog.e(TAG, "startPreview() Exception", e)
-                    }
+                    // Offizielle Reihenfolge: startPreview → addSurface → setFrameCallback
+                    try { helper.startPreview(); AppLog.i(TAG, "   1) startPreview()") }
+                    catch (e: Exception) { AppLog.e(TAG, "startPreview() Exception", e) }
 
                     try {
                         val tex = SurfaceTexture(0).apply { setDefaultBufferSize(w, h) }
@@ -215,17 +192,13 @@ class MainActivity : AppCompatActivity() {
                         dummySurfaceTex = tex
                         dummySurface = surf
                         helper.addSurface(surf, false)
-                        AppLog.i(TAG, "   2) dummy Surface hinzugefügt (${w}x${h})")
-                    } catch (e: Exception) {
-                        AppLog.e(TAG, "addSurface Exception", e)
-                    }
+                        AppLog.i(TAG, "   2) addSurface (${w}x${h})")
+                    } catch (e: Exception) { AppLog.e(TAG, "addSurface Exception", e) }
 
                     try {
                         helper.setFrameCallback(frameCallback, UVCCamera.PIXEL_FORMAT_NV21)
-                        AppLog.i(TAG, "   3) setFrameCallback(NV21) gesetzt")
-                    } catch (e: Exception) {
-                        AppLog.e(TAG, "setFrameCallback Exception", e)
-                    }
+                        AppLog.i(TAG, "   3) setFrameCallback(NV21)")
+                    } catch (e: Exception) { AppLog.e(TAG, "setFrameCallback Exception", e) }
                 }
 
                 override fun onCameraClose(device: UsbDevice?) {
@@ -244,13 +217,13 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 override fun onCancel(device: UsbDevice?) {
-                    AppLog.w(TAG, "→ onCancel (USB-Permission vom User abgelehnt?) ${device?.productName}")
+                    AppLog.w(TAG, "→ onCancel (Permission abgelehnt?) ${device?.productName}")
                 }
             })
-
-            // Frame-Callback wird erst in onCameraOpen gesetzt (da mUsbDevice vorher null)
         }
     }
+
+    // ── Frame → JS-Bridge ────────────────────────────────────────────────────
 
     private val frameCallback = object : IFrameCallback {
         private var logged = false
@@ -263,16 +236,32 @@ class MainActivity : AppCompatActivity() {
                 val bytes = ByteArray(frame.remaining())
                 frame.get(bytes)
                 val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, w, h)
+                frameCount++
+                lastFrameSize = jpeg.size
                 if (!logged) {
-                    AppLog.i(TAG, "Erster Frame empfangen: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
+                    AppLog.i(TAG, "Erster Frame: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
                     logged = true
                 }
-                mjpegServer.pushFrame(jpeg)
+                pushFrameToWebView(jpeg)
             } catch (e: Exception) {
                 AppLog.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
             }
         }
     }
+
+    private fun pushFrameToWebView(jpeg: ByteArray) {
+        val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
+        runOnUiThread {
+            // Stringkonkatenation via ' + ' vermeidet String-Escaping-Probleme.
+            // Base64 ist safe in JS-String (keine Quotes/Backslashes).
+            webView.evaluateJavascript(
+                "window.tpReceiveFrame && window.tpReceiveFrame('$b64')",
+                null
+            )
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun isJpeg(data: ByteArray): Boolean =
         data.size > 3 && data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte()
@@ -292,6 +281,22 @@ class MainActivity : AppCompatActivity() {
         try { dummySurfaceTex?.release() } catch (_: Exception) {}
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
         try { cameraHelper?.release() } catch (_: Exception) {}
-        mjpegServer.stop()
+    }
+
+    // ── JavaScript-Bridge ────────────────────────────────────────────────────
+
+    inner class TrefferPointBridge {
+        @JavascriptInterface
+        fun getLog(): String = AppLog.snapshot()
+
+        @JavascriptInterface
+        fun getStatus(): String =
+            """{"cameraConnected":${cameraOpened},"frameCount":$frameCount,"lastFrameBytes":$lastFrameSize}"""
+
+        @JavascriptInterface
+        fun getVersion(): String = BuildConfig.VERSION_NAME
+
+        @JavascriptInterface
+        fun isAndroidApp(): Boolean = true
     }
 }
