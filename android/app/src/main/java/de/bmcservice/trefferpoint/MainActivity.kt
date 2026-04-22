@@ -9,11 +9,13 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
-import com.herohan.uvcapp.CameraException
 import com.herohan.uvcapp.CameraHelper
 import com.herohan.uvcapp.ICameraHelper
-import com.serenegiant.usb.Size
+import com.serenegiant.usb.IFrameCallback
+import com.serenegiant.usb.UVCCamera
 import com.serenegiant.usb.UVCParam
+import com.serenegiant.utils.UVCUtils
+import java.nio.ByteBuffer
 
 /**
  * TrefferPoint Android App — Schritt 2 (UVC-Kamera-Anbindung)
@@ -66,6 +68,9 @@ class MainActivity : AppCompatActivity() {
             Log.e(TAG, "MJPEG server konnte nicht starten", e)
         }
 
+        // UVC-Library initialisieren (benötigt Application-Context)
+        UVCUtils.init(this)
+
         initCamera()
     }
 
@@ -110,21 +115,21 @@ class MainActivity : AppCompatActivity() {
                 }
             })
 
-            // Frame-Callback: pushen als JPEG in MJPEG-Server
-            helper.addFrameCallback({ frame ->
-                // frame ist ByteBuffer mit NV21-Daten (je nach UVCParam Format)
-                // Für MJPEG direkt: falls Format MJPEG, schon JPEG — sonst konvertieren
-                try {
-                    val bytes = ByteArray(frame.remaining())
-                    frame.get(bytes)
-                    // Falls bereits JPEG (MJPEG-Format) → direkt pushen
-                    // Sonst NV21 → JPEG konvertieren
-                    val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, PREVIEW_WIDTH, PREVIEW_HEIGHT)
-                    mjpegServer.pushFrame(jpeg)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
+            // Frame-Callback: NV21-Bytes → JPEG → MJPEG-Server pushen
+            helper.setFrameCallback(object : IFrameCallback {
+                override fun onFrame(frame: ByteBuffer) {
+                    try {
+                        val w = helper.previewSize?.width ?: PREVIEW_WIDTH
+                        val h = helper.previewSize?.height ?: PREVIEW_HEIGHT
+                        val bytes = ByteArray(frame.remaining())
+                        frame.get(bytes)
+                        val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, w, h)
+                        mjpegServer.pushFrame(jpeg)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
+                    }
                 }
-            }, com.serenegiant.usb.IFrameCallback.PIXEL_FORMAT_NV21)
+            }, UVCCamera.PIXEL_FORMAT_NV21)
         }
     }
 
