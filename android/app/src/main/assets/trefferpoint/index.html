@@ -669,6 +669,26 @@
                     style="flex:1;padding:5px;font-size:11px">
                     🌐 Stream-URL
                 </button>
+                <button class="btn" id="btnModeRtsp"
+                    style="flex:1;padding:5px;font-size:11px;display:none">
+                    📡 WLAN-Cam
+                </button>
+            </div>
+
+            <!-- RTSP-Modus (nur in Android-APK sichtbar) -->
+            <div id="modeRtsp" style="display:none">
+                <input type="text" id="rtspUrl"
+                    placeholder="rtsp://192.168.0.1:554/live/tcp/ch1"
+                    inputmode="url" autocomplete="off" enterkeyhint="go"
+                    style="width:100%;padding:7px 10px;background:var(--surface2);
+                           border:1px solid var(--border);color:var(--text);
+                           font-family:'Share Tech Mono',monospace;font-size:11px;
+                           margin-bottom:7px">
+                <div style="font-size:10px;color:var(--text-dim);margin-bottom:7px;font-family:'Share Tech Mono',monospace">
+                    Leer = Auto (Gateway-IP des verbundenen WLANs probieren)
+                </div>
+                <button class="btn btn-primary" id="btnRtsp">▶ RTSP-Stream starten</button>
+                <button class="btn" id="btnRtspStop" style="display:none;margin-top:5px">■ Stream stoppen</button>
             </div>
 
             <!-- USB/Gerät Modus -->
@@ -790,7 +810,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2265,6 +2285,68 @@ function resetSession() {
     if (calib) setMsg('Referenzframe setzen und Erkennung starten');
 }
 
+// --- Bridge Frame-Receiver (für USB-UVC UND RTSP — beide pushen JPEGs via tpReceiveFrame) ---
+let bridgeReceiverReady = false;
+function setupBridgeFrameReceiver() {
+    if (bridgeReceiverReady) return;
+    bridgeReceiverReady = true;
+
+    imgEl = new Image();
+    let firstFrameDone = false;
+    imgEl.onload = () => {
+        if (firstFrameDone) return;
+        firstFrameDone = true;
+        if (imgEl.naturalWidth > 0) {
+            canvas.width = imgEl.naturalWidth;
+            canvas.height = imgEl.naturalHeight;
+        }
+        appState = 'READY';
+        document.getElementById('btnRotateCam').style.display = '';
+        document.getElementById('btnCalib').disabled = false;
+        document.getElementById('btnAutoCalib').disabled = false;
+        document.getElementById('btnRef').disabled = false;
+        document.getElementById('btnDetect').disabled = false;
+        document.getElementById('camControlsSection').style.display = '';
+        setStatus('Stream aktiv \u00b7 native Bridge', 'ok');
+        setMsg('Auto-Erkennung \u2192 Button klicken');
+        if (!rafId) startLoop();
+    };
+
+    window.tpReceiveFrame = function(b64) {
+        try {
+            const bin = atob(b64);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            const blob = new Blob([arr], { type: 'image/jpeg' });
+            const old = imgEl.src;
+            const url = URL.createObjectURL(blob);
+            if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
+            imgEl.src = url;
+        } catch (e) { console.error('tpReceiveFrame Fehler', e); }
+    };
+
+    // Diagnose: nach 30s ohne Frame → Log zeigen
+    let checkCount = 0;
+    const checkTimer = setInterval(() => {
+        checkCount++;
+        if (firstFrameDone) { clearInterval(checkTimer); return; }
+        try {
+            const st = JSON.parse(window.tpBridge.getStatus());
+            let line = 'Warte auf Kamera\u2026\nmode=' + st.mode + ', frames=' + st.frameCount;
+            if (st.rtspFrameCount > 0) line += ', rtsp=' + st.rtspFrameCount;
+            if (st.rtspError) line += '\n' + st.rtspError;
+            setMsg(line);
+        } catch(e) {}
+        if (checkCount >= 15) {
+            clearInterval(checkTimer);
+            if (!firstFrameDone) {
+                setStatus('\u26a0 Keine Frames nach 30s', 'warn');
+                try { setMsg('--- App-Log ---\n' + window.tpBridge.getLog()); } catch(e) {}
+            }
+        }
+    }, 2000);
+}
+
 // --- Event Bindings ---
 // --- Stream-URL Start (MJPEG) ---
 // Versucht fetch-basierten MJPEG-Decoder (blob:-URLs -> kein Canvas-Taint -> Erkennung moeglich).
@@ -2303,68 +2385,11 @@ async function startStream() {
 
     const fetchHdrs = authHeader ? { 'Authorization': authHeader } : {};
 
-    // ── Android-APK via JS-Bridge: keine HTTP-Schicht, Frames kommen direkt aus Kotlin ──
+    // ── Android-APK via JS-Bridge: Frames kommen direkt aus Kotlin ──
     if (typeof window.tpBridge !== 'undefined' && window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp()) {
         setStatus('Warte auf erstes Frame\u2026', 'warn');
         setMsg('Kamera-Frames kommen über Native-Bridge');
-        imgEl = new Image();
-        let firstFrameDone = false;
-        imgEl.onload = () => {
-            if (firstFrameDone) return;
-            firstFrameDone = true;
-            if (imgEl.naturalWidth > 0) {
-                canvas.width = imgEl.naturalWidth;
-                canvas.height = imgEl.naturalHeight;
-            }
-            appState = 'READY';
-            document.getElementById('btnRotateCam').style.display = '';
-            document.getElementById('btnCalib').disabled = false;
-            document.getElementById('btnAutoCalib').disabled = false;
-            document.getElementById('btnRef').disabled = false;
-            document.getElementById('btnDetect').disabled = false;
-            document.getElementById('camControlsSection').style.display = '';
-            setStatus('Stream aktiv \u00b7 native Bridge', 'ok');
-            setMsg('Auto-Erkennung \u2192 Button klicken');
-            if (!rafId) startLoop();
-        };
-
-        // Kotlin ruft window.tpReceiveFrame(base64) pro Frame
-        window.tpReceiveFrame = function(b64) {
-            try {
-                // base64 → Uint8Array → Blob → URL
-                const bin = atob(b64);
-                const arr = new Uint8Array(bin.length);
-                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                const blob = new Blob([arr], { type: 'image/jpeg' });
-                const old = imgEl.src;
-                const url = URL.createObjectURL(blob);
-                if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
-                imgEl.src = url;
-            } catch (e) {
-                console.error('tpReceiveFrame Fehler', e);
-            }
-        };
-
-        // Diagnose: Kamera-Status alle 2s prüfen, falls nach 20s nichts → Log anzeigen
-        let checkCount = 0;
-        const checkTimer = setInterval(() => {
-            checkCount++;
-            if (firstFrameDone) { clearInterval(checkTimer); return; }
-            try {
-                const st = JSON.parse(window.tpBridge.getStatus());
-                setMsg('Warte auf Kamera\u2026\ncameraConnected=' + st.cameraConnected + ', frameCount=' + st.frameCount);
-            } catch(e) {}
-            if (checkCount >= 10) {
-                clearInterval(checkTimer);
-                if (!firstFrameDone) {
-                    setStatus('\u26a0 Keine Frames nach 20s', 'warn');
-                    try {
-                        const log = window.tpBridge.getLog();
-                        setMsg('--- App-Log ---\n' + log);
-                    } catch(e) {}
-                }
-            }
-        }, 2000);
+        setupBridgeFrameReceiver();
         return;
     }
 
@@ -2521,14 +2546,76 @@ document.getElementById('btnModeUsb').addEventListener('click', () => {
 document.getElementById('btnModeStream').addEventListener('click', () => {
     document.getElementById('modeUsb').style.display = 'none';
     document.getElementById('modeStream').style.display = '';
+    const mr = document.getElementById('modeRtsp'); if (mr) mr.style.display = 'none';
     document.getElementById('btnModeStream').style.background = 'var(--accent)';
     document.getElementById('btnModeStream').style.color = '#000';
     document.getElementById('btnModeStream').style.borderColor = 'var(--accent)';
     document.getElementById('btnModeUsb').style.background = '';
     document.getElementById('btnModeUsb').style.color = '';
     document.getElementById('btnModeUsb').style.borderColor = '';
+    const btnRtspMode = document.getElementById('btnModeRtsp');
+    if (btnRtspMode) { btnRtspMode.style.background = ''; btnRtspMode.style.color = ''; btnRtspMode.style.borderColor = ''; }
     inputMode = 'stream';
 });
+
+// RTSP-Mode: nur in Android-APK anbieten
+(function() {
+    const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
+        window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
+    if (!inAndroidApp) return;
+
+    const btnModeRtsp = document.getElementById('btnModeRtsp');
+    btnModeRtsp.style.display = '';
+    btnModeRtsp.addEventListener('click', () => {
+        document.getElementById('modeUsb').style.display = 'none';
+        document.getElementById('modeStream').style.display = 'none';
+        document.getElementById('modeRtsp').style.display = '';
+        btnModeRtsp.style.background = 'var(--accent)';
+        btnModeRtsp.style.color = '#000';
+        btnModeRtsp.style.borderColor = 'var(--accent)';
+        document.getElementById('btnModeUsb').style.background = '';
+        document.getElementById('btnModeUsb').style.color = '';
+        document.getElementById('btnModeUsb').style.borderColor = '';
+        document.getElementById('btnModeStream').style.background = '';
+        document.getElementById('btnModeStream').style.color = '';
+        document.getElementById('btnModeStream').style.borderColor = '';
+        inputMode = 'rtsp';
+        // Gateway-IP als Vorschlag eintragen
+        try {
+            const gw = window.tpBridge.getWifiGateway();
+            const rtspInput = document.getElementById('rtspUrl');
+            if (gw && !rtspInput.value) {
+                rtspInput.value = 'rtsp://' + gw + ':554/live/tcp/ch1';
+            }
+        } catch(e) {}
+    });
+
+    // RTSP starten
+    document.getElementById('btnRtsp').addEventListener('click', () => {
+        const url = document.getElementById('rtspUrl').value.trim();
+        localStorage.setItem('tp_rtsp_url', url);
+        setStatus('RTSP verbinden\u2026', 'warn');
+        setMsg('Starte RTSP-Stream\u2026');
+        // Wichtig: Frame-Receiver einmal aufsetzen (dasselbe wie für USB)
+        setupBridgeFrameReceiver();
+        try { window.tpBridge.startRtsp(url); } catch(e) {
+            setStatus('\u26a0 RTSP-Bridge-Fehler', 'warn');
+            setMsg('' + e);
+        }
+        document.getElementById('btnRtspStop').style.display = '';
+    });
+
+    // RTSP stoppen
+    document.getElementById('btnRtspStop').addEventListener('click', () => {
+        try { window.tpBridge.stopRtsp(); } catch(e) {}
+        document.getElementById('btnRtspStop').style.display = 'none';
+        setStatus('RTSP gestoppt', 'warn');
+    });
+
+    // Gespeicherte RTSP-URL wiederherstellen
+    const savedRtsp = localStorage.getItem('tp_rtsp_url');
+    if (savedRtsp) document.getElementById('rtspUrl').value = savedRtsp;
+})();
 
 // Stream-URL aus localStorage wiederherstellen
 (function() {

@@ -2,11 +2,13 @@ package de.bmcservice.trefferpoint
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.util.Base64
 import android.view.Surface
@@ -54,6 +56,9 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile private var frameCount: Long = 0
     @Volatile private var lastFrameSize: Int = 0
+    @Volatile private var activeMode: String = "none"  // "usb" | "rtsp" | "none"
+
+    private var rtspPipeline: RtspPipeline? = null
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -181,6 +186,10 @@ class MainActivity : AppCompatActivity() {
                     val h = size?.height ?: PREVIEW_HEIGHT
                     AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — ${w}x${h}")
                     cameraOpened = true
+                    activeMode = "usb"
+                    // Falls RTSP noch lief, stoppen — USB hat Vorrang bei direktem Anschluss
+                    rtspPipeline?.stop()
+                    rtspPipeline = null
 
                     // Offizielle Reihenfolge: startPreview → addSurface → setFrameCallback
                     try { helper.startPreview(); AppLog.i(TAG, "   1) startPreview()") }
@@ -277,6 +286,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try { rtspPipeline?.stop() } catch (_: Exception) {}
         try { dummySurface?.release() } catch (_: Exception) {}
         try { dummySurfaceTex?.release() } catch (_: Exception) {}
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
@@ -290,13 +300,79 @@ class MainActivity : AppCompatActivity() {
         fun getLog(): String = AppLog.snapshot()
 
         @JavascriptInterface
-        fun getStatus(): String =
-            """{"cameraConnected":${cameraOpened},"frameCount":$frameCount,"lastFrameBytes":$lastFrameSize}"""
+        fun getStatus(): String {
+            val rtspFC = rtspPipeline?.frameCount ?: 0
+            val rtspErr = rtspPipeline?.lastError?.let { ",\"rtspError\":\"${it.replace("\"","'")}\"" } ?: ""
+            return """{"mode":"$activeMode","cameraConnected":${cameraOpened || activeMode == "rtsp"},"frameCount":$frameCount,"rtspFrameCount":$rtspFC,"lastFrameBytes":$lastFrameSize$rtspErr}"""
+        }
 
         @JavascriptInterface
         fun getVersion(): String = BuildConfig.VERSION_NAME
 
         @JavascriptInterface
         fun isAndroidApp(): Boolean = true
+
+        /** Liefert die Gateway-IP des aktuell verbundenen WLANs als String, oder "" wenn keine. */
+        @JavascriptInterface
+        fun getWifiGateway(): String {
+            return try {
+                val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                val gw = wifi.dhcpInfo?.gateway ?: 0
+                if (gw == 0) "" else
+                    "${gw and 0xFF}.${(gw shr 8) and 0xFF}.${(gw shr 16) and 0xFF}.${(gw shr 24) and 0xFF}"
+            } catch (e: Exception) {
+                AppLog.e(TAG, "getWifiGateway fehlgeschlagen", e)
+                ""
+            }
+        }
+
+        /** RTSP-Stream starten. Wenn url leer, wird Gateway-IP + Standard-Pfade probiert. */
+        @JavascriptInterface
+        fun startRtsp(url: String) {
+            runOnUiThread {
+                try {
+                    // Bestehende Pipelines stoppen
+                    rtspPipeline?.stop()
+                    rtspPipeline = null
+                    try { cameraHelper?.closeCamera() } catch (_: Exception) {}
+                    cameraOpened = false
+
+                    val finalUrl = if (url.isNotBlank()) url else {
+                        val gw = getWifiGateway()
+                        if (gw.isNotBlank()) "rtsp://$gw:554/live/tcp/ch1"
+                        else "rtsp://192.168.0.1:554/live/tcp/ch1"
+                    }
+
+                    AppLog.i(TAG, "startRtsp: $finalUrl")
+                    val pipeline = RtspPipeline(
+                        applicationContext,
+                        onJpegFrame = { jpeg ->
+                            frameCount++
+                            lastFrameSize = jpeg.size
+                            pushFrameToWebView(jpeg)
+                        },
+                        onStatus = { status -> AppLog.i(TAG, "RTSP: $status") }
+                    )
+                    rtspPipeline = pipeline
+                    activeMode = "rtsp"
+                    pipeline.start(finalUrl)
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "startRtsp Exception", e)
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun stopRtsp() {
+            runOnUiThread {
+                try {
+                    rtspPipeline?.stop()
+                    rtspPipeline = null
+                    if (activeMode == "rtsp") activeMode = "none"
+                    AppLog.i(TAG, "stopRtsp")
+                } catch (e: Exception) { AppLog.e(TAG, "stopRtsp Exception", e) }
+            }
+        }
     }
 }
