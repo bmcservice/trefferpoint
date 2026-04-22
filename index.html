@@ -775,7 +775,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.22';
+const APP_VERSION = '2.0.23';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2265,13 +2265,45 @@ async function startStream() {
 
     const fetchHdrs = authHeader ? { 'Authorization': authHeader } : {};
 
-    // ── Android-APK / localhost: nativer <img>-Tag für MJPEG (kein fetch-Gebastel) ──
-    // Browser rendern multipart/x-mixed-replace direkt, same-origin → kein Canvas-Taint.
+    // ── Android-APK / localhost: zuerst /status pollen, dann nativen <img>-Tag für MJPEG ──
     if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
         const localVideoUrl = (cleanUrl.replace(/\/+$/, '')) + '/video';
-        setStatus('Verbinde\u2026 ' + localVideoUrl.replace(/^https?:\/\/[^\/]*/, ''), 'warn');
-        setMsg('Warte auf Kamera-Stream\u2026');
+        const statusUrl = location.origin + '/status';
+        setStatus('Warte auf Kamera\u2026', 'warn');
 
+        // Poll /status bis frameCount > 0 oder Timeout (20s)
+        const MAX_POLLS = 40; // 40 × 500ms = 20s
+        let frameCount = 0, pollErrors = 0;
+        for (let i = 0; i < MAX_POLLS; i++) {
+            if (ac.signal.aborted) return;
+            setStatus('Warte auf Kamera\u2026 (' + (i+1) + '/' + MAX_POLLS + ')', 'warn');
+            try {
+                const sCtrl = new AbortController();
+                const sTo = setTimeout(() => sCtrl.abort(), 1500);
+                const s = await fetch(statusUrl, { signal: sCtrl.signal, cache: 'no-store' });
+                clearTimeout(sTo);
+                if (s.ok) {
+                    const sj = await s.json();
+                    frameCount = sj.frameCount || 0;
+                    setMsg('cameraConnected=' + sj.cameraConnected + ', frameCount=' + frameCount);
+                    if (frameCount > 0) break; // Kamera liefert → <img>-Tag kann loslegen
+                }
+            } catch(e) { pollErrors++; }
+            await new Promise(res => setTimeout(res, 500));
+        }
+
+        if (frameCount === 0) {
+            setStatus('\u26a0 Kamera liefert keine Frames', 'warn');
+            try {
+                const logR = await fetch(location.origin + '/log', { cache: 'no-store' });
+                const logTxt = logR.ok ? await logR.text() : '';
+                setMsg('Nach 20s keine Frames. pollErrors=' + pollErrors + '\n\n--- App-Log ---\n' + logTxt);
+            } catch(e) { setMsg('Keine Frames + Log unerreichbar'); }
+            return;
+        }
+
+        // Kamera liefert — jetzt <img>-Tag setzen
+        setStatus('Kamera aktiv\u2026 lade Stream', 'warn');
         imgEl = new Image();
         let imgReady = false;
         imgEl.onload = () => {
@@ -2293,12 +2325,12 @@ async function startStream() {
             if (!rafId) startLoop();
         };
         imgEl.onerror = async () => {
-            setStatus('\u26a0 Stream-Fehler', 'warn');
+            setStatus('\u26a0 <img>-Tag Fehler (trotz Frames)', 'warn');
             try {
                 const logR = await fetch(location.origin + '/log', { cache: 'no-store' });
                 const logTxt = logR.ok ? await logR.text() : '';
-                setMsg('<img>-Tag onerror. Server-Log:\n\n' + logTxt);
-            } catch(e) { setMsg('Stream-Fehler, Log nicht erreichbar'); }
+                setMsg('img.onerror — frameCount war ' + frameCount + '\n\n' + logTxt);
+            } catch(e) { setMsg('img-Fehler + Log unerreichbar'); }
         };
         imgEl.src = localVideoUrl + '?t=' + Date.now();
         return;
