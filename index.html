@@ -775,7 +775,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.21';
+const APP_VERSION = '2.0.22';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2264,6 +2264,45 @@ async function startStream() {
     canvas.width = 1280; canvas.height = 720;
 
     const fetchHdrs = authHeader ? { 'Authorization': authHeader } : {};
+
+    // ── Android-APK / localhost: nativer <img>-Tag für MJPEG (kein fetch-Gebastel) ──
+    // Browser rendern multipart/x-mixed-replace direkt, same-origin → kein Canvas-Taint.
+    if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
+        const localVideoUrl = (cleanUrl.replace(/\/+$/, '')) + '/video';
+        setStatus('Verbinde\u2026 ' + localVideoUrl.replace(/^https?:\/\/[^\/]*/, ''), 'warn');
+        setMsg('Warte auf Kamera-Stream\u2026');
+
+        imgEl = new Image();
+        let imgReady = false;
+        imgEl.onload = () => {
+            if (imgReady) return;
+            if (imgEl.naturalWidth > 0) {
+                canvas.width = imgEl.naturalWidth;
+                canvas.height = imgEl.naturalHeight;
+            }
+            imgReady = true;
+            appState = 'READY';
+            document.getElementById('btnRotateCam').style.display = '';
+            document.getElementById('btnCalib').disabled = false;
+            document.getElementById('btnAutoCalib').disabled = false;
+            document.getElementById('btnRef').disabled = false;
+            document.getElementById('btnDetect').disabled = false;
+            document.getElementById('camControlsSection').style.display = '';
+            setStatus('Stream aktiv \u00b7 ' + localVideoUrl.replace(/^https?:\/\//, ''), 'ok');
+            setMsg('Auto-Erkennung \u2192 Button klicken');
+            if (!rafId) startLoop();
+        };
+        imgEl.onerror = async () => {
+            setStatus('\u26a0 Stream-Fehler', 'warn');
+            try {
+                const logR = await fetch(location.origin + '/log', { cache: 'no-store' });
+                const logTxt = logR.ok ? await logR.text() : '';
+                setMsg('<img>-Tag onerror. Server-Log:\n\n' + logTxt);
+            } catch(e) { setMsg('Stream-Fehler, Log nicht erreichbar'); }
+        };
+        imgEl.src = localVideoUrl + '?t=' + Date.now();
+        return;
+    }
 
     // ── Stream-Pfade ermitteln (USB Dual Cam: /video; IP Webcam: /video; DroidCam: /video) ──
     let pu2; try { pu2 = new URL(cleanUrl); } catch(e) {}
