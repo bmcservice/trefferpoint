@@ -16,12 +16,12 @@ import java.util.concurrent.CopyOnWriteArrayList
  * Vorteil gleiche Origin: keine CORS-Probleme im WebView, kein file://→http:// Block.
  *
  * Endpunkte:
- *   /                      → index.html (Asset)
- *   /manifest.json         → manifest.json (Asset)
- *   /*.html, *.css, *.js   → weitere Assets
- *   /video, /stream, /mjpeg, /video.mjpg → MJPEG-Stream
- *   /snapshot, /jpg        → letztes JPEG als Einzelbild
- *   /status                → JSON mit cam-Status (für Diagnose)
+ *   /                         index.html (Asset)
+ *   /manifest.json            manifest.json (Asset)
+ *   /sw.js, /version.json     weitere Assets (by extension)
+ *   /video, /stream, /mjpeg   MJPEG-Stream
+ *   /snapshot, /jpg           letztes JPEG als Einzelbild
+ *   /status                   JSON mit cam-Status (für Diagnose)
  */
 class MjpegServer(port: Int, private val appContext: Context?) : NanoHTTPD("127.0.0.1", port) {
 
