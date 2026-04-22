@@ -656,14 +656,14 @@
             <!-- Stream-URL Modus -->
             <div id="modeStream" style="display:none">
                 <input type="text" id="streamUrl"
-                    placeholder="http://192.168.178.62:8081"
+                    placeholder="http://admin:admin@192.168.178.62:8081"
                     inputmode="url" autocomplete="off" enterkeyhint="go"
                     style="width:100%;padding:7px 10px;background:var(--surface2);
                            border:1px solid var(--border);color:var(--text);
                            font-family:'Share Tech Mono',monospace;font-size:11px;
                            margin-bottom:7px">
                 <div style="font-size:10px;color:var(--text-dim);margin-bottom:7px;font-family:'Share Tech Mono',monospace">
-                    USB dual cam (WLAN): 192.168.178.62:8081 · IP Webcam: :8080/video · DroidCam: :4747/video
+                    Format: http://user:pass@IP:Port &nbsp;·&nbsp; Pfad optional (/video auto-erkannt)
                 </div>
                 <button class="btn btn-primary" id="btnStream">▶ Stream starten</button>
             </div>
@@ -764,7 +764,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.10';
+const APP_VERSION = '2.0.11';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2199,131 +2199,159 @@ function resetSession() {
 // Versucht fetch-basierten MJPEG-Decoder (blob:-URLs -> kein Canvas-Taint -> Erkennung moeglich).
 // Fallback: <img>-Tag (Canvas tainted -> nur Anzeige).
 async function startStream() {
-    const url = document.getElementById('streamUrl').value.trim();
-    if (!url) { setStatus('Bitte Stream-URL eingeben', 'warn'); return; }
-    localStorage.setItem('tp_stream_url', url);
+    const rawUrl = document.getElementById('streamUrl').value.trim();
+    if (!rawUrl) { setStatus('Bitte Stream-URL eingeben', 'warn'); return; }
+    localStorage.setItem('tp_stream_url', rawUrl);
 
-    // Mixed-Content-Warnung: HTTPS-Seite kann keine HTTP-Streams laden
-    if (location.protocol === 'https:' && url.startsWith('http:')) {
-        setStatus('⚠ Mixed Content: HTTPS → HTTP blockiert', 'warn');
-        setMsg('Lösung: TrefferPoint über http://[Tablet-IP]:8080 öffnen (nicht als PWA) — dann funktioniert der HTTP-Stream.');
+    // ── Credentials aus URL extrahieren (http://user:pass@host:port/path) ──
+    let cleanUrl = rawUrl, authHeader = null, parsedHost = '';
+    try {
+        const pu = new URL(rawUrl.includes('://') ? rawUrl : 'http://' + rawUrl);
+        parsedHost = pu.host;
+        if (pu.username) {
+            authHeader = 'Basic ' + btoa(decodeURIComponent(pu.username) + ':' + decodeURIComponent(pu.password));
+            pu.username = ''; pu.password = '';
+            cleanUrl = pu.toString();
+        }
+    } catch(e) {
+        setStatus('\u26a0 Ungültige URL', 'warn'); return;
+    }
+
+    // ── Mixed-Content: HTTPS kann keine HTTP-Streams laden ──
+    if (location.protocol === 'https:' && rawUrl.startsWith('http:')) {
+        setStatus('\u26a0 Mixed Content: HTTPS \u2192 HTTP blockiert', 'warn');
+        setMsg('Lösung: TrefferPoint über http://[Tablet-IP]:8080 öffnen (nicht als PWA)');
         return;
     }
 
     inputMode = 'stream';
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
     if (mjpegAbort) { mjpegAbort.abort(); mjpegAbort = null; }
-
     imgEl = new Image();
     canvas.width = 1280; canvas.height = 720;
-    setStatus('Stream wird verbunden...', 'warn');
 
-    // Versuch 1: fetch-basierter MJPEG-Decoder (blob:-URLs, kein Canvas-Taint)
+    const fetchHdrs = authHeader ? { 'Authorization': authHeader } : {};
+
+    // ── Stream-Pfade ermitteln (USB Dual Cam: /video; IP Webcam: /video; DroidCam: /video) ──
+    let pu2; try { pu2 = new URL(cleanUrl); } catch(e) {}
+    const hasExplicitPath = pu2 && pu2.pathname !== '/' && pu2.pathname !== '';
+    const root = cleanUrl.replace(/\/+$/, '');
+    const urlsToTry = hasExplicitPath
+        ? [cleanUrl]
+        : [root + '/video', root + '/stream', root + '/mjpeg', root + '/'];
+
     mjpegAbort = new AbortController();
     const ac = mjpegAbort;
-    let fetchOk = false;
-    try {
-        const resp = await fetch(url, { signal: ac.signal, cache: 'no-store' });
-        if (resp.ok && resp.body) {
-            fetchOk = true;
-            const reader = resp.body.getReader();
-            let buf = new Uint8Array(0);
-            let ready = false;
 
-            (async () => {
-                try {
-                    while (!ac.signal.aborted) {
-                        const { done, value } = await reader.read();
-                        if (done || ac.signal.aborted) break;
-
-                        const nb = new Uint8Array(buf.length + value.length);
-                        nb.set(buf); nb.set(value, buf.length);
-                        buf = nb;
-
-                        // Vollstaendige JPEGs extrahieren (FF D8 ... FF D9)
-                        while (buf.length > 3) {
-                            let soi = -1;
-                            for (let i = 0; i < buf.length - 1; i++) {
-                                if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
-                            }
-                            if (soi < 0) { buf = new Uint8Array(0); break; }
-
-                            let eoi = -1;
-                            for (let i = soi + 2; i < buf.length - 1; i++) {
-                                if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
-                            }
-                            if (eoi < 0) break;
-
-                            const jpeg = buf.slice(soi, eoi);
-                            buf = buf.slice(eoi);
-
-                            // blob:-URL -> kein Canvas-Taint
-                            const blobUrl = URL.createObjectURL(new Blob([jpeg], { type: 'image/jpeg' }));
-                            const oldSrc = imgEl.src;
-                            if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
-                            imgEl.src = blobUrl;
-
-                            if (!ready) {
-                                await new Promise(res => { imgEl.onload = res; });
-                                ready = true;
-                                if (imgEl.naturalWidth > 0) {
-                                    canvas.width  = imgEl.naturalWidth;
-                                    canvas.height = imgEl.naturalHeight;
-                                }
-                                appState = 'READY';
-                                document.getElementById('btnRotateCam').style.display = '';
-                                document.getElementById('btnCalib').disabled = false;
-                                document.getElementById('btnAutoCalib').disabled = false;
-                                document.getElementById('btnRef').disabled = false;
-                                document.getElementById('btnDetect').disabled = false;
-                                document.getElementById('camControlsSection').style.display = '';
-                                setStatus('Stream aktiv \u00b7 ' + url.replace('http://',''), 'ok');
-                                setMsg('Auto-Erkennung \u2192 Button klicken');
-                                if (!rafId) startLoop();
-                            }
-                        }
-                    }
-                } catch(e) {}
-            })();
-        }
-    } catch(e) { fetchOk = false; }
-
-    if (fetchOk) return;
-
-    // Fallback: <img>-Tag (ggf. Canvas tainted)
-    ac.abort();
-    imgEl = new Image();
-    imgEl.onload = () => {
-        if (imgEl.naturalWidth > 0) {
-            canvas.width  = imgEl.naturalWidth;
-            canvas.height = imgEl.naturalHeight;
-        }
-        appState = 'READY';
-        document.getElementById('btnRotateCam').style.display = '';
-        setMsg('Auto-Erkennung \u2192 Button klicken');
-        document.getElementById('btnCalib').disabled = false;
-        document.getElementById('btnAutoCalib').disabled = false;
-        document.getElementById('btnRef').disabled = false;
-        document.getElementById('camControlsSection').style.display = '';
+    // ── Schritt 1: Erreichbaren Stream-Pfad finden ──
+    let resp = null, workUrl = null;
+    for (const tryUrl of urlsToTry) {
+        if (ac.signal.aborted) return;
+        const shortPath = tryUrl.replace(/^https?:\/\/[^\/]*/, '') || '/';
+        setStatus('Verbinde\u2026 ' + shortPath, 'warn');
         try {
-            ctx.drawImage(imgEl, 0, 0, 1, 1);
-            ctx.getImageData(0, 0, 1, 1);
-            document.getElementById('btnDetect').disabled = false;
-            setStatus('Stream aktiv \u00b7 ' + url.replace('http://',''), 'ok');
+            const r = await fetch(tryUrl, { signal: ac.signal, cache: 'no-store', headers: fetchHdrs });
+            if (r.status === 401) {
+                setStatus('\u26a0 Login erforderlich (401)', 'warn');
+                setMsg('URL-Format: http://admin:admin@' + (parsedHost || 'IP:Port') + '/video');
+                return;
+            }
+            if (r.ok && r.body) { resp = r; workUrl = tryUrl; break; }
         } catch(e) {
-            setStatus('Stream aktiv \u00b7 nur Anzeige (kein CORS)', 'warn');
-            setMsg('\u26a0 Treffererkennung nicht verfuegbar \u2014 CORS-Header fehlen.');
-            document.getElementById('btnDetect').disabled = true;
+            if (ac.signal.aborted) return;
         }
-        if (!rafId) startLoop();
-    };
-    imgEl.onerror = () => {
-        setStatus('Stream nicht erreichbar \u2014 URL oder Netz pruefen', 'warn');
-        imgEl = null;
-    };
-    imgEl.src = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
-    setStatus('Stream wird geladen...', 'warn');
-    startLoop();
+    }
+
+    if (!resp) {
+        setStatus('\u26a0 Stream nicht erreichbar', 'warn');
+        setMsg('Geprüft: ' + urlsToTry.map(u => u.replace(/^https?:\/\/[^\/]*/, '') || '/').join(' \u00b7 ') + '\nUSB Dual Cam aktiv und WLAN verbunden?');
+        // Fallback: <img>-Tag (Verbindungstest)
+        const imgFb = new Image();
+        imgFb.onload = () => {
+            imgEl = imgFb;
+            appState = 'READY';
+            document.getElementById('btnRotateCam').style.display = '';
+            setMsg('Auto-Erkennung \u2192 Button klicken');
+            document.getElementById('btnCalib').disabled = false;
+            document.getElementById('btnAutoCalib').disabled = false;
+            document.getElementById('btnRef').disabled = false;
+            document.getElementById('camControlsSection').style.display = '';
+            try {
+                ctx.drawImage(imgFb, 0, 0, 1, 1);
+                ctx.getImageData(0, 0, 1, 1);
+                document.getElementById('btnDetect').disabled = false;
+                setStatus('Stream aktiv \u00b7 nur Anzeige (kein CORS)', 'warn');
+            } catch(e) {
+                setStatus('Stream aktiv \u00b7 nur Anzeige (kein CORS)', 'warn');
+                setMsg('\u26a0 Treffererkennung nicht verfügbar \u2014 CORS-Header fehlen.');
+                document.getElementById('btnDetect').disabled = true;
+            }
+            if (!rafId) startLoop();
+        };
+        imgFb.onerror = () => {};
+        imgFb.src = (cleanUrl.replace(/\/+$/, '')) + '/video?' + Date.now();
+        return;
+    }
+
+    // ── Schritt 2: MJPEG-Decode via fetch ReadableStream (blob-URLs → kein Canvas-Taint) ──
+    const reader = resp.body.getReader();
+    let buf = new Uint8Array(0);
+    let ready = false;
+
+    (async () => {
+        try {
+            while (!ac.signal.aborted) {
+                const { done, value } = await reader.read();
+                if (done || ac.signal.aborted) break;
+
+                const nb = new Uint8Array(buf.length + value.length);
+                nb.set(buf); nb.set(value, buf.length);
+                buf = nb;
+
+                // Vollständige JPEGs extrahieren (FF D8 … FF D9)
+                while (buf.length > 3) {
+                    let soi = -1;
+                    for (let i = 0; i < buf.length - 1; i++) {
+                        if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
+                    }
+                    if (soi < 0) { buf = new Uint8Array(0); break; }
+
+                    let eoi = -1;
+                    for (let i = soi + 2; i < buf.length - 1; i++) {
+                        if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
+                    }
+                    if (eoi < 0) break;
+
+                    const jpeg = buf.slice(soi, eoi);
+                    buf = buf.slice(eoi);
+
+                    const blobUrl = URL.createObjectURL(new Blob([jpeg], { type: 'image/jpeg' }));
+                    const oldSrc = imgEl.src;
+                    if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+                    imgEl.src = blobUrl;
+
+                    if (!ready) {
+                        await new Promise(res => { imgEl.onload = res; });
+                        ready = true;
+                        if (imgEl.naturalWidth > 0) {
+                            canvas.width  = imgEl.naturalWidth;
+                            canvas.height = imgEl.naturalHeight;
+                        }
+                        appState = 'READY';
+                        document.getElementById('btnRotateCam').style.display = '';
+                        document.getElementById('btnCalib').disabled = false;
+                        document.getElementById('btnAutoCalib').disabled = false;
+                        document.getElementById('btnRef').disabled = false;
+                        document.getElementById('btnDetect').disabled = false;
+                        document.getElementById('camControlsSection').style.display = '';
+                        setStatus('Stream aktiv \u00b7 ' + workUrl.replace(/^https?:\/\//, ''), 'ok');
+                        setMsg('Auto-Erkennung \u2192 Button klicken');
+                        if (!rafId) startLoop();
+                    }
+                }
+            }
+        } catch(e) {}
+    })();
 }
 
 // --- Mode Toggle ---
