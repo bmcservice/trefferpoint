@@ -36,7 +36,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
-    private val mjpegServer = MjpegServer(MJPEG_PORT)
+    private lateinit var mjpegServer: MjpegServer
 
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
@@ -46,6 +46,15 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
+
+        // MJPEG-Server ZUERST starten — die WebView wird davon HTML UND Stream laden
+        mjpegServer = MjpegServer(MJPEG_PORT, applicationContext)
+        try {
+            mjpegServer.start()
+            Log.i(TAG, "MJPEG server bereit auf Port $MJPEG_PORT")
+        } catch (e: Exception) {
+            Log.e(TAG, "MJPEG server konnte nicht starten", e)
+        }
 
         webView = findViewById(R.id.webview)
         webView.settings.apply {
@@ -59,14 +68,8 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = WebViewClient()
         webView.webChromeClient = WebChromeClient()
         WebView.setWebContentsDebuggingEnabled(true)
-        webView.loadUrl("file:///android_asset/trefferpoint/index.html")
-
-        try {
-            mjpegServer.start()
-            Log.i(TAG, "MJPEG server bereit auf Port $MJPEG_PORT")
-        } catch (e: Exception) {
-            Log.e(TAG, "MJPEG server konnte nicht starten", e)
-        }
+        // Alles von http://127.0.0.1:8888 → gleiches Origin wie /video → kein CORS-Block
+        webView.loadUrl("http://127.0.0.1:$MJPEG_PORT/")
 
         UVCUtils.init(this)
         initCamera()

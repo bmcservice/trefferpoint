@@ -1,51 +1,83 @@
 package de.bmcservice.trefferpoint
 
+import android.content.Context
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
-import java.io.InputStream
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Kleiner MJPEG-Server auf localhost.
- * Nimmt JPEG-Frames von der UVC-Kamera und serviert sie als
- * multipart/x-mixed-replace Stream an alle verbundenen Clients (WebView).
+ * Lokaler HTTP-Server der BEIDES macht:
+ *   1. TrefferPoint-HTML aus assets/ serviert (→ gleiche Origin wie /video)
+ *   2. JPEG-Frames der UVC-Kamera als multipart/x-mixed-replace Stream
+ *
+ * Vorteil gleiche Origin: keine CORS-Probleme im WebView, kein file://→http:// Block.
  *
  * Endpunkte:
- *   /          → HTML-Viewer zum Debuggen
- *   /video     → MJPEG-Stream (kompatibel mit TrefferPoint's Stream-Modus)
+ *   /                      → index.html (Asset)
+ *   /manifest.json         → manifest.json (Asset)
+ *   /*.html, *.css, *.js   → weitere Assets
+ *   /video, /stream, /mjpeg, /video.mjpg → MJPEG-Stream
+ *   /snapshot, /jpg        → letztes JPEG als Einzelbild
+ *   /status                → JSON mit cam-Status (für Diagnose)
  */
-class MjpegServer(port: Int) : NanoHTTPD("127.0.0.1", port) {
+class MjpegServer(port: Int, private val appContext: Context?) : NanoHTTPD("127.0.0.1", port) {
+
+    constructor(port: Int) : this(port, null)
 
     private val TAG = "MjpegServer"
     private val BOUNDARY = "trefferpointframe"
     private val clients = CopyOnWriteArrayList<PipedOutputStream>()
 
-    /** Letzten Frame merken, damit neue Clients sofort was sehen. */
     @Volatile private var lastFrame: ByteArray? = null
+    @Volatile private var frameCount: Long = 0
 
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
-        Log.i(TAG, "Request: $uri")
+        Log.d(TAG, "Request: $uri")
 
-        return when (uri) {
-            "/video", "/video.mjpg", "/stream", "/mjpeg" -> serveMjpeg()
-            "/snapshot", "/jpg" -> serveSnapshot()
-            else -> serveHtmlViewer()
+        return when {
+            uri == "/video" || uri == "/video.mjpg" || uri == "/stream" || uri == "/mjpeg" -> serveMjpeg()
+            uri == "/snapshot" || uri == "/jpg" -> serveSnapshot()
+            uri == "/status" -> serveStatus()
+            uri == "/" || uri == "/index.html" -> serveAsset("trefferpoint/index.html", "text/html; charset=utf-8")
+            uri == "/manifest.json" -> serveAsset("trefferpoint/manifest.json", "application/json")
+            uri.endsWith(".html") -> serveAsset("trefferpoint${uri}", "text/html; charset=utf-8")
+            uri.endsWith(".css") -> serveAsset("trefferpoint${uri}", "text/css")
+            uri.endsWith(".js") -> serveAsset("trefferpoint${uri}", "application/javascript")
+            uri.endsWith(".png") -> serveAsset("trefferpoint${uri}", "image/png")
+            uri.endsWith(".svg") -> serveAsset("trefferpoint${uri}", "image/svg+xml")
+            else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not found: $uri")
         }
     }
 
-    private fun serveHtmlViewer(): Response {
-        val html = """
-            <!DOCTYPE html><html><head><title>TrefferPoint Stream</title>
-            <style>body{margin:0;background:#080a0d;color:#c8a84b;font-family:monospace}
-            img{display:block;margin:0 auto;max-width:100%}</style></head>
-            <body><h3 style="text-align:center">TrefferPoint UVC Stream</h3>
-            <img src="/video" /></body></html>
-        """.trimIndent()
-        return newFixedLengthResponse(Response.Status.OK, "text/html", html)
+    private fun serveAsset(assetPath: String, mime: String): Response {
+        val ctx = appContext ?: return newFixedLengthResponse(
+            Response.Status.INTERNAL_ERROR, "text/plain", "Context nicht gesetzt"
+        )
+        return try {
+            val stream = ctx.assets.open(assetPath)
+            val bytes = stream.readBytes()
+            stream.close()
+            val resp = newFixedLengthResponse(
+                Response.Status.OK, mime, bytes.inputStream(), bytes.size.toLong()
+            )
+            resp.addHeader("Access-Control-Allow-Origin", "*")
+            resp.addHeader("Cache-Control", "no-cache")
+            resp
+        } catch (e: IOException) {
+            Log.e(TAG, "Asset $assetPath nicht gefunden", e)
+            newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Asset nicht gefunden: $assetPath")
+        }
+    }
+
+    private fun serveStatus(): Response {
+        val json = """{"cameraConnected": ${lastFrame != null}, "frameCount": $frameCount, "clients": ${clients.size}}"""
+        val resp = newFixedLengthResponse(Response.Status.OK, "application/json", json)
+        resp.addHeader("Access-Control-Allow-Origin", "*")
+        return resp
     }
 
     private fun serveSnapshot(): Response {
@@ -64,8 +96,6 @@ class MjpegServer(port: Int) : NanoHTTPD("127.0.0.1", port) {
     }
 
     private fun serveMjpeg(): Response {
-        // Wenn noch KEINE Frames angekommen sind → 503 statt endlos hängen.
-        // TrefferPoint zeigt dann eine saubere Fehlermeldung.
         if (lastFrame == null) {
             Log.w(TAG, "MJPEG angefragt aber keine Kamera-Frames vorhanden → 503")
             val msg = "Keine Kamera verbunden. USB-C Kamera anstecken und App neu öffnen."
@@ -79,7 +109,6 @@ class MjpegServer(port: Int) : NanoHTTPD("127.0.0.1", port) {
         clients.add(pipeOut)
         Log.i(TAG, "MJPEG Client verbunden (${clients.size} gesamt)")
 
-        // Letzten Frame sofort schicken
         lastFrame?.let { writeFrameTo(pipeOut, it) }
 
         val response = newChunkedResponse(
@@ -94,16 +123,13 @@ class MjpegServer(port: Int) : NanoHTTPD("127.0.0.1", port) {
         return response
     }
 
-    /** Neuen JPEG-Frame an alle Clients pushen. */
     fun pushFrame(jpeg: ByteArray) {
         lastFrame = jpeg
+        frameCount++
         val dead = mutableListOf<PipedOutputStream>()
         for (client in clients) {
-            try {
-                writeFrameTo(client, jpeg)
-            } catch (e: IOException) {
-                dead.add(client)
-            }
+            try { writeFrameTo(client, jpeg) }
+            catch (e: IOException) { dead.add(client) }
         }
         if (dead.isNotEmpty()) {
             clients.removeAll(dead)

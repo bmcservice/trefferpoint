@@ -59,11 +59,13 @@ jobs:
             echo "generated=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Sync index.html to Android assets
+      - name: Sync TrefferPoint web assets
         run: |
           mkdir -p android/app/src/main/assets/trefferpoint
           cp index.html android/app/src/main/assets/trefferpoint/index.html
           cp manifest.json android/app/src/main/assets/trefferpoint/manifest.json
+          cp sw.js android/app/src/main/assets/trefferpoint/sw.js
+          cp version.json android/app/src/main/assets/trefferpoint/version.json
 
       - name: Build signed Debug APK
         working-directory: android
