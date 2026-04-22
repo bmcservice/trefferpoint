@@ -552,9 +552,15 @@
 <header>
     <div class="logo">◎ TREFFERPOINT</div>
     <div class="logo-sub" id="logoSub">Digitale Schussauswertung · v…</div>
-    <div class="view-tabs">
-        <button class="view-tab active" id="tabCam">📷 Kamera</button>
-        <button class="view-tab" id="tabTreffer">📊 Treffer</button>
+    <div style="display:flex;align-items:center;gap:6px">
+        <div class="view-tabs">
+            <button class="view-tab active" id="tabCam">📷 Kamera</button>
+            <button class="view-tab" id="tabTreffer">📊 Treffer</button>
+        </div>
+        <button id="btnFullscreen" title="Vollbild" onclick="toggleFullscreen()"
+            style="background:none;border:1px solid var(--border);color:var(--text-dim);
+                   font-size:15px;cursor:pointer;padding:4px 7px;border-radius:6px;
+                   line-height:1;opacity:0.8;min-height:32px">⛶</button>
     </div>
 </header>
 
@@ -750,12 +756,7 @@
         <div class="dot" id="statusDot"></div>
         <span class="status-txt" id="statusTxt">Bereit</span>
     </div>
-    <div style="display:flex;align-items:center;gap:10px">
-        <span class="status-fps" id="statusFps"></span>
-        <button id="btnFullscreen" title="Vollbild" onclick="toggleFullscreen()"
-            style="background:none;border:none;color:var(--text-dim);font-size:16px;
-                   cursor:pointer;padding:2px 4px;line-height:1;opacity:0.7">⛶</button>
-    </div>
+    <span class="status-fps" id="statusFps"></span>
 </div>
 
 <script>
@@ -770,7 +771,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.12';
+const APP_VERSION = '2.0.13';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
