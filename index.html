@@ -656,13 +656,13 @@
             <!-- Stream-URL Modus -->
             <div id="modeStream" style="display:none">
                 <input type="text" id="streamUrl"
-                    placeholder="http://192.168.178.133:8080/video"
+                    placeholder="http://192.168.178.62:8081"
                     style="width:100%;padding:7px 10px;background:var(--surface2);
                            border:1px solid var(--border);color:var(--text);
                            font-family:'Share Tech Mono',monospace;font-size:11px;
                            margin-bottom:7px">
                 <div style="font-size:10px;color:var(--text-dim);margin-bottom:7px;font-family:'Share Tech Mono',monospace">
-                    IP Webcam: :8080/video · DroidCam: :4747/video
+                    USB dual cam: :8081 · IP Webcam: :8080/video · DroidCam: :4747/video
                 </div>
                 <button class="btn btn-primary" id="btnStream">▶ Stream starten</button>
             </div>
@@ -901,6 +901,7 @@ let mediaStream = null;
 let videoEl = document.createElement('video');
 videoEl.autoplay = true; videoEl.playsInline = true; videoEl.muted = true;
 let imgEl = null;          // für MJPEG-Streams (IP Webcam, DroidCam)
+let mjpegAbort = null;     // AbortController für fetch-basierten MJPEG-Decoder
 let inputMode = 'usb';     // 'usb' | 'stream'
 
 let canvas = document.getElementById('canvas');
@@ -2192,19 +2193,95 @@ function resetSession() {
 
 // --- Event Bindings ---
 // --- Stream-URL Start (MJPEG) ---
+// Versucht fetch-basierten MJPEG-Decoder (blob:-URLs -> kein Canvas-Taint -> Erkennung moeglich).
+// Fallback: <img>-Tag (Canvas tainted -> nur Anzeige).
 async function startStream() {
     const url = document.getElementById('streamUrl').value.trim();
     if (!url) { setStatus('Bitte Stream-URL eingeben', 'warn'); return; }
 
     inputMode = 'stream';
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+    if (mjpegAbort) { mjpegAbort.abort(); mjpegAbort = null; }
 
     imgEl = new Image();
-    // KEIN crossOrigin setzen — sonst CORS-Fehler bei Kameras ohne CORS-Header
-    // Canvas wird dadurch "tainted" aber der Stream lädt
-
     canvas.width = 1280; canvas.height = 720;
+    setStatus('Stream wird verbunden...', 'warn');
 
+    // Versuch 1: fetch-basierter MJPEG-Decoder (blob:-URLs, kein Canvas-Taint)
+    mjpegAbort = new AbortController();
+    const ac = mjpegAbort;
+    let fetchOk = false;
+    try {
+        const resp = await fetch(url, { signal: ac.signal, cache: 'no-store' });
+        if (resp.ok && resp.body) {
+            fetchOk = true;
+            const reader = resp.body.getReader();
+            let buf = new Uint8Array(0);
+            let ready = false;
+
+            (async () => {
+                try {
+                    while (!ac.signal.aborted) {
+                        const { done, value } = await reader.read();
+                        if (done || ac.signal.aborted) break;
+
+                        const nb = new Uint8Array(buf.length + value.length);
+                        nb.set(buf); nb.set(value, buf.length);
+                        buf = nb;
+
+                        // Vollstaendige JPEGs extrahieren (FF D8 ... FF D9)
+                        while (buf.length > 3) {
+                            let soi = -1;
+                            for (let i = 0; i < buf.length - 1; i++) {
+                                if (buf[i] === 0xFF && buf[i+1] === 0xD8) { soi = i; break; }
+                            }
+                            if (soi < 0) { buf = new Uint8Array(0); break; }
+
+                            let eoi = -1;
+                            for (let i = soi + 2; i < buf.length - 1; i++) {
+                                if (buf[i] === 0xFF && buf[i+1] === 0xD9) { eoi = i + 2; break; }
+                            }
+                            if (eoi < 0) break;
+
+                            const jpeg = buf.slice(soi, eoi);
+                            buf = buf.slice(eoi);
+
+                            // blob:-URL -> kein Canvas-Taint
+                            const blobUrl = URL.createObjectURL(new Blob([jpeg], { type: 'image/jpeg' }));
+                            const oldSrc = imgEl.src;
+                            if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc);
+                            imgEl.src = blobUrl;
+
+                            if (!ready) {
+                                await new Promise(res => { imgEl.onload = res; });
+                                ready = true;
+                                if (imgEl.naturalWidth > 0) {
+                                    canvas.width  = imgEl.naturalWidth;
+                                    canvas.height = imgEl.naturalHeight;
+                                }
+                                appState = 'READY';
+                                document.getElementById('btnRotateCam').style.display = '';
+                                document.getElementById('btnCalib').disabled = false;
+                                document.getElementById('btnAutoCalib').disabled = false;
+                                document.getElementById('btnRef').disabled = false;
+                                document.getElementById('btnDetect').disabled = false;
+                                document.getElementById('camControlsSection').style.display = '';
+                                setStatus('Stream aktiv \u00b7 ' + url.replace('http://',''), 'ok');
+                                setMsg('Auto-Erkennung \u2192 Button klicken');
+                                if (!rafId) startLoop();
+                            }
+                        }
+                    }
+                } catch(e) {}
+            })();
+        }
+    } catch(e) { fetchOk = false; }
+
+    if (fetchOk) return;
+
+    // Fallback: <img>-Tag (ggf. Canvas tainted)
+    ac.abort();
+    imgEl = new Image();
     imgEl.onload = () => {
         if (imgEl.naturalWidth > 0) {
             canvas.width  = imgEl.naturalWidth;
@@ -2212,34 +2289,27 @@ async function startStream() {
         }
         appState = 'READY';
         document.getElementById('btnRotateCam').style.display = '';
-        setStatus('Stream aktiv · ' + url.replace('http://',''), 'ok');
-        setMsg('Auto-Erkennung → Button klicken');
+        setMsg('Auto-Erkennung \u2192 Button klicken');
         document.getElementById('btnCalib').disabled = false;
         document.getElementById('btnAutoCalib').disabled = false;
         document.getElementById('btnRef').disabled = false;
         document.getElementById('camControlsSection').style.display = '';
-
-        // Tainted-Canvas Test — können wir Pixel lesen?
         try {
             ctx.drawImage(imgEl, 0, 0, 1, 1);
             ctx.getImageData(0, 0, 1, 1);
-            // Erfolgreich → Erkennung funktioniert
             document.getElementById('btnDetect').disabled = false;
+            setStatus('Stream aktiv \u00b7 ' + url.replace('http://',''), 'ok');
         } catch(e) {
-            // Canvas tainted → nur Anzeige, keine Pixelerkennung
-            setStatus('Stream aktiv · nur Anzeige (kein CORS)', 'warn');
-            setMsg('⚠ Treffererkennung nicht verfügbar — WiFi-Streams unterstützen keinen Canvas-Pixelzugriff. Lösung: Handy per USB verbinden → im USB/Gerät Modus starten.');
+            setStatus('Stream aktiv \u00b7 nur Anzeige (kein CORS)', 'warn');
+            setMsg('\u26a0 Treffererkennung nicht verfuegbar \u2014 CORS-Header fehlen.');
             document.getElementById('btnDetect').disabled = true;
         }
-
         if (!rafId) startLoop();
     };
-
     imgEl.onerror = () => {
-        setStatus('Stream nicht erreichbar — URL oder Netz prüfen', 'warn');
+        setStatus('Stream nicht erreichbar \u2014 URL oder Netz pruefen', 'warn');
         imgEl = null;
     };
-
     imgEl.src = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
     setStatus('Stream wird geladen...', 'warn');
     startLoop();
@@ -2256,6 +2326,7 @@ document.getElementById('btnModeUsb').addEventListener('click', () => {
     document.getElementById('btnModeStream').style.color = '';
     document.getElementById('btnModeStream').style.borderColor = '';
     inputMode = 'usb';
+    if (mjpegAbort) { mjpegAbort.abort(); mjpegAbort = null; }
 });
 
 document.getElementById('btnModeStream').addEventListener('click', () => {
