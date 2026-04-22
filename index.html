@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <title>TrefferPoint v2.0.8 — Digitale Schussauswertung</title>
+    <title>TrefferPoint — Digitale Schussauswertung</title>
     <meta name="theme-color" content="#c8a84b">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="manifest" href="./manifest.json">
@@ -550,7 +550,7 @@
 
 <header>
     <div class="logo">◎ TREFFERPOINT</div>
-    <div class="logo-sub">Digitale Schussauswertung · v2.0.8</div>
+    <div class="logo-sub" id="logoSub">Digitale Schussauswertung · v…</div>
     <div class="view-tabs">
         <button class="view-tab active" id="tabCam">📷 Kamera</button>
         <button class="view-tab" id="tabTreffer">📊 Treffer</button>
@@ -2441,6 +2441,9 @@ document.getElementById('sens').addEventListener('input', e => {
 
 // --- Init ---
 setMsg('Kamera verbinden → "Kamera starten" klicken');
+// Angezeigte Version aus APP_VERSION setzen (verhindert Drift zwischen Anzeige und Logik)
+document.title = 'TrefferPoint v' + APP_VERSION + ' — Digitale Schussauswertung';
+document.getElementById('logoSub').textContent = 'Digitale Schussauswertung · v' + APP_VERSION;
 setTimeout(checkForUpdate, 2000);
 // --- Service Worker ---
 if ('serviceWorker' in navigator) {
