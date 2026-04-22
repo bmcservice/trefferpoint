@@ -775,7 +775,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.0.18';
+const APP_VERSION = '2.0.19';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2290,40 +2290,61 @@ async function startStream() {
                 return;
             }
             if (r.status === 503) {
-                const errText = await r.text().catch(() => '');
-                // In Android-APK: Kamera braucht oft 1-3s bis Frames fließen — Retry
                 const isLocal = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
                 if (isLocal) {
-                    setStatus('Warte auf Kamera\u2026', 'warn');
-                    setMsg('Kamera initialisiert — Frames werden gleich kommen\u2026');
-                    // Bis zu 15 Versuche mit je 500ms Abstand = max 7.5s warten
-                    let gotFrames = false;
-                    for (let i = 0; i < 15; i++) {
+                    // In Android-APK: Kamera braucht oft 1-3s bis Frames fließen. Retry mit Progress.
+                    const MAX_TRIES = 20;
+                    let gotFrames = false, lastFrameCount = 0;
+                    for (let i = 0; i < MAX_TRIES; i++) {
                         if (ac.signal.aborted) return;
-                        await new Promise(res => setTimeout(res, 500));
+                        setStatus('Warte auf Kamera\u2026 (' + (i+1) + '/' + MAX_TRIES + ')', 'warn');
+
+                        // /status abfragen um zu sehen ob schon Frames da sind
+                        let statusInfo = '';
                         try {
-                            const rr = await fetch(tryUrl, { signal: ac.signal, cache: 'no-store', headers: fetchHdrs });
+                            const sCtrl = new AbortController();
+                            const sTo = setTimeout(() => sCtrl.abort(), 2000);
+                            const s = await fetch(location.origin + '/status', { signal: sCtrl.signal, cache: 'no-store' });
+                            clearTimeout(sTo);
+                            if (s.ok) {
+                                const sj = await s.json();
+                                lastFrameCount = sj.frameCount || 0;
+                                statusInfo = 'cameraConnected=' + sj.cameraConnected + ', frameCount=' + lastFrameCount;
+                            }
+                        } catch(e) { statusInfo = '(/status timeout)'; }
+                        setMsg('Kamera initialisiert\u2026\n' + statusInfo);
+
+                        await new Promise(res => setTimeout(res, 500));
+
+                        // /video probieren mit 2s Timeout
+                        try {
+                            const vCtrl = new AbortController();
+                            const vTo = setTimeout(() => vCtrl.abort(), 2000);
+                            const rr = await fetch(tryUrl, { signal: vCtrl.signal, cache: 'no-store', headers: fetchHdrs });
+                            clearTimeout(vTo);
                             if (rr.ok && rr.body) {
                                 const ct = (rr.headers.get('Content-Type') || '').toLowerCase();
                                 if (ct.includes('multipart/') || ct.includes('image/')) {
                                     resp = rr; workUrl = tryUrl; gotFrames = true; break;
                                 }
                             }
-                        } catch(e) { if (ac.signal.aborted) return; }
+                        } catch(e) {
+                            if (ac.signal.aborted) return;
+                            /* Timeout oder Netzfehler → weiter zum nächsten Retry */
+                        }
                     }
                     if (!gotFrames) {
-                        // Nach Retries immer noch nix → App-Log zeigen
                         setStatus('\u26a0 Kamera liefert keine Frames', 'warn');
                         try {
                             const logR = await fetch(location.origin + '/log', { cache: 'no-store' });
                             const logTxt = logR.ok ? await logR.text() : '';
-                            setMsg((errText || 'Keine Kamera-Frames nach 7 Sekunden') + '\n\n--- App-Log ---\n' + logTxt);
-                        } catch(e) { setMsg(errText || 'Keine Kamera-Frames'); }
+                            setMsg('Nach ' + MAX_TRIES + ' Versuchen keine Frames.\nletzte Zählung: ' + lastFrameCount + '\n\n--- App-Log ---\n' + logTxt);
+                        } catch(e) { setMsg('Keine Frames — /log nicht erreichbar'); }
                         return;
                     }
-                    // Frames gekommen → weiter zu MJPEG-Decoding (break aus for-loop)
                     break;
                 } else {
+                    const errText = await r.text().catch(() => '');
                     setStatus('\u26a0 Kamera nicht bereit', 'warn');
                     setMsg(errText || 'Server antwortet mit 503 — Kamera nicht verbunden');
                     return;
