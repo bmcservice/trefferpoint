@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'de.bmcservice.trefferpoint'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "de.bmcservice.trefferpoint"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "2.0.13"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+
+    // UVC-Kamera (USB Video Class) via AndroidUSBCamera (AUSBC) by jiangdongguo
+    implementation 'com.github.jiangdongguo.AndroidUSBCamera:libausbc:3.3.3'
+
+    // MJPEG-Server auf localhost für WebView
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
+}

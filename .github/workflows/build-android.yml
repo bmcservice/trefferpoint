@@ -1,0 +1,70 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android/**'
+      - 'index.html'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle 8.5
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
+      - name: Sync index.html to Android assets
+        run: |
+          mkdir -p android/app/src/main/assets/trefferpoint
+          cp index.html android/app/src/main/assets/trefferpoint/index.html
+          cp manifest.json android/app/src/main/assets/trefferpoint/manifest.json
+
+      - name: Build Debug APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Build Release APK (unsigned)
+        working-directory: android
+        run: gradle assembleRelease --no-daemon --stacktrace
+        continue-on-error: true
+
+      - name: Find APK
+        id: find_apk
+        run: |
+          DEBUG_APK=$(find android/app/build/outputs/apk -name "*.apk" | head -1)
+          echo "apk_path=$DEBUG_APK" >> $GITHUB_OUTPUT
+          echo "Found APK: $DEBUG_APK"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrefferPoint-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload Build Reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: |
+            android/app/build/reports/
+            android/build/reports/

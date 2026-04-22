@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- UVC-Kameras: class=14 (Video), subclass=2 (Video Streaming), protocol=0 -->
+    <!-- Fängt praktisch alle USB-Video-Class Kameras -->
+    <usb-device class="239" subclass="2" protocol="1" />
+    <usb-device class="14" />
+</resources>
