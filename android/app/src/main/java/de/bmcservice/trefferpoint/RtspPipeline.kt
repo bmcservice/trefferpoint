@@ -11,6 +11,8 @@ import android.os.HandlerThread
 import android.os.Looper
 import androidx.media3.common.MediaItem
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URL
 import kotlin.concurrent.thread
 import androidx.media3.common.PlaybackException
@@ -56,6 +58,10 @@ class RtspPipeline(
     @Volatile private var currentUrl: String = ""
     @Volatile private var triedUdpFallback = false
 
+    // Viidure/SGK-spezifisch: TCP-Socket auf Port 6035 ("mail_tcp_socket")
+    // muss offen bleiben während RTSP läuft, sonst blockt die Kamera den Stream.
+    @Volatile private var mailSocket: Socket? = null
+
     fun start(url: String) {
         currentUrl = url
         triedUdpFallback = false
@@ -66,9 +72,42 @@ class RtspPipeline(
             val host = hostMatch?.groupValues?.get(1)
             if (host != null && host.startsWith("192.168.")) {
                 wakeupCameraHttp(host)
+                openMailSocket(host, 6035)
             }
             // Danach eigentlichen Stream starten (auf Main-Thread weil ExoPlayer dies verlangt)
             mainHandler.post { startInternal(url, useTcp = true) }
+        }
+    }
+
+    /**
+     * Öffnet einen dauerhaften TCP-Socket auf Port 6035 ("mail_tcp_socket"-Port).
+     * Ohne diesen Kanal interpretiert die Viidure-Firmware keinen Client als aktiv
+     * und liefert keine RTP-Frames. Wir lesen die eingehenden JSON-Nachrichten
+     * (Heartbeats wie battery/sd-Status) und loggen sie — Daten nur zum Offenhalten.
+     */
+    private fun openMailSocket(host: String, port: Int) {
+        try { mailSocket?.close() } catch (_: Exception) {}
+        mailSocket = null
+        try {
+            val s = Socket()
+            s.connect(InetSocketAddress(host, port), 2000)
+            s.soTimeout = 15000
+            mailSocket = s
+            AppLog.i(TAG, "Mail-Socket offen auf $host:$port")
+            thread(start = true, name = "mail-socket-rx") {
+                try {
+                    val buf = ByteArray(4096)
+                    while (s.isConnected && !s.isClosed) {
+                        val n = try { s.getInputStream().read(buf) } catch (_: Exception) { -1 }
+                        if (n <= 0) break
+                        val msg = String(buf, 0, n, Charsets.UTF_8).trim().take(180)
+                        AppLog.i(TAG, "Mail-RX: $msg")
+                    }
+                } catch (_: Exception) {}
+                AppLog.i(TAG, "Mail-Socket Reader beendet")
+            }
+        } catch (e: Exception) {
+            AppLog.w(TAG, "Mail-Socket öffnen fehlgeschlagen: ${e.javaClass.simpleName} ${e.message ?: ""}")
         }
     }
 
@@ -231,6 +270,8 @@ class RtspPipeline(
         triedUdpFallback = false
         currentUrl = ""
         stopInternal()
+        try { mailSocket?.close() } catch (_: Exception) {}
+        mailSocket = null
     }
 
     private fun stopInternal() {
