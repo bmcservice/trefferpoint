@@ -99,10 +99,14 @@ object CameraScanner {
         }
         onProgress("Ports gefunden auf: ${ipPortMap.keys.joinToString()} — probe Protokolle…")
 
-        // Schritt 2: Protokoll-Probes — SEQUENZIELL pro IP (viele OEM-Kameras verkraften
-        // keine parallelen TCP-Verbindungen und zerbrechen dann komplett).
+        // Schritt 2: Protokoll-Probes — SEQUENZIELL pro IP.
         val results = JSONArray()
         for ((ip, ports) in ipPortMap) {
+            // Wake-Up-Sequenz (aus Viidure-Crash-Log abgeleitet): viele OEM-Kameras
+            // liefern nur nach HTTP-Setup-Handshake auch auf RTSP.
+            if (ports.contains(80) && (ports.contains(554) || ports.contains(8554))) {
+                wakeupCameraHttp(ip)
+            }
             for (port in ports) {
                 val hits = when (port) {
                     554, 8554 -> probeRtsp(ip, port)
@@ -116,6 +120,37 @@ object CameraScanner {
         AppLog.i(TAG, "Scan fertig — ${results.length()} Stream(s) gefunden")
         onProgress("${results.length()} Stream(s) gefunden")
         results.toString()
+    }
+
+    /**
+     * HTTP-Wake-Up-Sequenz für Viidure/SGK-Kameras. Ohne diesen Handshake ignorieren
+     * sie RTSP-Anfragen. Abgeleitet aus dem Crash-Log der Original-Viidure-App.
+     */
+    private fun wakeupCameraHttp(host: String) {
+        val endpoints = listOf(
+            "http://$host:80/app/getdeviceattr",
+            "http://$host:80/app/capability",
+            "http://$host:80/app/getproductinfo",
+            "http://$host:80/app/getmediainfo"
+        )
+        for (ep in endpoints) {
+            try {
+                val conn = URL(ep).openConnection() as HttpURLConnection
+                conn.connectTimeout = 1500
+                conn.readTimeout = 1500
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("User-Agent", "Lavf58.76.100")
+                val code = conn.responseCode
+                val body = if (code in 200..299) {
+                    conn.inputStream.bufferedReader().use { it.readText() }.take(150)
+                } else ""
+                conn.disconnect()
+                AppLog.i(TAG, "WakeUp $ep → $code ${if (body.isNotBlank()) "| $body" else ""}")
+            } catch (e: Exception) {
+                AppLog.i(TAG, "WakeUp $ep → ${e.javaClass.simpleName}")
+            }
+            try { Thread.sleep(50) } catch (_: Exception) {}
+        }
     }
 
     /** Prüft ob ein Port via TCP-Connect offen ist. */
