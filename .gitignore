@@ -7,3 +7,6 @@ trefferpoint_v*.html
 # Claude Code / tooling
 .claude/
 apk_download/
+
+# Viidure-Dump (nur lokale Analyse, nicht ins Repo — ~300MB)
+Viidure/
