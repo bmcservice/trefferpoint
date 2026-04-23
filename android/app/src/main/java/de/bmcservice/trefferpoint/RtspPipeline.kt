@@ -96,9 +96,13 @@ class RtspPipeline(
         val exo = ExoPlayer.Builder(context).build()
         player = exo
 
+        // User-Agent imitiert FFmpeg libavformat — genau das, was die Viidure-App selbst
+        // schickt (via PCAPdroid reverse-engineered). Viele OEM-Kameras liefern nur bei
+        // bekanntem User-Agent einen Stream aus ("security through obscurity").
         val rtspSource = RtspMediaSource.Factory()
             .setForceUseRtpTcp(useTcp)
             .setTimeoutMs(8000)
+            .setUserAgent("Lavf57.83.100")
             .createMediaSource(MediaItem.fromUri(url))
 
         exo.setMediaSource(rtspSource)
