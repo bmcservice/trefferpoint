@@ -8,5 +8,6 @@ trefferpoint_v*.html
 .claude/
 apk_download/
 
-# Viidure-Dump (nur lokale Analyse, nicht ins Repo — ~300MB)
+# Viidure-APK-Dump (nur lokale Analyse, nicht ins Repo)
 Viidure/
+com.vidure.app/
