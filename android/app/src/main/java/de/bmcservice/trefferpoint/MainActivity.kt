@@ -8,8 +8,11 @@ import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import java.net.Inet4Address
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import android.util.Base64
@@ -344,9 +347,35 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun isAndroidApp(): Boolean = true
 
-        /** Liefert die Gateway-IP des aktuell verbundenen WLANs als String, oder "" wenn keine. */
+        /**
+         * Liefert die Gateway-IP des aktuell verbundenen WLAN-Netzes.
+         * Nutzt ConnectivityManager + LinkProperties — weil WifiManager.getDhcpInfo() deprecated ist
+         * und oft stale Daten vom vorherigen Netz liefert.
+         */
         @JavascriptInterface
         fun getWifiGateway(): String {
+            try {
+                val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                // Alle aktiven Netzwerke durchgehen und das WIFI-Transport-Netz finden
+                for (network in cm.allNetworks) {
+                    val caps = cm.getNetworkCapabilities(network) ?: continue
+                    if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
+                    val lp = cm.getLinkProperties(network) ?: continue
+                    for (route in lp.routes) {
+                        if (route.isDefaultRoute) {
+                            val gw = route.gateway
+                            if (gw is Inet4Address) {
+                                val ip = gw.hostAddress ?: continue
+                                AppLog.i(TAG, "getWifiGateway via ConnectivityManager: $ip")
+                                return ip
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                AppLog.e(TAG, "getWifiGateway via ConnectivityManager fehlgeschlagen", e)
+            }
+            // Fallback: der alte (unzuverlässige) Weg via DhcpInfo — besser als gar nichts
             return try {
                 val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
                 @Suppress("DEPRECATION")
@@ -354,7 +383,7 @@ class MainActivity : AppCompatActivity() {
                 if (gw == 0) "" else
                     "${gw and 0xFF}.${(gw shr 8) and 0xFF}.${(gw shr 16) and 0xFF}.${(gw shr 24) and 0xFF}"
             } catch (e: Exception) {
-                AppLog.e(TAG, "getWifiGateway fehlgeschlagen", e)
+                AppLog.e(TAG, "getWifiGateway Fallback fehlgeschlagen", e)
                 ""
             }
         }

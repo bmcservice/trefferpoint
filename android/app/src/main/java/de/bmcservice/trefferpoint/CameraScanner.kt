@@ -44,39 +44,75 @@ object CameraScanner {
         "/"
     )
 
+    /** Gängige Standard-Gateway-IPs von Kamera-Hotspots (wenn Gateway-Detection spinnt). */
+    private val CAMERA_SUBNET_GUESSES = listOf(
+        "192.168.0.1",   // Viidure & viele generische OEMs
+        "192.168.1.1",
+        "192.168.4.1",   // ESP32-basiert
+        "192.168.8.1",
+        "192.168.25.1",  // Huawei/ZTE Dongles
+        "10.0.0.1",
+        "172.16.0.1"
+    )
+
     /**
      * Führt den kompletten Scan durch. Muss im IO-Kontext laufen.
+     * Scannt sowohl die übergebene IP (wenn vorhanden) als auch gängige Kamera-Gateway-IPs
+     * parallel — um Android-DHCP-Info-Quirks (veraltete Gateway-IP vom vorherigen Netz)
+     * zu umgehen.
+     *
      * Callback erhält JSON als String: [{"url":"...","port":554,"proto":"rtsp","detail":"..."}]
      */
     suspend fun scan(host: String, onProgress: (String) -> Unit): String = withContext(Dispatchers.IO) {
-        onProgress("Scanne $host ...")
-        AppLog.i(TAG, "Scan gestartet für $host")
-
-        // Parallel Port-Scan
-        val openPorts = coroutineScope {
-            TCP_PORTS.map { port ->
-                async { if (isPortOpen(host, port, 800)) port else null }
-            }.awaitAll().filterNotNull()
+        // Ziel-IPs zusammenstellen: die übergebene + Standard-Kamera-Subnetze.
+        // Das löst die "Gateway liefert Home-Router-IP"-Falle.
+        val targets = buildList {
+            if (host.isNotBlank()) add(host)
+            CAMERA_SUBNET_GUESSES.forEach { if (it != host) add(it) }
         }
-        AppLog.i(TAG, "Offene Ports auf $host: ${openPorts.joinToString()}")
-        onProgress("Offene Ports: ${openPorts.joinToString()}")
+        AppLog.i(TAG, "Scan gestartet für ${targets.size} IP(s): ${targets.joinToString()}")
+        onProgress("Scanne ${targets.size} IPs parallel…")
 
-        if (openPorts.isEmpty()) {
+        // Schritt 1: Für alle IPs parallel Port-Probes
+        val ipPortMap = mutableMapOf<String, List<Int>>()
+        coroutineScope {
+            targets.map { ip ->
+                async {
+                    val open = coroutineScope {
+                        TCP_PORTS.map { port ->
+                            async { if (isPortOpen(ip, port, 500)) port else null }
+                        }.awaitAll().filterNotNull()
+                    }
+                    ip to open
+                }
+            }.awaitAll().forEach { (ip, open) ->
+                if (open.isNotEmpty()) {
+                    ipPortMap[ip] = open
+                    AppLog.i(TAG, "Offene Ports auf $ip: ${open.joinToString()}")
+                }
+            }
+        }
+
+        if (ipPortMap.isEmpty()) {
+            onProgress("Keine offenen Ports gefunden.")
             return@withContext JSONArray().toString()
         }
+        onProgress("Ports gefunden auf: ${ipPortMap.keys.joinToString()} — probe Protokolle…")
 
-        // Protokoll-Probes
+        // Schritt 2: Protokoll-Probes für jede IP+Port-Kombination
         val results = JSONArray()
         coroutineScope {
-            openPorts.map { port ->
-                async {
-                    when (port) {
-                        554, 8554 -> probeRtsp(host, port)
-                        80, 81, 8080, 8081, 8888 -> probeHttpMjpeg(host, port)
-                        else -> null
+            ipPortMap.flatMap { (ip, ports) ->
+                ports.map { port ->
+                    async {
+                        when (port) {
+                            554, 8554 -> probeRtsp(ip, port)
+                            80, 81, 8080, 8081, 8888 -> probeHttpMjpeg(ip, port)
+                            else -> emptyList()
+                        }
                     }
                 }
-            }.awaitAll().filterNotNull().forEach { it.forEach { hit -> results.put(hit) } }
+            }.awaitAll().forEach { hits -> hits.forEach { hit -> results.put(hit) } }
         }
 
         AppLog.i(TAG, "Scan fertig — ${results.length()} Stream(s) gefunden")
