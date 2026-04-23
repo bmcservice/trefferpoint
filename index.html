@@ -823,7 +823,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.2';
+const APP_VERSION = '2.3.3';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2771,13 +2771,14 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         let html = '';
         if (progress) html += '<div style="color:var(--accent)">' + progress + '</div>';
         if (hits.length > 0) {
-            html += '<div style="margin-top:4px">Gefunden:</div>';
+            html += '<div style="margin-top:4px">Gefunden — antippen zum Starten:</div>';
             hits.forEach((h, i) => {
-                html += '<div style="margin-top:3px;padding:4px;background:var(--surface2);border:1px solid var(--border);cursor:pointer" '
-                      + 'onclick="tpPickScan(' + i + ')">'
-                      + '<div style="color:var(--accent)">' + (h.proto || '?').toUpperCase() + ' · Port ' + (h.port || '?') + '</div>'
-                      + '<div style="word-break:break-all">' + (h.url || '') + '</div>'
-                      + '<div style="color:var(--text-dim);font-size:9px">' + (h.detail || '') + '</div>'
+                html += '<div class="tp-scan-hit" data-scan-idx="' + i + '" '
+                      + 'style="margin-top:6px;padding:8px;background:var(--surface2);border:1px solid var(--accent);'
+                      +        'cursor:pointer;min-height:44px;border-radius:4px">'
+                      + '<div style="color:var(--accent);font-weight:bold">▶ ' + (h.proto || '?').toUpperCase() + ' · Port ' + (h.port || '?') + '</div>'
+                      + '<div style="word-break:break-all;margin-top:2px">' + (h.url || '') + '</div>'
+                      + '<div style="color:var(--text-dim);font-size:9px;margin-top:2px">' + (h.detail || '') + '</div>'
                       + '</div>';
             });
             window._tpScanHits = hits;
@@ -2789,7 +2790,7 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     };
 
     // Auf Ergebnis-Zeile geklickt → URL ins passende Feld übernehmen + Stream starten
-    window.tpPickScan = function(idx) {
+    function tpPickScan(idx) {
         const hit = (window._tpScanHits || [])[idx];
         if (!hit) return;
         if ((hit.proto || '') === 'rtsp') {
@@ -2797,13 +2798,28 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
             localStorage.setItem('tp_rtsp_url', hit.url);
             document.getElementById('btnRtsp').click();
         } else {
-            // MJPEG/JPEG → normale Stream-URL-Pipeline
             document.getElementById('streamUrl').value = hit.url;
             localStorage.setItem('tp_stream_url', hit.url);
             document.getElementById('btnModeStream').click();
             setTimeout(() => document.getElementById('btnStream').click(), 100);
         }
-    };
+    }
+
+    // Event-Delegation: Klick irgendwo in scanResults → passendes Ergebnis aktivieren
+    // (robuster als inline onclick im WebView-Kontext)
+    scanResults.addEventListener('click', (e) => {
+        const card = e.target.closest('.tp-scan-hit');
+        if (!card) return;
+        const idx = parseInt(card.getAttribute('data-scan-idx'), 10);
+        if (!isNaN(idx)) tpPickScan(idx);
+    });
+    // Touch auch explizit — manche WebViews feuern click nur verzögert
+    scanResults.addEventListener('touchstart', (e) => {
+        const card = e.target.closest('.tp-scan-hit');
+        if (!card) return;
+        const idx = parseInt(card.getAttribute('data-scan-idx'), 10);
+        if (!isNaN(idx)) { e.preventDefault(); tpPickScan(idx); }
+    }, { passive: false });
 
     scanBtn.addEventListener('click', () => {
         scanBtn.disabled = true;
