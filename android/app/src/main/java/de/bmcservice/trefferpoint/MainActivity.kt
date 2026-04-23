@@ -10,6 +10,8 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import java.util.Locale
 import android.util.Base64
 import android.view.Surface
 import android.view.WindowManager
@@ -26,6 +28,11 @@ import com.serenegiant.usb.UVCCamera
 import com.serenegiant.usb.UVCParam
 import com.serenegiant.utils.UVCUtils
 import java.nio.ByteBuffer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * TrefferPoint Android App — Architektur via JavaScriptInterface (kein HTTP-Server mehr).
@@ -59,6 +66,12 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var activeMode: String = "none"  // "usb" | "rtsp" | "none"
 
     private var rtspPipeline: RtspPipeline? = null
+
+    private var tts: TextToSpeech? = null
+    @Volatile private var ttsReady = false
+
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var scanJob: Job? = null
 
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,6 +120,24 @@ class MainActivity : AppCompatActivity() {
         UVCUtils.init(this)
         initCamera()
         handleUsbIntent(intent)
+        initTts()
+    }
+
+    private fun initTts() {
+        tts = TextToSpeech(applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                val lang = tts?.setLanguage(Locale.GERMAN)
+                if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    AppLog.w(TAG, "TTS: Deutsch nicht verfügbar — Fallback auf Default")
+                    tts?.setLanguage(Locale.getDefault())
+                }
+                tts?.setSpeechRate(1.1f)
+                ttsReady = true
+                AppLog.i(TAG, "TTS initialisiert")
+            } else {
+                AppLog.w(TAG, "TTS init fehlgeschlagen (status=$status)")
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -291,6 +322,7 @@ class MainActivity : AppCompatActivity() {
         try { dummySurfaceTex?.release() } catch (_: Exception) {}
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
         try { cameraHelper?.release() } catch (_: Exception) {}
+        try { tts?.stop(); tts?.shutdown() } catch (_: Exception) {}
     }
 
     // ── JavaScript-Bridge ────────────────────────────────────────────────────
@@ -360,6 +392,72 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     AppLog.e(TAG, "startRtsp Exception", e)
                 }
+            }
+        }
+
+        /**
+         * Scannt eine IP (oder Auto=Gateway) nach Kamera-Streams.
+         * Ergebnis wird asynchron via `window.tpOnScanResult(json, done)` an JS zurückgegeben.
+         * - `json` ist String mit JSONArray: [{url, port, proto, detail}, ...]
+         * - `done=true` signalisiert Scan-Ende. Während des Laufs kommen mehrere Progress-Calls.
+         */
+        @JavascriptInterface
+        fun scanForCameras(host: String) {
+            scanJob?.cancel()
+            val target = host.ifBlank { getWifiGateway() }
+            if (target.isBlank()) {
+                runOnUiThread {
+                    webView.evaluateJavascript(
+                        "window.tpOnScanResult && window.tpOnScanResult('[]', true, 'Keine IP — WLAN nicht verbunden?')",
+                        null
+                    )
+                }
+                return
+            }
+            scanJob = ioScope.launch {
+                try {
+                    val json = CameraScanner.scan(target) { progress ->
+                        val escaped = progress.replace("'", "\\'")
+                        runOnUiThread {
+                            webView.evaluateJavascript(
+                                "window.tpOnScanResult && window.tpOnScanResult('[]', false, '$escaped')",
+                                null
+                            )
+                        }
+                    }
+                    val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
+                    runOnUiThread {
+                        webView.evaluateJavascript(
+                            "window.tpOnScanResult && window.tpOnScanResult('$escaped', true, 'Fertig')",
+                            null
+                        )
+                    }
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "Scan Exception", e)
+                    val msg = (e.message ?: "Fehler").replace("'", "\\'")
+                    runOnUiThread {
+                        webView.evaluateJavascript(
+                            "window.tpOnScanResult && window.tpOnScanResult('[]', true, '$msg')",
+                            null
+                        )
+                    }
+                }
+            }
+        }
+
+        /** Native TTS — verlässlicher als Web-Speech im WebView. */
+        @JavascriptInterface
+        fun speak(text: String) {
+            if (text.isBlank()) return
+            val engine = tts
+            if (engine == null || !ttsReady) {
+                AppLog.w(TAG, "TTS nicht bereit — '$text' übersprungen")
+                return
+            }
+            try {
+                engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tp-${System.currentTimeMillis()}")
+            } catch (e: Exception) {
+                AppLog.e(TAG, "TTS speak Exception", e)
             }
         }
 
