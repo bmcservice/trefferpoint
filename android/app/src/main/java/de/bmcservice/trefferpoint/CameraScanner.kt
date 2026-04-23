@@ -147,7 +147,8 @@ object CameraScanner {
                 try {
                     socket.connect(InetSocketAddress(host, port), 1500)
                     socket.soTimeout = 1500
-                    val req = "OPTIONS $url RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: TrefferPoint-Scanner\r\n\r\n"
+                    // User-Agent imitiert Viidure/FFmpeg — manche Firmwares blockieren sonst
+                    val req = "OPTIONS $url RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: Lavf57.83.100\r\n\r\n"
                     socket.getOutputStream().write(req.toByteArray())
                     socket.getOutputStream().flush()
 
@@ -156,15 +157,22 @@ object CameraScanner {
                     if (n > 0) {
                         val resp = String(buf, 0, n, Charsets.US_ASCII)
                         val firstLine = resp.lineSequence().firstOrNull() ?: ""
-                        if (firstLine.contains("200")) {
+                        // Tolerant: jede gültige RTSP-Response werten, nicht nur exakt "200".
+                        // 200=OK, 401=Auth nötig, 405=OPTIONS nicht implementiert aber RTSP da.
+                        // Nur 404 ablehnen (klar falscher Pfad).
+                        if (firstLine.startsWith("RTSP/") && !firstLine.contains("404")) {
                             hits.add(JSONObject().apply {
                                 put("url", url)
                                 put("port", port)
                                 put("proto", "rtsp")
                                 put("detail", firstLine.trim())
                             })
-                            AppLog.i(TAG, "RTSP 200 auf $url")
+                            AppLog.i(TAG, "RTSP Antwort auf $url: ${firstLine.trim()}")
+                        } else {
+                            AppLog.i(TAG, "RTSP Nicht-Match auf $url: ${firstLine.trim()}")
                         }
+                    } else {
+                        AppLog.i(TAG, "RTSP keine Antwort auf $url")
                     }
                 } finally {
                     try { socket.close() } catch (_: Exception) {}
@@ -187,7 +195,7 @@ object CameraScanner {
                 conn.connectTimeout = 1200
                 conn.readTimeout = 1200
                 conn.requestMethod = "GET"
-                conn.setRequestProperty("User-Agent", "TrefferPoint-Scanner")
+                conn.setRequestProperty("User-Agent", "Lavf57.83.100")
                 val code = conn.responseCode
                 val ct = (conn.contentType ?: "").lowercase()
                 conn.inputStream?.close()
