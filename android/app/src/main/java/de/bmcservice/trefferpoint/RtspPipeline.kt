@@ -10,6 +10,9 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import androidx.media3.common.MediaItem
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
@@ -56,7 +59,50 @@ class RtspPipeline(
     fun start(url: String) {
         currentUrl = url
         triedUdpFallback = false
-        startInternal(url, useTcp = true)
+        // Viidure-SGK-Kameras wollen eine HTTP-Wake-Up-Sequenz bevor sie Stream liefern.
+        // Wir machen das im Hintergrund, damit der Start nicht blockiert.
+        thread(start = true, name = "rtsp-wakeup") {
+            val hostMatch = Regex("rtsp://([^:/]+)").find(url)
+            val host = hostMatch?.groupValues?.get(1)
+            if (host != null && host.startsWith("192.168.")) {
+                wakeupCameraHttp(host)
+            }
+            // Danach eigentlichen Stream starten (auf Main-Thread weil ExoPlayer dies verlangt)
+            mainHandler.post { startInternal(url, useTcp = true) }
+        }
+    }
+
+    /**
+     * Viidure/SGK-HTTP-Setup-Sequenz — aus dem Crash-Log der Original-Viidure-App abgeleitet.
+     * Ohne diesen Handshake liefert die Kamera zwar OPTIONS-Antwort auf RTSP, aber keine
+     * Video-Pakete (silent drop).
+     */
+    private fun wakeupCameraHttp(host: String) {
+        AppLog.i(TAG, "HTTP Wake-Up auf $host…")
+        val endpoints = listOf(
+            "http://$host:80/app/getdeviceattr",
+            "http://$host:80/app/capability",
+            "http://$host:80/app/getproductinfo",
+            "http://$host:80/app/getmediainfo"  // liefert RTSP-URL-Bestätigung
+        )
+        for (ep in endpoints) {
+            try {
+                val conn = URL(ep).openConnection() as HttpURLConnection
+                conn.connectTimeout = 2000
+                conn.readTimeout = 2000
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("User-Agent", "Lavf58.76.100")
+                val code = conn.responseCode
+                val body = if (code in 200..299) {
+                    conn.inputStream.bufferedReader().use { it.readText() }.take(200)
+                } else ""
+                conn.disconnect()
+                AppLog.i(TAG, "  $ep → $code ${if (body.isNotBlank()) "| $body" else ""}")
+            } catch (e: Exception) {
+                AppLog.i(TAG, "  $ep → ${e.javaClass.simpleName}: ${e.message?.take(40) ?: ""}")
+            }
+        }
+        AppLog.i(TAG, "HTTP Wake-Up abgeschlossen")
     }
 
     private fun startInternal(url: String, useTcp: Boolean) {
