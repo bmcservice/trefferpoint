@@ -247,6 +247,8 @@ class MainActivity : AppCompatActivity() {
                 override fun onCameraClose(device: UsbDevice?) {
                     AppLog.i(TAG, "→ onCameraClose")
                     cameraOpened = false
+                    autoModesDisabled = false
+                    uvcFrameCount = 0L
                 }
 
                 override fun onDeviceClose(device: UsbDevice?) {
@@ -268,6 +270,9 @@ class MainActivity : AppCompatActivity() {
 
     // ── Frame → JS-Bridge ────────────────────────────────────────────────────
 
+    @Volatile private var autoModesDisabled = false
+    @Volatile private var uvcFrameCount = 0L
+
     private val frameCallback = object : IFrameCallback {
         private var logged = false
         override fun onFrame(frame: ByteBuffer) {
@@ -280,15 +285,51 @@ class MainActivity : AppCompatActivity() {
                 frame.get(bytes)
                 val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, w, h)
                 frameCount++
+                uvcFrameCount++
                 lastFrameSize = jpeg.size
                 if (!logged) {
                     AppLog.i(TAG, "Erster Frame: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
                     logged = true
                 }
+                // Nach ~2 Sekunden (60 Frames @ 30fps) Auto-Exposure fixieren.
+                // Sonst pendelt die Kamera bei Spektiv-Szenen (dunkler Spiegel + heller Hintergrund)
+                // ununterbrochen zwischen zu hell und zu dunkel → starkes Flackern.
+                if (!autoModesDisabled && uvcFrameCount == 60L) {
+                    autoModesDisabled = true
+                    freezeCameraAutoModes(helper)
+                }
                 pushFrameToWebView(jpeg)
             } catch (e: Exception) {
                 AppLog.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
             }
+        }
+    }
+
+    private fun freezeCameraAutoModes(helper: ICameraHelper) {
+        val uvc = helper.uvcControl
+        if (uvc == null) {
+            AppLog.w(TAG, "UVC-Control nicht verfügbar — Kamera bleibt im Auto-Modus")
+            return
+        }
+        // Auto-Exposure → Manual Mode (1): friert aktuelle Belichtungszeit ein
+        try {
+            uvc.setAutoExposureMode(1)
+            AppLog.i(TAG, "UVC: Auto-Exposure auf MANUAL gesetzt (Flacker-Fix)")
+        } catch (e: Exception) {
+            // Wenn Manual nicht unterstützt, probier Shutter-Priority (4) = feste Shutter-Zeit
+            try {
+                uvc.setAutoExposureMode(4)
+                AppLog.i(TAG, "UVC: Auto-Exposure auf SHUTTER_PRIORITY gesetzt")
+            } catch (e2: Exception) {
+                AppLog.w(TAG, "UVC: setAutoExposureMode nicht unterstützt (${e.message})")
+            }
+        }
+        // Auto-White-Balance aus — verhindert Farb-Pendeln
+        try {
+            uvc.isAutoWhiteBalanceEnabled = false
+            AppLog.i(TAG, "UVC: Auto-White-Balance aus")
+        } catch (e: Exception) {
+            AppLog.w(TAG, "UVC: setAutoWhiteBalance nicht unterstützt")
         }
     }
 
