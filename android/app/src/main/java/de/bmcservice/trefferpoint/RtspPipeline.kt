@@ -8,6 +8,7 @@ import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -43,19 +44,29 @@ class RtspPipeline(
     private var imageReader: ImageReader? = null
     private var imageThread: HandlerThread? = null
     private var imageHandler: Handler? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile private var running = false
     @Volatile var frameCount: Long = 0; private set
     @Volatile var lastError: String? = null; private set
 
+    @Volatile private var currentUrl: String = ""
+    @Volatile private var triedUdpFallback = false
+
     fun start(url: String) {
-        if (running) stop()
+        currentUrl = url
+        triedUdpFallback = false
+        startInternal(url, useTcp = true)
+    }
+
+    private fun startInternal(url: String, useTcp: Boolean) {
+        if (running) stopInternal()
         running = true
         lastError = null
         frameCount = 0
 
-        AppLog.i(TAG, "start: $url")
-        onStatus("RTSP: Verbinde zu $url")
+        AppLog.i(TAG, "start: $url (RTP über ${if (useTcp) "TCP" else "UDP"})")
+        onStatus("RTSP: Verbinde (${if (useTcp) "TCP" else "UDP"}) zu $url")
 
         imageThread = HandlerThread("RtspImageReader").apply { start() }
         imageHandler = Handler(imageThread!!.looper)
@@ -86,7 +97,7 @@ class RtspPipeline(
         player = exo
 
         val rtspSource = RtspMediaSource.Factory()
-            .setForceUseRtpTcp(true)  // TCP für bessere Verlässlichkeit (viele Okularkameras)
+            .setForceUseRtpTcp(useTcp)
             .setTimeoutMs(8000)
             .createMediaSource(MediaItem.fromUri(url))
 
@@ -123,6 +134,22 @@ class RtspPipeline(
         })
 
         exo.prepare()
+
+        // Watchdog: Wenn nach 6s immer noch keine Frames angekommen sind, und wir sind auf TCP,
+        // automatischer Fallback auf UDP. Viele OEM-Kameras machen TCP-Interleaving kaputt.
+        mainHandler.postDelayed({
+            if (!running) return@postDelayed
+            if (frameCount > 0) return@postDelayed
+            if (!useTcp || triedUdpFallback) {
+                AppLog.w(TAG, "Keine Frames nach 6s — beide Transport-Arten probiert")
+                onStatus("RTSP: keine Video-Pakete empfangen (Kamera neu starten?)")
+                return@postDelayed
+            }
+            AppLog.i(TAG, "Keine Frames nach 6s mit TCP — Fallback auf UDP")
+            onStatus("RTSP: TCP-Pakete kommen nicht — versuche UDP")
+            triedUdpFallback = true
+            startInternal(currentUrl, useTcp = false)
+        }, 6000)
     }
 
     private fun recreateImageReader(w: Int, h: Int) {
@@ -151,6 +178,12 @@ class RtspPipeline(
     }
 
     fun stop() {
+        triedUdpFallback = false
+        currentUrl = ""
+        stopInternal()
+    }
+
+    private fun stopInternal() {
         if (!running) return
         running = false
         AppLog.i(TAG, "stop")
