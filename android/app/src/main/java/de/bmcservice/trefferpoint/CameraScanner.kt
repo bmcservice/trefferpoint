@@ -148,7 +148,7 @@ object CameraScanner {
                     socket.connect(InetSocketAddress(host, port), 1500)
                     socket.soTimeout = 1500
                     // User-Agent imitiert Viidure/FFmpeg — manche Firmwares blockieren sonst
-                    val req = "OPTIONS $url RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: Lavf57.83.100\r\n\r\n"
+                    val req = "OPTIONS $url RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: Lavf58.76.100\r\n\r\n"
                     socket.getOutputStream().write(req.toByteArray())
                     socket.getOutputStream().flush()
 
@@ -195,7 +195,7 @@ object CameraScanner {
                 conn.connectTimeout = 1200
                 conn.readTimeout = 1200
                 conn.requestMethod = "GET"
-                conn.setRequestProperty("User-Agent", "Lavf57.83.100")
+                conn.setRequestProperty("User-Agent", "Lavf58.76.100")
                 val code = conn.responseCode
                 val ct = (conn.contentType ?: "").lowercase()
                 conn.inputStream?.close()
