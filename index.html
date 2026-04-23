@@ -823,7 +823,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.11';
+const APP_VERSION = '2.3.12';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1929,6 +1929,71 @@ function drawOverlay() {
 }
 
 // --- Auto-Kalibrierung mit Ellipsen-Fitting ---
+// Hilfsfunktion: Kreis durch 3 Punkte (für RANSAC)
+function _circleFrom3Points(p1, p2, p3) {
+    const ax = p1.x, ay = p1.y, bx = p2.x, by = p2.y, cx3 = p3.x, cy3 = p3.y;
+    const d = 2 * (ax * (by - cy3) + bx * (cy3 - ay) + cx3 * (ay - by));
+    if (Math.abs(d) < 0.001) return null;
+    const a2 = ax*ax + ay*ay, b2 = bx*bx + by*by, c2 = cx3*cx3 + cy3*cy3;
+    const ux = (a2 * (by - cy3) + b2 * (cy3 - ay) + c2 * (ay - by)) / d;
+    const uy = (a2 * (cx3 - bx) + b2 * (ax - cx3) + c2 * (bx - ax)) / d;
+    return { cx: ux, cy: uy, r: Math.hypot(ax - ux, ay - uy) };
+}
+
+// RANSAC-Kreisfit: findet den besten Kreis durch möglichst viele Kantenpunkte
+function _ransacCircle(points, W, H, iterations, inlierTolerance) {
+    if (points.length < 10) return null;
+    const maxR = Math.hypot(W, H) * 0.6;  // Kreis kann maximal Bilddiagonale x 0.6 sein
+    const minR = Math.min(W, H) * 0.05;   // sinnvolles Minimum
+    let best = null, bestInliers = 0;
+    for (let i = 0; i < iterations; i++) {
+        const p1 = points[(Math.random() * points.length) | 0];
+        const p2 = points[(Math.random() * points.length) | 0];
+        const p3 = points[(Math.random() * points.length) | 0];
+        if (p1 === p2 || p2 === p3 || p1 === p3) continue;
+        const c = _circleFrom3Points(p1, p2, p3);
+        if (!c || c.r < minR || c.r > maxR) continue;
+        if (c.cx < 0 || c.cx > W || c.cy < 0 || c.cy > H) continue;
+        let inliers = 0;
+        for (const p of points) {
+            const d = Math.abs(Math.hypot(p.x - c.cx, p.y - c.cy) - c.r);
+            if (d < inlierTolerance) inliers++;
+        }
+        if (inliers > bestInliers) {
+            bestInliers = inliers;
+            best = { ...c, inliers };
+        }
+    }
+    return best;
+}
+
+// Least-Squares Verfeinerung: nach RANSAC exaktere Kreis-Parameter
+// (Kåsa-Methode — schnell und ausreichend genau für die Inliers)
+function _refineCircle(inlierPoints) {
+    const n = inlierPoints.length;
+    if (n < 3) return null;
+    let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxxx = 0, syyy = 0, sxyy = 0, syxx = 0;
+    for (const p of inlierPoints) {
+        const x = p.x, y = p.y;
+        sx += x; sy += y;
+        sxx += x*x; syy += y*y; sxy += x*y;
+        sxxx += x*x*x; syyy += y*y*y;
+        sxyy += x*y*y; syxx += y*x*x;
+    }
+    const A = n*sxx - sx*sx;
+    const B = n*sxy - sx*sy;
+    const C = n*syy - sy*sy;
+    const D = 0.5 * (n*sxyy - sx*syy + n*sxxx - sx*sxx);
+    const E = 0.5 * (n*syxx - sy*sxx + n*syyy - sy*syy);
+    const det = A*C - B*B;
+    if (Math.abs(det) < 1e-9) return null;
+    const cx = (D*C - B*E) / det;
+    const cy = (A*E - B*D) / det;
+    let r2sum = 0;
+    for (const p of inlierPoints) r2sum += (p.x - cx)*(p.x - cx) + (p.y - cy)*(p.y - cy);
+    return { cx, cy, r: Math.sqrt(r2sum / n) };
+}
+
 function autoCalib() {
     setMsg('🔍 Scheibe wird erkannt...');
     setStatus('Auto-Kalibrierung läuft', 'warn');
@@ -1938,7 +2003,7 @@ function autoCalib() {
             const W = canvas.width, H = canvas.height;
             const data = ctx.getImageData(0, 0, W, H).data;
 
-            // Adaptive Schwelle
+            // Adaptive Schwelle: schwarz/weiß-Mitte
             let brightnessSum = 0, sampleCount = 0;
             for (let i = 0; i < data.length; i += 4 * 4) {
                 brightnessSum += (data[i] + data[i+1] + data[i+2]) / 3;
@@ -1947,130 +2012,79 @@ function autoCalib() {
             const avgBrightness = brightnessSum / sampleCount;
             const threshold = avgBrightness * 0.5;
 
-            // Dunkle Pixel sammeln
-            let darkPixels = [];
-            for (let y = 0; y < H; y += 2) {
-                for (let x = 0; x < W; x += 2) {
+            // ─── Rand-Extraktion ───
+            // Statt "alle dunklen Pixel" sammeln wir nur die Übergangs-Pixel (schwarz/weiß-Rand).
+            // Ein Pixel ist Randkandidat wenn er dunkel ist UND ein naher Nachbar hell.
+            // Das eliminiert Flächen-Artefakte (Vignettierung, Schatten, Schmutzflecken innen).
+            const step = 2;          // Sampling-Auflösung
+            const probe = 4;         // Nachbar-Distanz für Gradient-Prüfung
+            const edgePixels = [];
+            for (let y = probe; y < H - probe; y += step) {
+                for (let x = probe; x < W - probe; x += step) {
                     const i = (y * W + x) * 4;
                     const b = (data[i] + data[i+1] + data[i+2]) / 3;
-                    if (b < threshold) darkPixels.push({ x, y });
+                    if (b >= threshold) continue;
+                    // Vier Kardinalrichtungen prüfen — mindestens eine muss hell sein
+                    const iR = i + probe * 4;
+                    const iL = i - probe * 4;
+                    const iD = i + W * probe * 4;
+                    const iU = i - W * probe * 4;
+                    const bR = (data[iR] + data[iR+1] + data[iR+2]) / 3;
+                    const bL = (data[iL] + data[iL+1] + data[iL+2]) / 3;
+                    const bD = (data[iD] + data[iD+1] + data[iD+2]) / 3;
+                    const bU = (data[iU] + data[iU+1] + data[iU+2]) / 3;
+                    if (bR >= threshold || bL >= threshold || bD >= threshold || bU >= threshold) {
+                        edgePixels.push({ x, y });
+                    }
                 }
             }
 
-            if (darkPixels.length < 100) {
-                setMsg('⚠ Keine Scheibe erkannt — Kontrast prüfen oder manuell kalibrieren');
+            if (edgePixels.length < 50) {
+                setMsg('⚠ Zu wenige Rand-Pixel — Kontrast prüfen oder manuell kalibrieren');
                 setStatus('Auto-Kalibrierung fehlgeschlagen', 'warn');
                 calibFailFlashUntil = Date.now() + 2500;
                 return;
             }
 
-            // --- Schritt A: Grober Schwerpunkt über alle dunklen Pixel ---
-            let sumX = 0, sumY = 0;
-            darkPixels.forEach(p => { sumX += p.x; sumY += p.y; });
-            let cx = sumX / darkPixels.length;
-            let cy = sumY / darkPixels.length;
-
-            // --- Schritt B: Cluster-Filter — Median-Distanz zum Zentrum + nur Pixel im 2× Median-Radius ---
-            // Das eliminiert zB. Vignettierung an den Bildrändern.
-            const distances = darkPixels.map(p => Math.hypot(p.x - cx, p.y - cy));
-            const sortedDists = [...distances].sort((x, y) => x - y);
-            const medianDist = sortedDists[Math.floor(sortedDists.length / 2)];
-            const clusterRadius = medianDist * 2.0;
-            darkPixels = darkPixels.filter(p => Math.hypot(p.x - cx, p.y - cy) < clusterRadius);
-            if (darkPixels.length < 100) {
-                setMsg('⚠ Nach Cluster-Filter zu wenige Pixel — manuell kalibrieren');
+            // ─── RANSAC-Kreisfit ───
+            // Wir fitten einen Kreis (nicht Ellipse): frontal aufgenommene DSB-Scheiben sind symmetrisch.
+            // RANSAC wirft Outlier (Artefakte, Fremdkanten) automatisch raus.
+            const ransac = _ransacCircle(edgePixels, W, H, 200, 5);
+            if (!ransac) {
+                setMsg('⚠ Kein passender Kreis gefunden — manuell kalibrieren');
                 setStatus('Auto-Kalibrierung fehlgeschlagen', 'warn');
                 calibFailFlashUntil = Date.now() + 2500;
                 return;
             }
 
-            // --- Schritt C: Zentrum nachjustieren auf gefilterten Cluster ---
-            sumX = 0; sumY = 0;
-            darkPixels.forEach(p => { sumX += p.x; sumY += p.y; });
-            cx = sumX / darkPixels.length;
-            cy = sumY / darkPixels.length;
+            // Inlier sammeln für Verfeinerung
+            const inliers = edgePixels.filter(p =>
+                Math.abs(Math.hypot(p.x - ransac.cx, p.y - ransac.cy) - ransac.r) < 5);
 
-            // --- Schritt D: Outlier-Rejection — Pixel >2σ Abstand verwerfen ---
-            const d2 = darkPixels.map(p => (p.x - cx)*(p.x - cx) + (p.y - cy)*(p.y - cy));
-            const meanD2 = d2.reduce((s, v) => s + v, 0) / d2.length;
-            const stdD = Math.sqrt(meanD2);
-            const sigmaCutoff = stdD * 2.0;
-            darkPixels = darkPixels.filter(p => Math.hypot(p.x - cx, p.y - cy) <= sigmaCutoff);
+            // Least-Squares-Verfeinerung für präziseres Zentrum und Radius
+            const refined = _refineCircle(inliers) || ransac;
 
-            // --- Schritt E: Kovarianzmatrix für Ellipsen-Fitting (PCA) auf bereinigtem Set ---
-            let Cxx = 0, Cyy = 0, Cxy = 0;
-            darkPixels.forEach(p => {
-                const dx = p.x - cx, dy = p.y - cy;
-                Cxx += dx * dx;
-                Cyy += dy * dy;
-                Cxy += dx * dy;
-            });
-            const n = darkPixels.length;
-            Cxx /= n; Cyy /= n; Cxy /= n;
+            const cx = refined.cx;
+            const cy = refined.cy;
+            // Wir nutzen einen Kreis → a=b=r, angle=0 (keine Ellipsen-Rotation nötig)
+            let a = refined.r;
+            let b = refined.r;
+            const angle = 0;
+            const rawRatio = 1;
+            const circleForced = false;
 
-            // Eigenwerte → Halbachsen
-            const trace  = Cxx + Cyy;
-            const det    = Cxx * Cyy - Cxy * Cxy;
-            const disc2  = Math.sqrt(Math.max(0, (trace/2)*(trace/2) - det));
-            const lambda1 = trace/2 + disc2;  // größter Eigenwert
-            const lambda2 = trace/2 - disc2;  // kleinster Eigenwert
-
-            // Rotationswinkel der Hauptachse
-            const angle = Math.atan2(2 * Cxy, Cxx - Cyy) / 2;
-
-            // Halbachsen aus Eigenwerten skalieren
-            // Skalierungsfaktor: 92. Perzentil der normierten Abstände
-            const sqrtL1 = Math.sqrt(Math.max(lambda1, 1));
-            const sqrtL2 = Math.sqrt(Math.max(lambda2, 1));
-            const cosA = Math.cos(-angle), sinA = Math.sin(-angle);
-
-            let normDists = darkPixels.map(p => {
-                const dx = p.x - cx, dy = p.y - cy;
-                const rx = cosA * dx - sinA * dy;
-                const ry = sinA * dx + cosA * dy;
-                return Math.sqrt((rx/sqrtL1)*(rx/sqrtL1) + (ry/sqrtL2)*(ry/sqrtL2));
-            });
-            normDists.sort((a, b) => a - b);
-            const scaleFactor = normDists[Math.floor(normDists.length * 0.92)];
-
-            // Rohe Halbachsen aus PCA
-            let a = sqrtL1 * scaleFactor;  // Halbachse entlang Hauptachse
-            let b = sqrtL2 * scaleFactor;  // Halbachse quer
-
-            // Circle-Fallback: wenn a/b > 1.3, unrealistisch für ein frontal aufgenommenes Spektiv.
-            // Dann lieber als Kreis mit geometrischem Mittel der Halbachsen behandeln.
-            const rawRatio = a / Math.max(b, 1);
-            let circleForced = false;
-            if (rawRatio > 1.3) {
-                const r = Math.sqrt(a * b);
-                a = r; b = r;
-                circleForced = true;
-            }
-
-            // pxPerMm über mittleren Radius (geometrisches Mittel der Halbachsen)
+            // pxPerMm aus Radius und Norm-Maß
             const disc = DISCS[document.getElementById('discSel').value];
-            const meanR = Math.sqrt(a * b);
-            const pxPerMm = meanR / disc.outer_mm;
-
-            // Verhältnis b/a — wie oval ist die Scheibe?
-            const ellipticity = (1 - b/a);
-            const ellipticityPct = (ellipticity * 100).toFixed(1);
+            const pxPerMm = refined.r / disc.outer_mm;
 
             calib = { cx, cy, a, b, angle, pxPerMm };
 
             appState = 'CALIBRATED';
-            let ellipseInfo;
-            if (circleForced) {
-                ellipseInfo = ' · Kreis (stark verzerrte Messung → Kreis-Fallback)';
-            } else if (ellipticity > 0.08) {
-                ellipseInfo = ` · Oval ${ellipticityPct}%`;
-            } else {
-                ellipseInfo = ' · kreisförmig';
-            }
-            setMsg('✓ Auto-kalibriert' + ellipseInfo + ' — Referenzframe setzen, dann Erkennung starten');
+            const qualityInfo = ` · ${inliers.length}/${edgePixels.length} Rand-Pixel`;
+            setMsg('✓ Auto-kalibriert (Kreisfit)' + qualityInfo + ' — Referenzframe setzen, dann Erkennung starten');
             setStatus('Auto-kalibriert', 'ok');
             document.getElementById('calibStatus').textContent =
-                `✓ Auto · ${disc.name} · ${pxPerMm.toFixed(1)} px/mm${ellipseInfo}`;
+                `✓ Auto · ${disc.name} · r=${refined.r.toFixed(0)}px · ${pxPerMm.toFixed(2)} px/mm${qualityInfo}`;
             document.getElementById('btnDetect').disabled = false;
 
         } catch(e) {
