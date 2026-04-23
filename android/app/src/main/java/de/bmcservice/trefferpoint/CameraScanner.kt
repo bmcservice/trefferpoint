@@ -86,13 +86,14 @@ object CameraScanner {
 
     /** Prüft ob ein Port via TCP-Connect offen ist. */
     private fun isPortOpen(host: String, port: Int, timeoutMs: Int): Boolean {
+        val s = Socket()
         return try {
-            Socket().use { s ->
-                s.connect(InetSocketAddress(host, port), timeoutMs)
-                true
-            }
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+            true
         } catch (_: Exception) {
             false
+        } finally {
+            try { s.close() } catch (_: Exception) {}
         }
     }
 
@@ -103,17 +104,19 @@ object CameraScanner {
     private fun probeRtsp(host: String, port: Int): List<JSONObject> {
         val hits = mutableListOf<JSONObject>()
         for (path in RTSP_PATHS) {
+            if (hits.isNotEmpty()) break  // Nach erstem Treffer aufhören
             val url = "rtsp://$host:$port$path"
             try {
-                Socket().use { s ->
-                    s.connect(InetSocketAddress(host, port), 1500)
-                    s.soTimeout = 1500
+                val socket = Socket()
+                try {
+                    socket.connect(InetSocketAddress(host, port), 1500)
+                    socket.soTimeout = 1500
                     val req = "OPTIONS $url RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: TrefferPoint-Scanner\r\n\r\n"
-                    s.getOutputStream().write(req.toByteArray())
-                    s.getOutputStream().flush()
+                    socket.getOutputStream().write(req.toByteArray())
+                    socket.getOutputStream().flush()
 
                     val buf = ByteArray(4096)
-                    val n = s.getInputStream().read(buf)
+                    val n = socket.getInputStream().read(buf)
                     if (n > 0) {
                         val resp = String(buf, 0, n, Charsets.US_ASCII)
                         val firstLine = resp.lineSequence().firstOrNull() ?: ""
@@ -125,10 +128,10 @@ object CameraScanner {
                                 put("detail", firstLine.trim())
                             })
                             AppLog.i(TAG, "RTSP 200 auf $url")
-                            // Nach erstem Treffer aufhören — sonst kriegen wir Duplikate
-                            break
                         }
                     }
+                } finally {
+                    try { socket.close() } catch (_: Exception) {}
                 }
             } catch (_: Exception) { /* Pfad nicht verfügbar — weiter */ }
         }
@@ -137,7 +140,7 @@ object CameraScanner {
 
     /**
      * HTTP-Probe: GET auf Kandidaten-Pfade.
-     * Erfolg: 200 mit Content-Type multipart/* oder image/*.
+     * Erfolg: Status 200 mit Content-Type beginnend mit "multipart/" oder "image/".
      */
     private fun probeHttpMjpeg(host: String, port: Int): List<JSONObject> {
         val hits = mutableListOf<JSONObject>()
