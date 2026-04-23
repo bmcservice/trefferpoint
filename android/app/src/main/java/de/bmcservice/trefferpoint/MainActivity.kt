@@ -326,10 +326,10 @@ class MainActivity : AppCompatActivity() {
         }
         // Auto-White-Balance aus — verhindert Farb-Pendeln
         try {
-            uvc.isAutoWhiteBalanceEnabled = false
+            uvc.setWhiteBalanceAuto(false)
             AppLog.i(TAG, "UVC: Auto-White-Balance aus")
         } catch (e: Exception) {
-            AppLog.w(TAG, "UVC: setAutoWhiteBalance nicht unterstützt")
+            AppLog.w(TAG, "UVC: setWhiteBalanceAuto nicht unterstützt: ${e.message}")
         }
     }
 
