@@ -515,6 +515,50 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /**
+         * Setzt Belichtungszeit manuell fest (in ms).
+         * Indoor-Kunstlicht: 10/20 ms (Vielfaches von 10ms bei 100Hz-Halbwellen) vermeidet
+         * Flicker/Banding. UVC-Unit = 100µs → ms×10.
+         */
+        @JavascriptInterface
+        fun setExposureTime(millis: Int) {
+            val helper = cameraHelper ?: return
+            runOnUiThread {
+                try {
+                    val uvc = helper.uvcControl
+                    if (uvc == null) {
+                        AppLog.w(TAG, "setExposureTime: UVC-Control nicht verfügbar")
+                        return@runOnUiThread
+                    }
+                    // Auto-Auto-Lock (Flacker-Fix) übersteuern
+                    autoModesDisabled = true
+                    try { uvc.setAutoExposureMode(1) } catch (_: Exception) {}  // MANUAL
+                    try { uvc.setExposureTimeAbsolute(millis * 10) } catch (e: Exception) {
+                        AppLog.w(TAG, "setExposureTimeAbsolute fehlgeschlagen: ${e.message}")
+                    }
+                    AppLog.i(TAG, "UVC: Exposure manuell auf ${millis} ms (${millis * 10} UVC-Units)")
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "setExposureTime Exception", e)
+                }
+            }
+        }
+
+        /** Belichtung zurück auf Auto-Modus. */
+        @JavascriptInterface
+        fun setExposureAuto() {
+            val helper = cameraHelper ?: return
+            runOnUiThread {
+                try {
+                    val uvc = helper.uvcControl ?: return@runOnUiThread
+                    try { uvc.setAutoExposureMode(2) } catch (_: Exception) {}  // AUTO
+                    autoModesDisabled = false  // Re-Enable Auto-Lock-Logik
+                    AppLog.i(TAG, "UVC: Exposure zurück auf AUTO")
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "setExposureAuto Exception", e)
+                }
+            }
+        }
+
         /** Native TTS — verlässlicher als Web-Speech im WebView. */
         @JavascriptInterface
         fun speak(text: String) {

@@ -728,11 +728,14 @@
             </div>
 
             <select id="discSel" style="margin-top:7px">
+                <option value="kk25" selected>Sportpistole 25m · KK .22</option>
+                <option value="gk25">Pistole 25m · 9mm (GK)</option>
+                <!-- Weitere Disziplinen (LG/LP/KK50) wieder aktivieren
+                     sobald kk25/gk25 stabil funktionieren:
                 <option value="lg10">Luftgewehr 10m (LG)</option>
                 <option value="lp10">Luftpistole 10m (LP)</option>
-                <option value="kk25" selected>Sportpistole 25m (KK)</option>
-                <option value="gk25">Pistole 25m (9mm GK)</option>
                 <option value="kk50">KK-Gewehr 50m liegend</option>
+                -->
             </select>
         </div>
 
@@ -760,6 +763,21 @@
             </div>
             <div id="camControls"></div>
             <div style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--text-dim);margin-top:6px" id="camCapsInfo"></div>
+
+            <!-- Shutter-Time-Presets (nur Android-APK: UVC-Zugriff via tpBridge) -->
+            <div id="shutterPresets" style="display:none;margin-top:8px">
+                <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;font-family:'Share Tech Mono',monospace">
+                    Belichtung (Indoor 50Hz → 10/20 ms verhindert Flicker)
+                </div>
+                <div style="display:flex;gap:5px">
+                    <button class="btn shutter-btn" data-ms="10" style="flex:1;font-size:11px;padding:5px">10 ms</button>
+                    <button class="btn shutter-btn" data-ms="20" style="flex:1;font-size:11px;padding:5px">20 ms</button>
+                    <button class="btn shutter-btn" data-ms="33" style="flex:1;font-size:11px;padding:5px">33 ms</button>
+                    <button class="btn" id="btnExposureAuto" style="flex:1;font-size:11px;padding:5px">Auto</button>
+                </div>
+                <div id="shutterStatus" style="font-size:10px;color:var(--text-dim);margin-top:3px;font-family:'Share Tech Mono',monospace"></div>
+            </div>
+
             <button class="btn btn-primary" id="btnAutoOpt" style="margin-top:8px">⚙ Auto-Optimieren</button>
             <div id="autoOptLog" style="font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--green);margin-top:5px;line-height:1.6;display:none"></div>
         </div>
@@ -823,7 +841,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.12';
+const APP_VERSION = '2.3.13';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -930,8 +948,10 @@ const DISCS = {
     },
     kk25: {
         id: 'kk25',
-        name: 'Sportpistole 25m (KK)',
-        kaliber: 5.6,
+        name: 'Sportpistole 25m · KK .22',
+        kaliberLabel: '.22',
+        kaliber: 5.6,  // mm (intern genutzt)
+        sensDefault: 32,  // .22: kleineres Loch → empfindlicher detektieren
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -943,8 +963,10 @@ const DISCS = {
     },
     gk25: {
         id: 'gk25',
-        name: 'Pistole 25m (9mm GK)',
+        name: 'Pistole 25m · 9mm (GK)',
+        kaliberLabel: '9mm',
         kaliber: 9.0,
+        sensDefault: 24,  // 9mm: größeres Loch, stärkeres Signal → weniger empfindlich reicht
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -1698,6 +1720,8 @@ function confirmPointer() {
             a: outerPx, b: outerPx, angle: 0,
             pxPerMm: outerPx / disc.outer_mm
         };
+        // Persistent speichern
+        try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(calib)); } catch(e) {}
         appState = 'CALIBRATED';
         manualPointer = null;
         showDpad(false);
@@ -2078,6 +2102,9 @@ function autoCalib() {
             const pxPerMm = refined.r / disc.outer_mm;
 
             calib = { cx, cy, a, b, angle, pxPerMm };
+
+            // Persistent speichern — Spektiv steht fest, selbe Kalibrierung beim nächsten App-Start
+            try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(calib)); } catch(e) {}
 
             appState = 'CALIBRATED';
             const qualityInfo = ` · ${inliers.length}/${edgePixels.length} Rand-Pixel`;
@@ -2881,11 +2908,43 @@ document.getElementById('streamUrl').addEventListener('keydown', e => {
     if (e.key === 'Enter') startStream();
 });
 
+function applyDiscPresets() {
+    const disc = DISCS[document.getElementById('discSel').value];
+    if (!disc) return;
+    // Sensitivity kaliber-abhängig setzen
+    if (typeof disc.sensDefault === 'number') {
+        const sensEl = document.getElementById('sens');
+        sensEl.value = disc.sensDefault;
+        document.getElementById('sensVal').textContent = disc.sensDefault;
+    }
+    // Gespeicherte Kalibrierung laden (Spektiv steht fest → einmal kalibriert, immer wieder nutzbar)
+    const saved = localStorage.getItem('tp_calib_' + disc.id);
+    if (saved) {
+        try {
+            calib = JSON.parse(saved);
+            appState = 'CALIBRATED';
+            document.getElementById('btnDetect').disabled = false;
+            document.getElementById('calibStatus').textContent =
+                `✓ Gespeichert · ${disc.name} · r=${(calib.a||0).toFixed(0)}px · ${(calib.pxPerMm||0).toFixed(2)} px/mm`;
+            setStatus('Kalibrierung geladen', 'ok');
+            setMsg('Gespeicherte Kalibrierung geladen — Referenzframe setzen oder neu kalibrieren');
+        } catch(e) {
+            calib = null;
+            document.getElementById('calibStatus').textContent = 'Nicht kalibriert';
+        }
+    } else {
+        calib = null;
+        document.getElementById('calibStatus').textContent = 'Nicht kalibriert';
+    }
+}
+
 document.getElementById('discSel').addEventListener('change', () => {
     updatePreview();
-    calib = null; // Kalibrierung zurücksetzen bei Disziplinwechsel
-    document.getElementById('calibStatus').textContent = 'Nicht kalibriert';
+    applyDiscPresets();
 });
+
+// Sensitivity-Preset beim ersten Laden anwenden
+applyDiscPresets();
 
 // Vorschau beim Start zeichnen
 updatePreview();
@@ -2923,6 +2982,40 @@ document.getElementById('btnDetect').addEventListener('click', () => {
 });
 
 document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
+
+// Shutter-Time-Presets nur in Android-APK einblenden + Event-Handler anbinden
+(function() {
+    const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
+        window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
+    if (!inAndroidApp) return;
+    const presetsBox = document.getElementById('shutterPresets');
+    const statusEl = document.getElementById('shutterStatus');
+    presetsBox.style.display = '';
+    document.querySelectorAll('.shutter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const ms = parseInt(btn.dataset.ms);
+            try {
+                window.tpBridge.setExposureTime(ms);
+                statusEl.textContent = '✓ Belichtung fest auf ' + ms + ' ms';
+                // Visuelle Aktiv-Markierung
+                document.querySelectorAll('.shutter-btn').forEach(b => b.style.background = '');
+                btn.style.background = 'var(--accent)';
+                btn.style.color = '#000';
+            } catch (e) {
+                statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
+            }
+        });
+    });
+    document.getElementById('btnExposureAuto').addEventListener('click', () => {
+        try {
+            window.tpBridge.setExposureAuto();
+            statusEl.textContent = '↻ Belichtung auf Auto zurückgesetzt';
+            document.querySelectorAll('.shutter-btn').forEach(b => { b.style.background = ''; b.style.color = ''; });
+        } catch (e) {
+            statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
+        }
+    });
+})();
 
 document.getElementById('btnRotateCam').addEventListener('click', () => {
     camRotation = (camRotation + 90) % 360;
