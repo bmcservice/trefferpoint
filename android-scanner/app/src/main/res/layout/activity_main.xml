@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#080a0d">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="TrefferPoint Netz-Scanner"
+        android:textColor="#c8a84b"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace" />
+
+    <TextView
+        android:id="@+id/tvGateway"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Gateway wird ermittelt…"
+        android:textColor="#aaaaaa"
+        android:fontFamily="monospace" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+        <EditText
+            android:id="@+id/etIp"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:hint="IP (leer = Gateway)"
+            android:textColorHint="#666"
+            android:textColor="#ffffff"
+            android:fontFamily="monospace"
+            android:inputType="text"
+            android:importantForAutofill="no" />
+        <Button
+            android:id="@+id/btnScan"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Scan" />
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp"
+        android:background="#0f1218"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/tvOutput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#c8a84b"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:typeface="monospace"
+            android:textIsSelectable="true"
+            android:text="Bereit." />
+    </ScrollView>
+
+</LinearLayout>

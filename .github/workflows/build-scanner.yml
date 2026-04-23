@@ -1,0 +1,63 @@
+name: Build Scanner APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android-scanner/**'
+      - '.github/workflows/build-scanner.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle 8.5
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
+      - name: Keystore bereitstellen
+        run: |
+          KEYSTORE=android-scanner/app/scanner.keystore
+          if [ ! -f "$KEYSTORE" ]; then
+            keytool -genkey -v \
+              -keystore "$KEYSTORE" \
+              -alias scanner \
+              -keyalg RSA -keysize 2048 -validity 36500 \
+              -storepass scanner123 -keypass scanner123 \
+              -dname "CN=TPScanner, O=bmcservice, C=DE"
+            git config user.email "actions@github.com"
+            git config user.name "GitHub Actions"
+            git add "$KEYSTORE"
+            git commit -m "build: festen Scanner-Keystore erzeugt"
+            git push
+          fi
+
+      - name: Build Debug APK
+        working-directory: android-scanner
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TPScanner-debug-apk
+          path: android-scanner/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
