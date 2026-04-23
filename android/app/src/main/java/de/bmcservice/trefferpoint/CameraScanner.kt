@@ -99,20 +99,18 @@ object CameraScanner {
         }
         onProgress("Ports gefunden auf: ${ipPortMap.keys.joinToString()} — probe Protokolle…")
 
-        // Schritt 2: Protokoll-Probes für jede IP+Port-Kombination
+        // Schritt 2: Protokoll-Probes — SEQUENZIELL pro IP (viele OEM-Kameras verkraften
+        // keine parallelen TCP-Verbindungen und zerbrechen dann komplett).
         val results = JSONArray()
-        coroutineScope {
-            ipPortMap.flatMap { (ip, ports) ->
-                ports.map { port ->
-                    async {
-                        when (port) {
-                            554, 8554 -> probeRtsp(ip, port)
-                            80, 81, 8080, 8081, 8888 -> probeHttpMjpeg(ip, port)
-                            else -> emptyList()
-                        }
-                    }
+        for ((ip, ports) in ipPortMap) {
+            for (port in ports) {
+                val hits = when (port) {
+                    554, 8554 -> probeRtsp(ip, port)
+                    80, 81, 8080, 8081, 8888 -> probeHttpMjpeg(ip, port)
+                    else -> emptyList()
                 }
-            }.awaitAll().forEach { hits -> hits.forEach { hit -> results.put(hit) } }
+                hits.forEach { results.put(it) }
+            }
         }
 
         AppLog.i(TAG, "Scan fertig — ${results.length()} Stream(s) gefunden")
@@ -140,44 +138,43 @@ object CameraScanner {
     private fun probeRtsp(host: String, port: Int): List<JSONObject> {
         val hits = mutableListOf<JSONObject>()
         for (path in RTSP_PATHS) {
-            if (hits.isNotEmpty()) break  // Nach erstem Treffer aufhören
+            if (hits.isNotEmpty()) break
             val url = "rtsp://$host:$port$path"
+            val socket = Socket()
             try {
-                val socket = Socket()
-                try {
-                    socket.connect(InetSocketAddress(host, port), 1500)
-                    socket.soTimeout = 1500
-                    // User-Agent imitiert Viidure/FFmpeg — manche Firmwares blockieren sonst
-                    val req = "OPTIONS $url RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: Lavf58.76.100\r\n\r\n"
-                    socket.getOutputStream().write(req.toByteArray())
-                    socket.getOutputStream().flush()
+                socket.connect(InetSocketAddress(host, port), 2000)
+                socket.soTimeout = 2000
+                // User-Agent Lavf58.76.100 — per TPScanner-Test als akzeptiert bestätigt
+                val req = "OPTIONS $url RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: Lavf58.76.100\r\n\r\n"
+                socket.getOutputStream().write(req.toByteArray())
+                socket.getOutputStream().flush()
 
-                    val buf = ByteArray(4096)
-                    val n = socket.getInputStream().read(buf)
-                    if (n > 0) {
-                        val resp = String(buf, 0, n, Charsets.US_ASCII)
-                        val firstLine = resp.lineSequence().firstOrNull() ?: ""
-                        // Tolerant: jede gültige RTSP-Response werten, nicht nur exakt "200".
-                        // 200=OK, 401=Auth nötig, 405=OPTIONS nicht implementiert aber RTSP da.
-                        // Nur 404 ablehnen (klar falscher Pfad).
-                        if (firstLine.startsWith("RTSP/") && !firstLine.contains("404")) {
-                            hits.add(JSONObject().apply {
-                                put("url", url)
-                                put("port", port)
-                                put("proto", "rtsp")
-                                put("detail", firstLine.trim())
-                            })
-                            AppLog.i(TAG, "RTSP Antwort auf $url: ${firstLine.trim()}")
-                        } else {
-                            AppLog.i(TAG, "RTSP Nicht-Match auf $url: ${firstLine.trim()}")
-                        }
+                val buf = ByteArray(4096)
+                val n = socket.getInputStream().read(buf)
+                if (n > 0) {
+                    val resp = String(buf, 0, n, Charsets.US_ASCII)
+                    val firstLine = resp.lineSequence().firstOrNull()?.trim() ?: ""
+                    if (firstLine.startsWith("RTSP/") && !firstLine.contains("404")) {
+                        hits.add(JSONObject().apply {
+                            put("url", url)
+                            put("port", port)
+                            put("proto", "rtsp")
+                            put("detail", firstLine)
+                        })
+                        AppLog.i(TAG, "✓ RTSP $path → $firstLine")
                     } else {
-                        AppLog.i(TAG, "RTSP keine Antwort auf $url")
+                        AppLog.i(TAG, "✗ RTSP $path → $firstLine")
                     }
-                } finally {
-                    try { socket.close() } catch (_: Exception) {}
+                } else {
+                    AppLog.i(TAG, "✗ RTSP $path → keine Daten (n=$n)")
                 }
-            } catch (_: Exception) { /* Pfad nicht verfügbar — weiter */ }
+            } catch (e: Exception) {
+                AppLog.i(TAG, "✗ RTSP $path → ${e.javaClass.simpleName}: ${e.message?.take(40) ?: ""}")
+            } finally {
+                try { socket.close() } catch (_: Exception) {}
+            }
+            // Kleine Pause zwischen Probes — manche Kameras brauchen sonst Zeit
+            try { Thread.sleep(100) } catch (_: Exception) {}
         }
         return hits
     }

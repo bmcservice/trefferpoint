@@ -1,0 +1,183 @@
+{
+  "name": "FreeSky",
+  "code": "dashboardFreeSky",
+  "index": 3,
+  "cover": "cover.jpg",
+  "ver": "*",
+  "tpl_tag": "new",
+  "ui": [
+    {
+      "widget_type": 1,
+      "name": "GradientMask",
+      "frame": "0#648#1920#432",
+      "bg_img": "bottom_gradient_mask.png"
+    },
+    {
+      "bz_type": "userinfo",
+      "widget_type": 12,
+      "sub_type": 1,
+      "icon": "icon/tpl_user_info.png",
+      "name": "UserInfo",
+      "frame": "0#12#1920#60",
+      "avatar_size": 70,
+      "nickname_text_size": 48,
+      "nickname_text_color": "#FFFFFF",
+      "sign_text_size": 48,
+      "sign_text_color": "#FFFFFF"
+    },
+    {
+      "bz_type": "ar",
+      "widget_type": 6,
+      "name": "AR",
+      "icon": "icon/tpl_ar.png",
+      "frame": "0#0#1920#1080",
+      "color_arrow": "00CCCC",
+      "color_trapezoid": "00FFCC"
+    },
+    {
+      "bz_type": "ar",
+      "widget_type": 7,
+      "name": "AR",
+      "icon": "icon/tpl_ar.png",
+      "frame": "0#0#1920#1080",
+      "bg_fill_type": 1,
+      "distance_unit_ft": "distance_unit_ft.png",
+      "distance_unit_m": "distance_unit_m.png",
+      "distance_bg_nor": "distance_background_1.png",
+      "distance_bg_warn": "distance_background_2.png",
+      "distance_bg_err": "distance_background_3.png",
+      "people_mode_bg": "red_people_mode.png",
+      "plate_bg_nor": "blue_bubble.png",
+      "plate_bg_warn": "yellow_bubble.png",
+      "plate_bg_err": "red_bubble.png",
+      "plate_img_bg_nor": "blue_bubble_frame.png",
+      "plate_img_bg_warn": "yellow_bubble_frame.png",
+      "plate_img_bg_err": "red_bubble_frame.png"
+    },
+    {
+      "bz_type": "speed",
+      "widget_type": 16,
+      "name": "Speed",
+      "icon": "icon/tpl_cur_speed.png",
+      "frame": "5#740#420#300",
+      "top_img": "speed_top_icon.png",
+      "sub_type": 1,
+      "text_a_size": 38,
+      "text_b_size": 16,
+      "text_a_size_color": [
+        "#FFFFFF"
+      ],
+      "text_b_size_color": "#FFFFFF",
+      "font_family": "font/BebasNeue-1.otf",
+      "width_progress": 18,
+      "color_bg_progress": "#70FFFFFF",
+      "color_progress": [
+        "#00FFCC",
+        "#00CCCC"
+      ]
+    },
+    {
+      "bz_type": "gsensor",
+      "widget_type": 1,
+      "icon": "icon/tpl_gsensor.png",
+      "name": "gsensor",
+      "frame": "420#850#300#200",
+      "font_family": "font/BebasNeue-1.otf",
+      "elms": [
+        {
+          "elm_type": "img",
+          "frame": "70#1#170#60",
+          "img": "gsensor_top_icon.png"
+        },
+        {
+          "elm_type": "txt",
+          "value_key": "cur_gsensor",
+          "frame": "150#80#150#50",
+          "maxLength": 6,
+          "size": 90,
+          "align": "CENTER",
+          "color": "#FFFFFF",
+          "index": 0
+        },
+        {
+          "elm_type": "img",
+          "frame": "55#110#200#90",
+          "img": "txt_bottom_bg.png"
+        }
+      ]
+    },
+    {
+      "bz_type": "altitude",
+      "widget_type": 1,
+      "icon": "icon/tpl_cur_altitude.png",
+      "name": "Altitude",
+      "frame": "1580#680#300#131",
+      "font_family": "font/BebasNeue-1.otf",
+      "elms": [
+        {
+          "elm_type": "img",
+          "frame": "70#1#170#60",
+          "img": "elevation_top_icon.png"
+        },
+        {
+          "elm_type": "txt",
+          "value_key": "cur_altitude",
+          "frame": "150#80#150#50",
+          "maxLength": 6,
+          "size": 90,
+          "align": "CENTER",
+          "color": "#FFFFFF",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "bz_type": "altitude",
+      "widget_type": 1,
+      "icon": "icon/tpl_cur_altitude.png",
+      "name": "Altitude",
+      "frame": "1580#880#300#131",
+      "font_family": "font/BebasNeue-1.otf",
+      "elms": [
+        {
+          "elm_type": "img",
+          "frame": "70#1#170#60",
+          "img": "up_elevation_top_icon.png"
+        },
+        {
+          "elm_type": "txt",
+          "value_key": "up_altitude",
+          "frame": "150#80#150#50",
+          "maxLength": 6,
+          "size": 90,
+          "align": "CENTER",
+          "color": "#FFFFFF",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "bz_type": "track",
+      "widget_type": 3,
+      "name": "Map",
+      "icon": "icon/tpl_map.png",
+      "bg_img": "track_back.png",
+      "direct_img": "track_direction.png",
+      "frame": "5#100#400#400",
+      "color_line_drived": "#00CCCC",
+      "color_line_undrived": "#44464a",
+      "color_text": "#d5d5d5",
+      "width_line": 10,
+      "font_size": 40
+    },
+    {
+      "bz_type": "turn",
+      "widget_type": 14,
+      "name": "Turn",
+      "icon": "icon/tpl_map.png",
+      "frame": "710#600#500#500",
+      "left_turn_img": "gyro_bottom_turn_left.png",
+      "right_turn_img": "gyro_bottom_turn_right.png"
+    }
+  ]
+}

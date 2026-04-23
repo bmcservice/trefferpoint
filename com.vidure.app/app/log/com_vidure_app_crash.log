@@ -1,0 +1,517 @@
+---------START-----------Sun Sep 14 10:23:03 GMT+02:00 2025---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.g.b(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:8)
+	at com.google.maps.api.android.lib6.impl.hq.run(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:563)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2025-09-14 10:23:03
+versioninfo:v2.7.1.250712/524
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@ff001da
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@25d660b
+SUPPORTED_ABIS=[Ljava.lang.String;@e5dfce8
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Sep 14 10:23:03 GMT+02:00 2025---------------------
+
+---------START-----------Sun Sep 14 10:34:33 GMT+02:00 2025---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.g.b(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:8)
+	at com.google.maps.api.android.lib6.impl.hq.run(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:563)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2025-09-14 10:34:33
+versioninfo:v2.7.1.250712/524
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@1931a68
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@21e1e81
+SUPPORTED_ABIS=[Ljava.lang.String;@ce47b26
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Sep 14 10:34:33 GMT+02:00 2025---------------------
+
+---------START-----------Sun Sep 14 10:49:33 GMT+02:00 2025---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.g.b(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:8)
+	at com.google.maps.api.android.lib6.impl.hq.run(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:563)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2025-09-14 10:49:33
+versioninfo:v2.7.1.250712/524
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@3629e8
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@944b801
+SUPPORTED_ABIS=[Ljava.lang.String;@418d6a6
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Sep 14 10:49:33 GMT+02:00 2025---------------------
+
+---------START-----------Sun Sep 14 11:01:01 GMT+02:00 2025---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.g.b(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:8)
+	at com.google.maps.api.android.lib6.impl.hq.run(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:563)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2025-09-14 11:01:01
+versioninfo:v2.7.1.250712/524
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@b892de
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@10a5cbf
+SUPPORTED_ABIS=[Ljava.lang.String;@465df8c
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Sep 14 11:01:01 GMT+02:00 2025---------------------
+
+---------START-----------Sun Sep 14 11:12:28 GMT+02:00 2025---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.g.b(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:8)
+	at com.google.maps.api.android.lib6.impl.hq.run(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:563)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2025-09-14 11:12:28
+versioninfo:v2.7.1.250712/524
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@246780
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@40941b9
+SUPPORTED_ABIS=[Ljava.lang.String;@80d89fe
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Sep 14 11:12:28 GMT+02:00 2025---------------------
+
+---------START-----------Sun Sep 14 11:23:58 GMT+02:00 2025---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.g.b(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:8)
+	at com.google.maps.api.android.lib6.impl.hq.run(:com.google.android.gms.policy_maps_core_dynamite@252725204@252725201025.791442750.791442750:563)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2025-09-14 11:23:58
+versioninfo:v2.7.1.250712/524
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@576410a
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@2e6ed7b
+SUPPORTED_ABIS=[Ljava.lang.String;@d0c798
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Sep 14 11:23:58 GMT+02:00 2025---------------------
+
+---------START-----------Sun Mar 15 11:07:35 GMT+01:00 2026---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.h.b(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:8)
+	at com.google.maps.api.android.lib6.impl.hr.run(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:586)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2026-03-15 11:07:35
+versioninfo:v3.2.1.260208/619
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@21d5be0
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@7be8e99
+SUPPORTED_ABIS=[Ljava.lang.String;@eeb855e
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Mar 15 11:07:35 GMT+01:00 2026---------------------
+
+---------START-----------Sun Mar 15 11:19:19 GMT+01:00 2026---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.h.b(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:8)
+	at com.google.maps.api.android.lib6.impl.hr.run(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:586)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2026-03-15 11:19:19
+versioninfo:v3.2.1.260208/619
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@b8b08bc
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@4443045
+SUPPORTED_ABIS=[Ljava.lang.String;@21bc39a
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Mar 15 11:19:19 GMT+01:00 2026---------------------
+
+---------START-----------Sun Mar 15 11:30:42 GMT+01:00 2026---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.h.b(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:8)
+	at com.google.maps.api.android.lib6.impl.hr.run(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:586)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2026-03-15 11:30:42
+versioninfo:v3.2.1.260208/619
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@9f62c1c
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@8e98025
+SUPPORTED_ABIS=[Ljava.lang.String;@21505fa
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Mar 15 11:30:42 GMT+01:00 2026---------------------
+
+---------START-----------Sun Mar 15 11:42:04 GMT+01:00 2026---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.h.b(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:8)
+	at com.google.maps.api.android.lib6.impl.hr.run(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:586)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2026-03-15 11:42:04
+versioninfo:v3.2.1.260208/619
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@9e3d1da
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@88cf60b
+SUPPORTED_ABIS=[Ljava.lang.String;@e7e4ce8
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Mar 15 11:42:04 GMT+01:00 2026---------------------
+
+---------START-----------Sun Mar 15 11:53:23 GMT+01:00 2026---------------------
+
+errorinfo:java.lang.RuntimeException: android.os.DeadSystemException
+	at android.app.ApplicationPackageManager.getApplicationInfoAsUser(ApplicationPackageManager.java:496)
+	at android.app.ApplicationPackageManager.getApplicationInfo(ApplicationPackageManager.java:480)
+	at com.google.maps.api.android.lib6.common.h.b(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:8)
+	at com.google.maps.api.android.lib6.impl.hr.run(:com.google.android.gms.policy_maps_core_dynamite@254515607@254515602025.843324832.843324832:586)
+	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+	at java.lang.Thread.run(Thread.java:919)
+Caused by: android.os.DeadSystemException
+	... 7 more
+
+date:2026-03-15 11:53:23
+versioninfo:v3.2.1.260208/619
+mobileInfo:BOARD=msm8998
+BOOTLOADER=T835XXU5CVG2
+BRAND=samsung
+CPU_ABI=arm64-v8a
+CPU_ABI2=
+DEVICE=gts4llte
+DISPLAY=QP1A.190711.020.T835XXU5CVG2
+FINGERPRINT=samsung/gts4lltexx/gts4llte:10/QP1A.190711.020/T835XXU5CVG2:user/release-keys
+HARDWARE=qcom
+HOST=21HH1G04
+ID=QP1A.190711.020
+IS_DEBUGGABLE=false
+IS_EMULATOR=false
+MANUFACTURER=samsung
+MODEL=SM-T835
+PERMISSIONS_REVIEW_REQUIRED=true
+PRODUCT=gts4lltexx
+RADIO=unknown
+SERIAL=unknown
+SUPPORTED_32_BIT_ABIS=[Ljava.lang.String;@69f390d
+SUPPORTED_64_BIT_ABIS=[Ljava.lang.String;@23b70c2
+SUPPORTED_ABIS=[Ljava.lang.String;@7b64ed3
+TAGS=release-keys
+TIME=1658709230000
+TYPE=user
+UNKNOWN=unknown
+USER=dpi
+
+
+
+---------END  -----------Sun Mar 15 11:53:23 GMT+01:00 2026---------------------
+

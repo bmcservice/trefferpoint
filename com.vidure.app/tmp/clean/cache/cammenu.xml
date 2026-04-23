@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<camera xmlns="urn:schemas-ait-dvr:device-1-0">
+    <version>0.1</version>
+    <soc>8336</soc>
+    <!-- 机型验证 -->
+    <model>JX001</model>
+    <!-- 版本型号 -->
+    <livePath>rtsp://192.72.1.1/liveRTSP/av4</livePath>
+    <!-- 如果是单路，只填写这个rtsp地址 -->
+    <livePath2></livePath2>
+    <!-- 如果是双路，这里填写rtsp地址2，否则请为空 -->
+    <enable_gps>false</enable_gps>
+    <!-- GPS控件显示 -->
+    <!-- 上述信息是否可以和固件号一起显示，方便查看机型 -->
+    <menu title="VIDEO RESOLUTION" id="VideoRes">
+        <!-- 录制分辨率/帧率 -->
+        <item id="2K">2K 25fps</item>
+    </menu>
+    <menu title="SoundRecord" id="SoundRecord">
+        <!-- 麦克风 -->
+        <item id="OFF">OFF</item>
+        <item id="ON">ON</item>
+    </menu>
+    <menu title="VoiceSwitch" id="VoiceSwitch">
+        <!-- 外放音量 -->
+        <item id="OFF">OFF</item>
+        <item id="LOW">LOW</item>
+        <item id="MID">MID</item>
+        <item id="HIGH">HIGH</item>
+    </menu>
+    <menu title="LOOPING VIDEO" id="LoopingVideo">
+        <!-- 循环录影 -->
+        <item id="1MIN">1 min</item>
+        <item id="3MIN">3 min</item>
+	<!--
+        <item id="5MIN">5 min</item>
+	-->
+    </menu>
+    <menu title="Timelapse fps" id="Timelapse">
+        <!-- 缩时录影帧率 -->
+        <item id="OFF">OFF</item>
+        <item id="1SEC">1 FPS/s</item>
+        <item id="3SEC">3 FPS/s</item>
+		<!--
+        <item id="2SEC">2 FPS/s</item>
+        <item id="4SEC">4 FPS/s</item>
+		-->
+    </menu>
+
+    <menu title="Timelapse time" id="TimelapseTime">
+        <!-- 缩时录影时间 -->
+        <item id="OFF">OFF</item>
+        <item id="12H">12 h</item>
+        <item id="24H">24 h</item>
+        <item id="48H">48 h</item>
+    </menu>
+
+    <menu title="GSensor" id="GSensor">
+        <!-- Gsensor灵敏度 -->
+        <item id="OFF">off</item>
+        <item id="LOW">low</item>
+        <item id="MID">mid</item>
+        <item id="HIGH">high</item>
+    </menu>
+    <menu title="PowerOnGSensor" id="PowerOnGSensor">
+        <!-- 停车监控 -->
+        <item id="OFF">OFF</item>
+        <item id="LOW">low</item>
+        <item id="MID">mid</item>
+        <item id="HIGH">high</item>
+    </menu>
+
+	<![CDATA[
+    <menu title="Flicker" id="Flicker">
+        <!-- 光源频率 -->
+        <item id="50HZ">50Hz</item>
+        <item id="60HZ">60Hz</item>
+    </menu>
+    <menu title="DateLogoStamp" id="DateLogoStamp">
+        <!-- 时间水印 -->
+        <item id="DATELOGO">DATELOGO</item>
+        <item id="DATE">DATE</item>
+        <item id="OFF">OFF</item>
+    </menu>
+	    <menu title="Language" id="Language">
+        <item id="ENGLISH">English</item>
+        <item id="SCHINESE">Schinese</item>
+        <item id="TCHINESE">Tchinese</item>
+        <item id="JAPANESE">Japanese</item>
+    </menu>
+    <menu title="SPEED" id="SPEED">
+        <item id="KMH">Kmh</item>
+        <item id="MPH">Mph</item>
+    </menu>
+	]]>
+
+    <!-- 查看wifi信息、设置新的ssid和密码时GET/SET都是这两个字段 -->
+    <menu title="WIFI SSID" id="Net.WIFI_AP.SSID">
+        <!-- wifi ssid --> 
+    
+    </menu>
+    <menu title="WIFI PASSWD" id="Net.WIFI_AP.CryptoKey">
+        <!-- wifi passwd -->    
+    </menu>
+    <!-- 信息更新后重启wifi的指令:  action=set property=Net value=reset -->
+    <menu title="TFCARD INFO" id="Camera.Menu.CardInfo.*">
+        <!-- 显示TF卡容量 -->
+    </menu>
+    <menu title="FactoryReset" id="FactoryReset">
+        <!-- 恢复出厂设置 -->    
+    </menu>
+    <menu title="Version" id="FWversion">
+        <!-- 固件版本号由编译生成，app显示即可 -->    
+    
+    </menu>
+</camera>
+

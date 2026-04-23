@@ -1,0 +1,403 @@
+{
+	"name": "default",
+	"code": "dashboardClassic",
+	"index": 1,
+	"cover": "cover.jpg",
+	"ver": "*",
+	"ui": [
+		{
+			"bz_type": "ar",
+			"widget_type": 6,
+			"name": "AR",
+			"icon": "icon/tpl_ar.png",
+			"frame": "0#0#1920#1080",
+			"color_arrow": "057afe",
+			"color_trapezoid": "0E7FFF"
+		},
+		{
+			"bz_type": "ar",
+			"widget_type": 7,
+			"name": "AR",
+			"icon": "icon/tpl_ar.png",
+			"frame": "0#0#1920#1080",
+			"center_rotate": false,
+			"distance_unit_ft": "distance_unit_ft.png",
+			"distance_unit_m": "distance_unit_m.png",
+			"distance_bg_nor": "distance_background_1.png",
+			"distance_bg_warn":"distance_background_2.png",
+			"distance_bg_err": "distance_background_3.png",
+			"plate_bg_nor": "blue_bubble.png",
+			"plate_bg_warn":"yellow_bubble.png",
+			"plate_bg_err": "red_bubble.png",
+			"plate_img_bg_nor": "blue_bubble_frame.png",
+			"plate_img_bg_warn":"yellow_bubble_frame.png",
+			"plate_img_bg_err": "red_bubble_frame.png"
+		},
+		{
+			"bz_type": "userinfo",
+			"widget_type": 12,
+			"icon": "icon/tpl_user_info.png",
+			"name": "UserInfo",
+			"frame": "0#900#1920#180",
+			"avatar_size": 70,
+			"nickname_text_size": 60,
+			"nickname_text_color": "#d5d5d5",
+			"sign_text_size": 50,
+			"sign_text_color": "#d5d5d5"
+		},
+		{
+			"bz_type": "altitude",
+			"widget_type": 1,
+			"icon": "icon/tpl_cur_altitude.png",
+			"name": "Altitude",
+			"frame": "0#26#400#131",
+			"bg_img": "txt_data_background_left.png",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "21#6#308#40",
+					"text": "cur altitude",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 11,
+					"bg_img": "text_title.png",
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "img",
+					"frame": "29#68#48#48",
+					"img": "data_icon_rta.png"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "cur_altitude",
+					"frame": "329#68#156#50",
+					"maxLength": 4,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "altitude",
+			"widget_type": 1,
+			"icon": "icon/tpl_cur_altitude.png",
+			"name": "Altitude",
+			"frame": "0#177#400#131",
+			"bg_img": "txt_data_background_left.png",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "21#6#308#40",
+					"text": "up altitude",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 11,
+					"bg_img": "text_title.png",
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "img",
+					"frame": "29#68#48#48",
+					"img": "data_icon_rta.png"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "up_altitude",
+					"frame": "329#68#156#50",
+					"maxLength": 4,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "press",
+			"widget_type": 1,
+			"icon": "icon/gps_pressure.png",
+			"name": "Pressure",
+			"frame": "0#328#400#131",
+			"bg_img": "txt_data_background_left.png",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "21#6#308#40",
+					"text": "pressure",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 11,
+					"bg_img": "text_title.png",
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "img",
+					"frame": "29#68#48#48",
+					"img": "gps_pressure.png"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "press",
+					"frame": "329#68#156#50",
+					"maxLength": 6,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "speed",
+			"widget_type": 4,
+			"name": "Speed",
+			"icon": "icon/tpl_cur_speed.png",
+			"frame": "1600#700#300#300",
+			"color_base": "#33000000",
+			"color_line": "#7fd1d1d1",
+			"color_progress": "#057afe",
+			"width_line": 2,
+			"width_progress": 30,
+			"sizePadding": 6,
+			"text_a_size": 80,
+			"text_b_size": 30,
+			"text_a_size_color": "#d5d5d5",
+			"text_b_size_color": "#d5d5d5"
+		},
+		{
+			"bz_type": "gsensor",
+			"widget_type": 2,
+			"name": "gsensor",
+			"icon": "icon/tpl_gsensor.png",
+			"frame": "1350#800#200#200",
+			"color_base": "#33000000",
+			"color_line": "#7fd1d1d1",
+			"color_ball": "#057afe",
+			"color_value_bg": "#44464a",
+			"color_value": "#d5d5d5",
+			"width_line": 2,
+			"radius_line": 95,
+			"radius_ball": 60,
+			"radius_value": 50,
+			"font_size": 30
+		},
+		{
+			"bz_type": "track",
+			"widget_type": 3,
+			"name": "Map",
+			"icon": "icon/tpl_map.png",
+			"bg_img": "track_back.png",
+			"direct_img": "track_direction.png",
+			"frame": "5#600#400#400",
+			"color_line_drived": "#FFD200",
+			"color_line_undrived": "#44464a",
+			"color_text": "#d5d5d5",
+			"width_line": 10,
+			"font_size": 40
+		},
+		{
+			"bz_type": "turn",
+			"widget_type": 14,
+			"name": "Turn",
+			"icon": "icon/tpl_map.png",
+			"frame": "710#600#500#500",
+			"left_turn_img": "gyro_bottom_turn_left.png",
+			"right_turn_img": "gyro_bottom_turn_right.png"
+		},
+		{
+			"bz_type": "race",
+			"widget_type": 1,
+			"name": "Race",
+			"icon": "icon/tpl_race.png",
+			"frame": "710#80#500#200",
+			"show_flag": "show_race",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "250#0#500#180",
+					"value_key": "race_duration_center",
+					"style": "bold",
+					"align": "CENTER",
+					"maxLength": 5,
+					"color": "#F9CD00"
+				}
+			]
+		},
+		{
+			"bz_type": "race",
+			"widget_type": 1,
+			"name": "Race",
+			"icon": "icon/tpl_race.png",
+			"frame": "1400#25#520#72",
+			"bg_img": "txt_data_background_type_right.png",
+			"show_flag": "show_race",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "107#12#135#48",
+					"text": "Race Type",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 9,
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "race_type",
+					"frame": "515#12#263#48",
+					"maxLength": 9,
+					"group": 1,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "race",
+			"widget_type": 1,
+			"name": "Race",
+			"icon": "icon/tpl_race.png",
+			"frame": "1400#117#520#72",
+			"bg_img": "txt_data_background_right.png",
+			"show_flag": "show_race",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "107#12#135#48",
+					"text": "Time",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 9,
+					"bg_img": "text_title.png",
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "race_duration",
+					"frame": "515#12#263#48",
+					"maxLength": 9,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "race",
+			"widget_type": 1,
+			"name": "Race",
+			"icon": "icon/tpl_race.png",
+			"frame": "1400#209#520#72",
+			"bg_img": "txt_data_background_right.png",
+			"show_flag": "show_race",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "107#12#135#48",
+					"text": "Distance",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 9,
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "race_distance",
+					"frame": "515#12#263#48",
+					"maxLength": 9,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "race",
+			"widget_type": 1,
+			"name": "Race",
+			"icon": "icon/tpl_race.png",
+			"frame": "1400#301#520#72",
+			"bg_img": "txt_data_background_right.png",
+			"show_flag": "show_race_statis",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "107#12#135#48",
+					"text": "Slope",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 9,
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "race_slope",
+					"frame": "515#12#263#48",
+					"maxLength": 9,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "race",
+			"widget_type": 1,
+			"name": "Race",
+			"icon": "icon/tpl_race.png",
+			"frame": "1400#393#520#72",
+			"bg_img": "txt_data_background_right.png",
+			"show_flag": "show_race_statis",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "107#12#135#48",
+					"text": "Max speed",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 9,
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "race_max_speed",
+					"frame": "515#12#263#48",
+					"maxLength": 9,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		},
+		{
+			"bz_type": "race",
+			"widget_type": 1,
+			"name": "Race",
+			"icon": "icon/tpl_race.png",
+			"frame": "1400#485#520#72",
+			"bg_img": "txt_data_background_right.png",
+			"show_flag": "show_race_statis",
+			"elms": [
+				{
+					"elm_type": "txt",
+					"frame": "107#12#135#48",
+					"text": "Avg speed",
+					"style": "bold",
+					"align": "LEFT",
+					"maxLength": 9,
+					"color": "#F9CD00"
+				},
+				{
+					"elm_type": "txt",
+					"value_key": "race_avg_speed",
+					"frame": "515#12#263#48",
+					"maxLength": 9,
+					"align": "RIGHT",
+					"color": "#d5d5d5",
+					"index": 0
+				}
+			]
+		}
+	]
+}
