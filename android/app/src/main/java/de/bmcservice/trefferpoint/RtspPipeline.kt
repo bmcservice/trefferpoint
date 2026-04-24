@@ -15,12 +15,15 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
 import kotlin.concurrent.thread
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 
@@ -179,7 +182,16 @@ class RtspPipeline(
             }, imageHandler)
         }
 
-        val exo = ExoPlayer.Builder(context).build()
+        // Audio deaktivieren — SGK/Viidure-Kameras verstehen multi-track SETUP nicht:
+        // sie senden keine Video-Daten wenn ExoPlayer auch SETUP für Audio schickt.
+        val trackSelector = DefaultTrackSelector(context).apply {
+            parameters = buildUponParameters()
+                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                .build()
+        }
+        val exo = ExoPlayer.Builder(context)
+            .setTrackSelector(trackSelector)
+            .build()
         player = exo
 
         // Scanner-Test hat gezeigt: Lavf57.83.100 (was Viidure selbst schickt) wird vom
@@ -252,7 +264,7 @@ class RtspPipeline(
             onStatus("RTSP: TCP-Pakete kommen nicht — versuche UDP")
             triedUdpFallback = true
             startInternal(currentUrl, useTcp = false)
-        }, 6000)
+        }, 20000)
     }
 
     private fun recreateImageReader(w: Int, h: Int) {
