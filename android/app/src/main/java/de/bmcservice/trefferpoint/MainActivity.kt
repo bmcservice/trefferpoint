@@ -586,5 +586,41 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) { AppLog.e(TAG, "stopRtsp Exception", e) }
             }
         }
+
+        /**
+         * Speichert einen JSON-Testbericht nach Downloads/TrefferPoint/.
+         * Gibt den Dateinamen zurück (Erfolg) oder "Fehler: ..." (Misserfolg).
+         */
+        @JavascriptInterface
+        fun saveTestbericht(json: String): String {
+            return try {
+                val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault())
+                    .format(java.util.Date())
+                val filename = "trefferpoint_$ts.json"
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
+                        put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+                        put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/TrefferPoint")
+                    }
+                    val uri = contentResolver.insert(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                    ) ?: return "Fehler: URI null"
+                    contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
+                } else {
+                    @Suppress("DEPRECATION")
+                    val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS
+                    )
+                    val sub = java.io.File(dir, "TrefferPoint").also { it.mkdirs() }
+                    java.io.File(sub, filename).writeText(json)
+                }
+                AppLog.i(TAG, "Testbericht gespeichert: $filename")
+                filename
+            } catch (e: Exception) {
+                AppLog.e(TAG, "saveTestbericht fehlgeschlagen", e)
+                "Fehler: ${e.message}"
+            }
+        }
     }
 }

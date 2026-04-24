@@ -805,6 +805,7 @@
             <div class="ps-label">Gesamtergebnis</div>
             <div class="score-big" id="totalScore">0</div>
             <div class="score-meta" id="scoreMeta">— Treffer</div>
+            <button class="btn" id="btnExport" style="margin-top:8px;display:none">💾 Testbericht speichern</button>
         </div>
 
         <!-- Hit list -->
@@ -841,7 +842,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.13';
+const APP_VERSION = '2.3.14';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3047,6 +3048,45 @@ document.getElementById('btnReset').addEventListener('click', resetSession);
 document.getElementById('btnAutoOpt').addEventListener('click', autoOptimizeCamera);
 
 document.getElementById('btnDemo').addEventListener('click', runDemo);
+
+// Export-Button: nur in Android-APK sichtbar
+(function() {
+    const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
+        window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
+    if (inAndroidApp) {
+        document.getElementById('btnExport').style.display = '';
+    }
+})();
+document.getElementById('btnExport').addEventListener('click', function() {
+    try {
+        const discKey = document.getElementById('discSel').value;
+        const report = {
+            version: APP_VERSION,
+            timestamp: new Date().toISOString(),
+            discipline: discKey,
+            calib: calib ? {
+                cx: calib.cx, cy: calib.cy,
+                a: calib.a, b: calib.b,
+                angle: calib.angle, pxPerMm: calib.pxPerMm
+            } : null,
+            hits: hits.map(function(h) {
+                return { ring: h.ring, clock: h.clock, dx: h.dx, dy: h.dy };
+            }),
+            appLog: (typeof window.tpBridge !== 'undefined') ? window.tpBridge.getLog() : '',
+            appStatus: (typeof window.tpBridge !== 'undefined') ? window.tpBridge.getStatus() : ''
+        };
+        const json = JSON.stringify(report, null, 2);
+        const result = window.tpBridge.saveTestbericht(json);
+        if (result.startsWith('Fehler')) {
+            setStatus('Export fehlgeschlagen: ' + result, 'error');
+        } else {
+            setStatus('Testbericht gespeichert: Downloads/TrefferPoint/' + result, 'ok');
+        }
+    } catch(e) {
+        setStatus('Export Exception: ' + e.message, 'error');
+    }
+});
+
 document.getElementById('tabCam').addEventListener('click', () => setView('cam'));
 document.getElementById('tabAnzeige').addEventListener('click', () => setView('anzeige'));
 document.getElementById('tabTreffer').addEventListener('click', () => setView('treffer'));
