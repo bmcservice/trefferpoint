@@ -44,8 +44,10 @@ class RtspPipeline(
 ) {
     companion object {
         private const val TAG = "RtspPipeline"
-        private const val INITIAL_WIDTH = 1920
-        private const val INITIAL_HEIGHT = 1080
+        // SGK GK720X / Viidure liefert immer 960×540 laut SDP.
+        // Passend zur Kamera-Ausgabe → kein Surface-Wechsel nötig nach onTracksChanged.
+        private const val INITIAL_WIDTH = 960
+        private const val INITIAL_HEIGHT = 540
         private const val JPEG_QUALITY = 85
     }
 
@@ -332,6 +334,13 @@ class RtspPipeline(
 
     private fun recreateImageReader(w: Int, h: Int) {
         try {
+            // Surface-Wechsel während BUFFERING resettet den MediaCodec-Decoder.
+            // Wenn die Größe bereits stimmt, Surface nicht neu erstellen.
+            val current = imageReader
+            if (current != null && current.width == w && current.height == h) {
+                AppLog.i(TAG, "ImageReader bereits ${w}x${h} — kein Neustart")
+                return
+            }
             val oldReader = imageReader
             val newReader = ImageReader.newInstance(w, h, ImageFormat.YUV_420_888, 2)
             newReader.setOnImageAvailableListener({ r ->

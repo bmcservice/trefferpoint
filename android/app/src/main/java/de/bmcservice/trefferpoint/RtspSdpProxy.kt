@@ -95,7 +95,11 @@ class RtspSdpProxy(
                     AppLog.i(TAG, "Kamera→$method: $status${if (transport.isNotEmpty()) " | $transport" else ""}")
                 }
 
-                val fwd = if (method == "DESCRIBE") patchSdp(resp) else resp
+                val fwd = when (method) {
+                    "DESCRIBE" -> patchSdp(resp)
+                    "PLAY"     -> patchPlayResponse(resp)
+                    else       -> resp
+                }
                 cOut.write(fwd.toByteArray(Charsets.UTF_8))
                 cOut.flush()
 
@@ -217,6 +221,26 @@ class RtspSdpProxy(
         }
     }
 
+    /**
+     * Schreibt in der PLAY-Antwort alle Kamera-URLs auf Proxy-URLs um.
+     *
+     * Firmware-Bug 4: Die PLAY-Antwort enthält RTP-Info mit der Kamera-IP:
+     *   RTP-Info: url=rtsp://192.168.0.1/live/tcp/ch1/video/track0;seq=256;rtptime=...
+     * ExoPlayer versucht, diese URL mit der SETUP-URL (rtsp://127.0.0.1:15554/...) zu matchen.
+     * Bei URL-Mismatch ignoriert ExoPlayer seq= und rtptime= → RTP-Receiver-Initialisierung
+     * mit Standardwerten → alle Pakete werden als "zu alt" verworfen → BUFFERING hängt.
+     */
+    private fun patchPlayResponse(response: String): String {
+        val cameraBase = if (cameraPort == 554) "rtsp://$cameraHost" else "rtsp://$cameraHost:$cameraPort"
+        val proxyBase  = "rtsp://127.0.0.1:$proxyPort"
+        val patched = response.replace(cameraBase, proxyBase)
+
+        val rtpInfo = patched.lineSequence()
+            .firstOrNull { it.startsWith("RTP-Info:", ignoreCase = true) }?.take(150) ?: ""
+        AppLog.i(TAG, "PLAY-Antwort RTP-Info: ${rtpInfo.ifEmpty { "(kein RTP-Info Header)" }}")
+        return patched
+    }
+
     /** Entfernt alle "a=recvonly"-Zeilen aus dem SDP und aktualisiert Content-Length. */
     private fun patchSdp(response: String): String {
         val cut = response.indexOf("\r\n\r\n").takeIf { it >= 0 } ?: return response
@@ -336,7 +360,23 @@ class RtspSdpProxy(
                 if (!firstChunkLogged) {
                     val hex = (0 until minOf(4 + len, 16))
                         .joinToString(" ") { "%02X".format(pktBuf[it].toInt() and 0xFF) }
-                    AppLog.i(TAG, "Erster RTP-Chunk: ${4 + len}B → $hex")
+                    // NAL-Typ aus erstem Byte nach 12-Byte RTP-Header (pktBuf[4+12] = pktBuf[16])
+                    val nalDesc = if (ch % 2 == 0 && len >= 13) {
+                        val nalByte = pktBuf[16].toInt() and 0xFF
+                        val nalType = nalByte and 0x1F
+                        when (nalType) {
+                            1  -> "NAL=NonIDR(P/B)"
+                            5  -> "NAL=IDR(Keyframe)"
+                            7  -> "NAL=SPS"
+                            8  -> "NAL=PPS"
+                            28 -> if (len >= 14) {
+                                val fu = pktBuf[17].toInt() and 0xFF
+                                "NAL=FU-A(start=${(fu and 0x80)!=0},type=${fu and 0x1F}${if((fu and 0x1F)==5)"/IDR" else ""})"
+                            } else "NAL=FU-A"
+                            else -> "NAL=type$nalType"
+                        }
+                    } else ""
+                    AppLog.i(TAG, "Erster RTP-Chunk: ${4 + len}B → $hex ${nalDesc}".trim())
                     firstChunkLogged = true
                 }
 
