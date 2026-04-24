@@ -1,5 +1,6 @@
 package de.bmcservice.trefferpoint
 
+import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
@@ -15,6 +16,12 @@ import kotlin.concurrent.thread
  *
  * Firmware-Bug 2: Kamera trennt TCP-Verbindung nach ~4-5s (Segment-Streaming).
  *   → Proxy reconnectet sofort zur Kamera, ExoPlayer sieht kontinuierlichen Stream.
+ *
+ * Firmware-Bug 3: Kamera setzt RTP-Sequenznummern bei jedem Segment auf den
+ *   Initialwert (256) zurück. ExoPlayer interpretiert dies als "bereits empfangen"
+ *   und verwirft alle Pakete des zweiten Segments → BUFFERING bleibt hängen.
+ *   → Proxy patcht Sequenznummern paketweise und hält sie über Reconnects hinweg
+ *     monoton aufsteigend.
  */
 class RtspSdpProxy(
     private val cameraHost: String,
@@ -48,7 +55,6 @@ class RtspSdpProxy(
 
     private fun session(clientSock: Socket) {
         var cameraSock: Socket? = null
-        // Track-URL aus dem ersten SETUP merken — für Reconnects benötigt
         var trackUrl = if (cameraPort == 554)
             "rtsp://$cameraHost/live/tcp/ch1/video/track0"
         else
@@ -72,10 +78,8 @@ class RtspSdpProxy(
                     else "rtsp://$cameraHost:$cameraPort"
                 )
                 if (method == "SETUP") {
-                    // Track-URL aus dem (umgeschriebenen) SETUP extrahieren
                     val setupUrl = camReq.substringAfter("SETUP ").substringBefore(" RTSP")
                     if (setupUrl.startsWith("rtsp://")) trackUrl = setupUrl
-                    // TCP-Interleaved erzwingen
                     camReq = Regex("Transport:[^\r\n]*", RegexOption.IGNORE_CASE)
                         .replace(camReq, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1")
                     AppLog.i(TAG, "SETUP → Kamera (TCP-Interleaved erzwungen)")
@@ -103,17 +107,21 @@ class RtspSdpProxy(
                 }
             }
 
-            // RTP-Relay-Loop mit transparentem Kamera-Reconnect
+            // RTP-Relay-Loop: seqState hält den nächsten zu sendenden Sequenz-Counter.
+            // Durch Weitergabe über alle relay()-Aufrufe bleiben Sequenznummern
+            // monoton, auch wenn die Kamera bei jedem Segment von vorne beginnt.
+            // seqState[0] = -1 bedeutet "noch nicht initialisiert".
+            val seqState = IntArray(1) { -1 }
             var reconnects = 0
             while (true) {
                 val cameraClosedFirst = relay(
                     cIn, cOut,
                     cameraSock!!.getInputStream(),
-                    cameraSock!!.getOutputStream()
+                    cameraSock!!.getOutputStream(),
+                    seqState
                 )
                 if (!cameraClosedFirst) break  // ExoPlayer hat Verbindung getrennt
 
-                // Kamera hat Segment beendet → sofort neue RTSP-Session aufbauen
                 reconnects++
                 AppLog.i(TAG, "Kamera-Segment-Ende → transparenter Reconnect #$reconnects")
                 try { cameraSock?.close() } catch (_: Exception) {}
@@ -123,7 +131,7 @@ class RtspSdpProxy(
                     AppLog.w(TAG, "Reconnect #$reconnects fehlgeschlagen — Stream Ende")
                     break
                 }
-                AppLog.i(TAG, "Reconnect #$reconnects OK → setze RTP-Relay fort")
+                AppLog.i(TAG, "Reconnect #$reconnects OK → setze RTP-Relay fort (nextSeq=${seqState[0] and 0xFFFF})")
             }
 
         } catch (e: Exception) {
@@ -226,82 +234,119 @@ class RtspSdpProxy(
     }
 
     /**
-     * Transparentes bidirektionales Byte-Relay für die RTP-Streaming-Phase.
+     * Paketweises TCP-Interleaved-Relay.
+     *
+     * Liest RTP-Pakete von der Kamera paketweise ($ ch lenHi lenLo payload),
+     * schreibt für gerade Kanäle (RTP-Daten) die Sequenznummer mit dem
+     * gemeinsamen seqState-Zähler um, und leitet das Paket an ExoPlayer weiter.
+     *
+     * seqState[0]:
+     *   -1  = noch nicht initialisiert (erste Paket der gesamten Session)
+     *   ≥0  = nächste zu verwendende Ausgabe-Sequenznummer
+     *
+     * Durch Weitergabe von seqState über mehrere relay()-Aufrufe hinweg bleibt
+     * der Zähler über Kamera-Reconnects monoton — ExoPlayer sieht keine Lücken.
+     *
      * Gibt true zurück wenn die Kamera die Verbindung getrennt hat,
      * false wenn ExoPlayer (der Client) getrennt hat.
-     *
-     * RTSP-Keepalives (OPTIONS/GET_PARAMETER) von ExoPlayer werden abgefangen
-     * und lokal beantwortet — die Kamera sieht diese Nachrichten nie.
      */
     private fun relay(
         cIn: InputStream, cOut: OutputStream,
-        camIn: InputStream, camOut: OutputStream
+        camIn: InputStream, camOut: OutputStream,
+        seqState: IntArray
     ): Boolean {
         var cameraClosedFirst = false
+        var firstChunkLogged = false
+        var totalBytes = 0L
+        val cOutLock = Any()
+
+        // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
+        val cam = BufferedInputStream(camIn, 65536)
+
+        // Einmal allokierter Sende-Puffer: 4 Byte TCP-Interleaved-Header + max. 64 KB Payload
+        val pktBuf = ByteArray(4 + 65536)
 
         // Richtung ExoPlayer→Kamera (RTCP + abgefangene Keepalives)
         val t = thread(name = "proxy-c2cam") {
             try {
                 val buf = ByteArray(8192)
                 while (true) {
-                    val n = try { cIn.read(buf) } catch (e: Exception) {
-                        AppLog.w(TAG, "proxy-c2cam cIn: ${e.javaClass.simpleName}: ${e.message?.take(50)}")
-                        break
-                    }
-                    if (n <= 0) { AppLog.i(TAG, "proxy-c2cam: ExoPlayer EOF"); break }
-
+                    val n = cIn.read(buf).also { if (it <= 0) return@thread }
                     if (buf[0] == 0x24.toByte()) {
-                        // TCP-Interleaved RTCP → an Kamera weiterleiten
                         camOut.write(buf, 0, n)
                         camOut.flush()
                     } else {
-                        // RTSP-Keepalive (OPTIONS/GET_PARAMETER) → lokal beantworten
                         val msg = String(buf, 0, n, Charsets.UTF_8)
                         val cseq = Regex("CSeq:\\s*(\\d+)", RegexOption.IGNORE_CASE)
                             .find(msg)?.groupValues?.get(1) ?: "0"
-                        val method = msg.substringBefore(" ").take(20)
-                        AppLog.i(TAG, "Keepalive abgefangen: $method CSeq=$cseq")
-                        cOut.write("RTSP/1.0 200 OK\r\nCSeq: $cseq\r\n\r\n".toByteArray())
-                        cOut.flush()
+                        AppLog.i(TAG, "Keepalive abgefangen: ${msg.substringBefore(" ").take(20)} CSeq=$cseq")
+                        val resp = "RTSP/1.0 200 OK\r\nCSeq: $cseq\r\n\r\n".toByteArray()
+                        synchronized(cOutLock) { cOut.write(resp); cOut.flush() }
                     }
                 }
-            } catch (e: Exception) {
-                AppLog.w(TAG, "proxy-c2cam Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
-            }
+            } catch (_: Exception) {}
         }
 
-        // Richtung Kamera→ExoPlayer (RTP-Daten)
-        var totalBytes = 0L
+        // Richtung Kamera→ExoPlayer (paketweises Lesen + Seq-Rewrite)
         try {
-            val buf = ByteArray(8192)
             while (true) {
-                val n = try {
-                    camIn.read(buf)
-                } catch (e: Exception) {
-                    AppLog.w(TAG, "camIn.read Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
-                    cameraClosedFirst = true
-                    break
+                // TCP-Interleaved Sync-Byte
+                val dollar = cam.read()
+                if (dollar < 0) { cameraClosedFirst = true; break }
+                if (dollar != 0x24) {
+                    AppLog.w(TAG, "TCP-Interleaved Sync: 0x%02X statt 0x24".format(dollar))
+                    continue
                 }
-                if (n <= 0) { AppLog.i(TAG, "cam→client: EOF (n=$n)"); cameraClosedFirst = true; break }
 
-                if (totalBytes == 0L) {
-                    val hex = buf.take(minOf(n, 16))
-                        .joinToString(" ") { "%02X".format(it.toInt().and(0xFF)) }
-                    AppLog.i(TAG, "Erster RTP-Chunk: ${n}B → $hex")
+                val ch    = cam.read(); if (ch    < 0) { cameraClosedFirst = true; break }
+                val lenHi = cam.read(); if (lenHi < 0) { cameraClosedFirst = true; break }
+                val lenLo = cam.read(); if (lenLo < 0) { cameraClosedFirst = true; break }
+                val len = (lenHi shl 8) or lenLo
+                if (len <= 0 || len > 65536) {
+                    AppLog.w(TAG, "Ungültige RTP-Paketgröße: $len — überspringe")
+                    continue
                 }
-                totalBytes += n
 
-                try {
-                    cOut.write(buf, 0, n)
-                    cOut.flush()
-                } catch (e: Exception) {
-                    AppLog.w(TAG, "cOut.write Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
-                    break
+                // Payload in pktBuf ab Offset 4 einlesen (0..3 = TCP-Header)
+                pktBuf[0] = 0x24.toByte(); pktBuf[1] = ch.toByte()
+                pktBuf[2] = lenHi.toByte(); pktBuf[3] = lenLo.toByte()
+                var read = 0
+                while (read < len) {
+                    val n = cam.read(pktBuf, 4 + read, len - read)
+                    if (n < 0) { cameraClosedFirst = true; break }
+                    read += n
                 }
+                if (read < len) { cameraClosedFirst = true; break }
+                totalBytes += 4 + len
+
+                // RTP-Sequenznummern (gerade Kanäle = Daten, nicht RTCP) kontinuierlich halten.
+                // RTP-Seq liegt bei Offset 2..3 des RTP-Packets, d.h. pktBuf[6..7].
+                if (ch % 2 == 0 && len >= 4) {
+                    if (seqState[0] < 0) {
+                        // Erste Initialisierung: Kamera-Startseq übernehmen (typisch 256)
+                        val camSeq = ((pktBuf[6].toInt() and 0xFF) shl 8) or (pktBuf[7].toInt() and 0xFF)
+                        seqState[0] = camSeq
+                    }
+                    val outSeq = seqState[0] and 0xFFFF
+                    pktBuf[6] = (outSeq ushr 8).toByte()
+                    pktBuf[7] = (outSeq and 0xFF).toByte()
+                    seqState[0]++
+                }
+
+                if (!firstChunkLogged) {
+                    val hex = (0 until minOf(4 + len, 16))
+                        .joinToString(" ") { "%02X".format(pktBuf[it].toInt() and 0xFF) }
+                    AppLog.i(TAG, "Erster RTP-Chunk: ${4 + len}B → $hex")
+                    firstChunkLogged = true
+                }
+
+                synchronized(cOutLock) { cOut.write(pktBuf, 0, 4 + len); cOut.flush() }
             }
         } catch (e: Exception) {
-            AppLog.w(TAG, "RTP-Relay outer: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "RTP-Relay Kamera→Client: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
+            cameraClosedFirst = true
         }
+
         AppLog.i(TAG, "RTP-Relay: ${totalBytes}B von Kamera | cameraFirst=$cameraClosedFirst")
         t.join(500)
         return cameraClosedFirst

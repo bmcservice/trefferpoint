@@ -311,8 +311,10 @@ class RtspPipeline(
 
         exo.prepare()
 
-        // Watchdog: Wenn nach 20s keine Frames ankommen und wir TCP verwendet haben,
+        // Watchdog: Wenn nach 30s keine Frames ankommen und wir TCP verwendet haben,
         // automatischer Fallback auf UDP. Viele OEM-Kameras machen TCP-Interleaving kaputt.
+        // 30s statt 20s: SGK-Segment-Streaming hat ~620ms Reconnect-Pause alle 4.4s →
+        // ExoPlayer braucht mehrere Segmente bis der Puffer gefüllt ist.
         mainHandler.postDelayed({
             if (!running) return@postDelayed
             if (frameCount > 0) return@postDelayed
@@ -325,7 +327,7 @@ class RtspPipeline(
             onStatus("RTSP: TCP liefert keine Frames — versuche UDP")
             triedUdpFallback = true
             startInternal(currentUrl, useTcp = false)
-        }, 20000)
+        }, 30000)
     }
 
     private fun recreateImageReader(w: Int, h: Int) {
