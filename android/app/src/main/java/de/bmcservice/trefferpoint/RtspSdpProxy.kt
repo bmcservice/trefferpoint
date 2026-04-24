@@ -283,6 +283,7 @@ class RtspSdpProxy(
         var firstChunkLogged = false
         var totalBytes = 0L
         val cOutLock = Any()
+        val mBitFixed = mutableSetOf<Int>()  // NAL-Typen, für die M-bit bereits geloggt wurde
 
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
@@ -355,6 +356,29 @@ class RtspSdpProxy(
                     pktBuf[6] = (outSeq ushr 8).toByte()
                     pktBuf[7] = (outSeq and 0xFF).toByte()
                     seqState[0]++
+                }
+
+                // M-bit Fix (Firmware-Bug #5): SGK setzt M=0 auf allen Paketen.
+                // ExoPlayer's RtpH264Reader emittiert Samples NUR wenn M=1 (letztes Paket
+                // eines Access Units) ODER FU-A End-Bit gesetzt ist. Ohne M=1 bleibt der
+                // Sample-Buffer leer → ExoPlayer hängt ewig in BUFFERING.
+                // Fix: M=1 setzen für NAL-Typen, die einen kompletten Frame signalisieren.
+                if (ch % 2 == 0 && len >= 13) {
+                    val nalType = pktBuf[16].toInt() and 0x1F
+                    val mAlreadySet = (pktBuf[5].toInt() and 0x80) != 0
+                    if (!mAlreadySet) {
+                        val shouldFix = when (nalType) {
+                            1, 5 -> true  // Non-IDR / IDR als Single-NAL-Paket = vollständiger Frame
+                            28   -> len >= 14 && (pktBuf[17].toInt() and 0x40) != 0  // FU-A End-Bit
+                            else -> false
+                        }
+                        if (shouldFix) {
+                            pktBuf[5] = (pktBuf[5].toInt() or 0x80).toByte()
+                            if (mBitFixed.add(nalType)) {
+                                AppLog.i(TAG, "M-bit Fix: NAL=$nalType → M=1 (Firmware-Bug #5)")
+                            }
+                        }
+                    }
                 }
 
                 if (!firstChunkLogged) {
