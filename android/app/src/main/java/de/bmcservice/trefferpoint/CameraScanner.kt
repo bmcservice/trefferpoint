@@ -136,6 +136,70 @@ object CameraScanner {
     }
 
     /**
+     * Vollscan: Sweep aller 254 IPs im /24-Subnetz der Gateway-IP.
+     * Phase 1: Paralleler TCP-Ping auf alle Kamera-Ports (300ms Timeout) — ~5–10s.
+     * Phase 2: Protokoll-Probes auf allen antwortenden Hosts — gleiche Logik wie scan().
+     */
+    suspend fun scanSubnet(gateway: String, onProgress: (String) -> Unit): String = withContext(Dispatchers.IO) {
+        val parts = gateway.trim().split(".")
+        if (parts.size != 4) return@withContext scan(gateway, onProgress)
+        val prefix = "${parts[0]}.${parts[1]}.${parts[2]}."
+
+        AppLog.i(TAG, "Vollscan: ${prefix}1–254")
+        onProgress("Vollscan ${prefix}1–254 — pinge alle IPs…")
+
+        // Phase 1: Paralleler Ping auf alle Kamera-relevanten Ports
+        val candidates: Map<String, List<Int>> = coroutineScope {
+            (1..254).map { i ->
+                val ip = "$prefix$i"
+                async {
+                    val open = TCP_PORTS.filter { p -> isPortOpen(ip, p, 300) }
+                    if (open.isNotEmpty()) ip to open else null
+                }
+            }.awaitAll().filterNotNull().toMap()
+        }
+
+        if (candidates.isEmpty()) {
+            onProgress("Keine aktiven Hosts im Subnetz gefunden.")
+            AppLog.i(TAG, "Vollscan: keine aktiven Hosts")
+            return@withContext JSONArray().toString()
+        }
+        AppLog.i(TAG, "Vollscan: ${candidates.size} aktive Host(s): ${candidates.keys.joinToString()}")
+        onProgress("${candidates.size} Host(s) gefunden: ${candidates.keys.joinToString()} — probe Streams…")
+
+        // Phase 2: Protokoll-Probes (identisch zu scan())
+        val results = JSONArray()
+        for ((ip, ports) in candidates) {
+            AppLog.i(TAG, "Vollscan Probe $ip: Ports ${ports.joinToString()}")
+            var discoveredRtsp: String? = null
+            if (ports.contains(80) && (ports.contains(554) || ports.contains(8554))) {
+                discoveredRtsp = wakeupCameraHttp(ip)
+            }
+            if (discoveredRtsp != null) {
+                results.put(JSONObject().apply {
+                    put("url", discoveredRtsp); put("port", 554)
+                    put("proto", "rtsp"); put("detail", "via getmediainfo (SGK/Viidure)")
+                })
+                AppLog.i(TAG, "✓ RTSP via getmediainfo: $discoveredRtsp")
+                if (ports.contains(80)) probeHttpMjpeg(ip, 80).forEach { results.put(it) }
+            } else {
+                for (port in ports) {
+                    val hits = when (port) {
+                        554, 8554 -> probeRtsp(ip, port)
+                        80, 81, 8080, 8081, 8888 -> probeHttpMjpeg(ip, port)
+                        else -> emptyList()
+                    }
+                    hits.forEach { results.put(it) }
+                }
+            }
+        }
+
+        AppLog.i(TAG, "Vollscan fertig — ${results.length()} Stream(s) gefunden")
+        onProgress("Vollscan: ${results.length()} Stream(s) gefunden")
+        results.toString()
+    }
+
+    /**
      * HTTP-Wake-Up-Sequenz für Viidure/SGK-Kameras. Ohne diesen Handshake ignorieren
      * sie RTSP-Anfragen. Abgeleitet aus dem Crash-Log der Original-Viidure-App.
      * Gibt RTSP-URL aus getmediainfo zurück wenn vorhanden, sonst null.

@@ -16,6 +16,8 @@ import java.net.Inet4Address
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import android.util.Base64
+import android.content.ContentValues
+import android.net.Uri
 import android.view.Surface
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
@@ -587,40 +589,111 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /** Öffnet eine URL im System-Browser (für Update-Download etc.). */
+        @JavascriptInterface
+        fun openUrl(url: String) {
+            try {
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                applicationContext.startActivity(intent)
+            } catch (e: Exception) {
+                AppLog.e(TAG, "openUrl fehlgeschlagen: $url", e)
+            }
+        }
+
+        /**
+         * Vollscan: scannt alle 254 IPs im Subnetz der Gateway-IP.
+         * Ergebnis asynchron via window.tpOnScanResult (gleicher Callback wie scanForCameras).
+         * Nach Abschluss: Scan-Log automatisch in Downloads/TrefferPoint/ gespeichert.
+         */
+        @JavascriptInterface
+        fun scanSubnet(host: String) {
+            scanJob?.cancel()
+            val target = host.ifBlank { getWifiGateway() }
+            if (target.isBlank()) {
+                runOnUiThread {
+                    webView.evaluateJavascript(
+                        "window.tpOnScanResult && window.tpOnScanResult('[]', true, 'Keine IP — WLAN nicht verbunden?')",
+                        null
+                    )
+                }
+                return
+            }
+            scanJob = ioScope.launch {
+                try {
+                    val json = CameraScanner.scanSubnet(target) { progress ->
+                        val escaped = progress.replace("'", "\\'")
+                        runOnUiThread {
+                            webView.evaluateJavascript(
+                                "window.tpOnScanResult && window.tpOnScanResult('[]', false, '$escaped')",
+                                null
+                            )
+                        }
+                    }
+                    // Scan-Log automatisch speichern
+                    val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+                    val logJson = "{\"type\":\"scan_subnet\",\"timestamp\":\"$ts\",\"results\":$json,\"appLog\":${
+                        org.json.JSONObject.quote(AppLog.snapshot())
+                    }}"
+                    saveToDownloads("scan_$ts.json", logJson)
+
+                    val escaped = json.replace("\\", "\\\\").replace("'", "\\'")
+                    runOnUiThread {
+                        webView.evaluateJavascript(
+                            "window.tpOnScanResult && window.tpOnScanResult('$escaped', true, 'Vollscan fertig')",
+                            null
+                        )
+                    }
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "scanSubnet Exception", e)
+                    val msg = (e.message ?: "Fehler").replace("'", "\\'")
+                    runOnUiThread {
+                        webView.evaluateJavascript(
+                            "window.tpOnScanResult && window.tpOnScanResult('[]', true, '$msg')",
+                            null
+                        )
+                    }
+                }
+            }
+        }
+
         /**
          * Speichert einen JSON-Testbericht nach Downloads/TrefferPoint/.
          * Gibt den Dateinamen zurück (Erfolg) oder "Fehler: ..." (Misserfolg).
          */
         @JavascriptInterface
         fun saveTestbericht(json: String): String {
-            return try {
-                val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault())
-                    .format(java.util.Date())
-                val filename = "trefferpoint_$ts.json"
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    val values = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
-                        put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
-                        put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/TrefferPoint")
-                    }
-                    val uri = contentResolver.insert(
-                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
-                    ) ?: return "Fehler: URI null"
-                    contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray()) }
-                } else {
-                    @Suppress("DEPRECATION")
-                    val dir = android.os.Environment.getExternalStoragePublicDirectory(
-                        android.os.Environment.DIRECTORY_DOWNLOADS
-                    )
-                    val sub = java.io.File(dir, "TrefferPoint").also { it.mkdirs() }
-                    java.io.File(sub, filename).writeText(json)
-                }
-                AppLog.i(TAG, "Testbericht gespeichert: $filename")
-                filename
-            } catch (e: Exception) {
-                AppLog.e(TAG, "saveTestbericht fehlgeschlagen", e)
-                "Fehler: ${e.message}"
-            }
+            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+            return saveToDownloads("trefferpoint_$ts.json", json)
         }
     }
+
+    private fun saveToDownloads(filename: String, content: String): String {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/TrefferPoint")
+                }
+                val uri = contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                ) ?: return "Fehler: URI null"
+                contentResolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS
+                )
+                val sub = java.io.File(dir, "TrefferPoint").also { it.mkdirs() }
+                java.io.File(sub, filename).writeText(content)
+            }
+            AppLog.i(TAG, "Gespeichert: $filename")
+            filename
+        } catch (e: Exception) {
+            AppLog.e(TAG, "saveToDownloads fehlgeschlagen: $filename", e)
+            "Fehler: ${e.message}"
+        }
+    }
+
 }

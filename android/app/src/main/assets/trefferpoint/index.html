@@ -699,7 +699,8 @@
                     Leer = Auto (Gateway-IP des verbundenen WLANs probieren)
                 </div>
                 <button class="btn btn-primary" id="btnRtsp">▶ RTSP-Stream starten</button>
-                <button class="btn" id="btnScanCam" style="margin-top:5px">🔍 Kamera suchen (Auto-Discovery)</button>
+                <button class="btn" id="btnScanCam" style="margin-top:5px">🔍 Kamera suchen (Auto)</button>
+                <button class="btn" id="btnScanSubnet" style="margin-top:3px;display:none">🌐 Vollscan (Subnetz 1–254)</button>
                 <button class="btn" id="btnRtspStop" style="display:none;margin-top:5px">■ Stream stoppen</button>
                 <div id="scanResults" style="display:none;margin-top:8px;font-size:10px;font-family:'Share Tech Mono',monospace;color:var(--text-dim)"></div>
             </div>
@@ -842,7 +843,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.15';
+const APP_VERSION = '2.3.16';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2383,7 +2384,9 @@ async function manualUpdateCheck() {
         if (!latest) throw new Error('Keine Version gefunden');
         if (versionGt(latest, APP_VERSION)) {
             if (inAndroidApp) {
-                alert('Neue Version verfügbar: v' + latest + '\n\nAPK herunterladen:\nhttps://github.com/bmcservice/trefferpoint/releases/latest');
+                if (confirm('Neue Version v' + latest + ' verfügbar.\nGitHub-Releases im Browser öffnen?')) {
+                    try { window.tpBridge.openUrl('https://github.com/bmcservice/trefferpoint/releases/latest'); } catch(e) {}
+                }
             } else if (confirm('Neue Version v' + latest + ' verfügbar — jetzt laden?')) {
                 applyUpdate();
             }
@@ -2863,20 +2866,37 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         if (!isNaN(idx)) { e.preventDefault(); tpPickScan(idx); }
     }, { passive: false });
 
-    scanBtn.addEventListener('click', () => {
+    function startScan(full) {
         scanBtn.disabled = true;
+        const subnetBtn = document.getElementById('btnScanSubnet');
+        if (subnetBtn) subnetBtn.disabled = true;
         scanBtn.textContent = '🔍 Suche läuft...';
         scanResults.style.display = '';
-        scanResults.innerHTML = '<div style="color:var(--accent)">Scanne...</div>';
+        scanResults.innerHTML = '<div style="color:var(--accent)">' + (full ? 'Vollscan läuft (~15s)...' : 'Scanne...') + '</div>';
         const manual = document.getElementById('rtspUrl').value.trim();
         let host = '';
+        try { if (manual) host = new URL(manual).hostname || ''; } catch(e) {}
         try {
-            if (manual) host = new URL(manual).hostname || '';
-        } catch(e) {}
-        try { window.tpBridge.scanForCameras(host); } catch(e) {
+            if (full) window.tpBridge.scanSubnet(host);
+            else window.tpBridge.scanForCameras(host);
+        } catch(e) {
             window.tpOnScanResult('[]', true, 'Bridge-Fehler: ' + e);
         }
-    });
+    }
+
+    // done-Callback: Buttons wieder freigeben
+    const _origOnScanResult = window.tpOnScanResult;
+    window.tpOnScanResult = function(json, done, progress) {
+        _origOnScanResult(json, done, progress);
+        if (done) {
+            const subnetBtn = document.getElementById('btnScanSubnet');
+            if (subnetBtn) subnetBtn.disabled = false;
+        }
+    };
+
+    scanBtn.addEventListener('click', () => startScan(false));
+    const subnetBtn = document.getElementById('btnScanSubnet');
+    if (subnetBtn) subnetBtn.addEventListener('click', () => startScan(true));
 })();
 
 // Stream-URL aus localStorage wiederherstellen
@@ -3049,12 +3069,13 @@ document.getElementById('btnAutoOpt').addEventListener('click', autoOptimizeCame
 
 document.getElementById('btnDemo').addEventListener('click', runDemo);
 
-// Export-Button: nur in Android-APK sichtbar
+// Buttons nur in Android-APK sichtbar
 (function() {
     const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
         window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
     if (inAndroidApp) {
         document.getElementById('btnExport').style.display = '';
+        document.getElementById('btnScanSubnet').style.display = '';
     }
 })();
 document.getElementById('btnExport').addEventListener('click', function() {

@@ -17,6 +17,7 @@ import java.net.URL
 import kotlin.concurrent.thread
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
@@ -211,6 +212,19 @@ class RtspPipeline(
                 AppLog.e(TAG, "ExoPlayer Fehler: ${error.errorCodeName} — ${error.message}", error)
                 lastError = "${error.errorCodeName}: ${error.message}"
                 onStatus("RTSP-Fehler: ${error.errorCodeName}")
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                if (tracks.groups.isEmpty()) {
+                    AppLog.w(TAG, "onTracksChanged: keine Tracks — SDP leer oder unbekanntes Format")
+                    return
+                }
+                for (g in tracks.groups) {
+                    for (i in 0 until g.length) {
+                        val fmt = g.getTrackFormat(i)
+                        AppLog.i(TAG, "Track[$i]: mime=${fmt.sampleMimeType} codec=${fmt.codecs} ${fmt.width}x${fmt.height} selected=${g.isTrackSelected(i)}")
+                    }
+                }
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
