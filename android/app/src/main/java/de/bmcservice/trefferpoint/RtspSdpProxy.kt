@@ -174,34 +174,52 @@ class RtspSdpProxy(
 
     /** Transparentes bidirektionales Byte-Relay für die RTP-Streaming-Phase. */
     private fun relay(cIn: InputStream, cOut: OutputStream, camIn: InputStream, camOut: OutputStream) {
+        // Richtung ExoPlayer→Kamera (RTCP, keepalives)
         val t = thread(name = "proxy-c2cam") {
             try {
                 val buf = ByteArray(8192)
                 while (true) {
                     val n = cIn.read(buf)
-                    if (n <= 0) break
+                    if (n <= 0) { AppLog.i(TAG, "proxy-c2cam: ExoPlayer EOF (n=$n)"); break }
                     camOut.write(buf, 0, n)
                     camOut.flush()
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                AppLog.w(TAG, "proxy-c2cam Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
+            }
         }
+
+        // Richtung Kamera→ExoPlayer (RTP-Daten)
         var totalBytes = 0L
         try {
             val buf = ByteArray(8192)
             while (true) {
-                val n = camIn.read(buf)
-                if (n <= 0) break
+                val n = try {
+                    camIn.read(buf)
+                } catch (e: Exception) {
+                    AppLog.w(TAG, "camIn.read Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
+                    break
+                }
+                if (n <= 0) { AppLog.i(TAG, "cam→client: Kamera EOF (n=$n)"); break }
+
                 if (totalBytes == 0L) {
-                    // Ersten Chunk analysieren — bei TCP-Interleaved beginnt RTP mit '$'
-                    val firstByte = "0x${buf[0].toInt().and(0xFF).toString(16).uppercase()}"
-                    AppLog.i(TAG, "Erster RTP-Chunk von Kamera: ${n}B, erstes Byte=$firstByte")
+                    // TCP-Interleaved: '$' [ch] [len-hi] [len-lo] [payload...]
+                    val hex = buf.take(minOf(n, 12))
+                        .joinToString(" ") { "%02X".format(it.toInt().and(0xFF)) }
+                    AppLog.i(TAG, "Erster RTP-Chunk: ${n}B → $hex")
                 }
                 totalBytes += n
-                cOut.write(buf, 0, n)
-                cOut.flush()
+
+                try {
+                    cOut.write(buf, 0, n)
+                    cOut.flush()
+                } catch (e: Exception) {
+                    AppLog.w(TAG, "cOut.write Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)} — ExoPlayer hat Verbindung getrennt")
+                    break
+                }
             }
         } catch (e: Exception) {
-            AppLog.w(TAG, "RTP-Relay cam→client Ende: ${e.javaClass.simpleName}")
+            AppLog.w(TAG, "RTP-Relay outer Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
         }
         AppLog.i(TAG, "RTP-Relay beendet: ${totalBytes}B gesamt von Kamera empfangen")
         t.join(500)

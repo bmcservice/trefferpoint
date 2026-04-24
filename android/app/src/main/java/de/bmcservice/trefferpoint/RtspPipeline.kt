@@ -287,8 +287,14 @@ class RtspPipeline(
                         if (fmt.sampleMimeType?.startsWith("video/") == true
                             && g.isTrackSelected(i)
                             && fmt.width > 0 && fmt.height > 0) {
-                            AppLog.i(TAG, "→ ImageReader auf ${fmt.width}x${fmt.height} anpassen (vor PLAY)")
-                            recreateImageReader(fmt.width, fmt.height)
+                            val w = fmt.width; val h = fmt.height
+                            // Nicht direkt aus dem Listener-Callback aufrufen —
+                            // setVideoSurface() aus onTracksChanged heraus kann ExoPlayer
+                            // zu internem Reconnect zwingen. Post auf Main-Looper.
+                            mainHandler.post {
+                                AppLog.i(TAG, "→ ImageReader auf ${w}x${h} anpassen")
+                                recreateImageReader(w, h)
+                            }
                         }
                     }
                 }
