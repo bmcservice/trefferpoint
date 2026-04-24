@@ -102,18 +102,31 @@ object CameraScanner {
         // Schritt 2: Protokoll-Probes — SEQUENZIELL pro IP.
         val results = JSONArray()
         for ((ip, ports) in ipPortMap) {
-            // Wake-Up-Sequenz (aus Viidure-Crash-Log abgeleitet): viele OEM-Kameras
-            // liefern nur nach HTTP-Setup-Handshake auch auf RTSP.
+            // Wake-Up + URL-Discovery: SGK/Viidure-Kameras melden ihre RTSP-URL selbst via
+            // getmediainfo. Wenn vorhanden: direkt vertrauen, Socket-Probe überspringen.
+            var discoveredRtspUrl: String? = null
             if (ports.contains(80) && (ports.contains(554) || ports.contains(8554))) {
-                wakeupCameraHttp(ip)
+                discoveredRtspUrl = wakeupCameraHttp(ip)
             }
-            for (port in ports) {
-                val hits = when (port) {
-                    554, 8554 -> probeRtsp(ip, port)
-                    80, 81, 8080, 8081, 8888 -> probeHttpMjpeg(ip, port)
-                    else -> emptyList()
+            if (discoveredRtspUrl != null) {
+                results.put(JSONObject().apply {
+                    put("url", discoveredRtspUrl)
+                    put("port", 554)
+                    put("proto", "rtsp")
+                    put("detail", "via getmediainfo (SGK/Viidure)")
+                })
+                AppLog.i(TAG, "✓ RTSP via getmediainfo: $discoveredRtspUrl")
+                // HTTP-MJPEG noch prüfen (falls Kamera beides kann)
+                if (ports.contains(80)) probeHttpMjpeg(ip, 80).forEach { results.put(it) }
+            } else {
+                for (port in ports) {
+                    val hits = when (port) {
+                        554, 8554 -> probeRtsp(ip, port)
+                        80, 81, 8080, 8081, 8888 -> probeHttpMjpeg(ip, port)
+                        else -> emptyList()
+                    }
+                    hits.forEach { results.put(it) }
                 }
-                hits.forEach { results.put(it) }
             }
         }
 
@@ -125,8 +138,10 @@ object CameraScanner {
     /**
      * HTTP-Wake-Up-Sequenz für Viidure/SGK-Kameras. Ohne diesen Handshake ignorieren
      * sie RTSP-Anfragen. Abgeleitet aus dem Crash-Log der Original-Viidure-App.
+     * Gibt RTSP-URL aus getmediainfo zurück wenn vorhanden, sonst null.
      */
-    private fun wakeupCameraHttp(host: String) {
+    private fun wakeupCameraHttp(host: String): String? {
+        var discoveredRtsp: String? = null
         val endpoints = listOf(
             "http://$host:80/app/getdeviceattr",
             "http://$host:80/app/capability",
@@ -142,15 +157,23 @@ object CameraScanner {
                 conn.setRequestProperty("User-Agent", "Lavf58.76.100")
                 val code = conn.responseCode
                 val body = if (code in 200..299) {
-                    conn.inputStream.bufferedReader().use { it.readText() }.take(150)
+                    conn.inputStream.bufferedReader().use { it.readText() }.take(300)
                 } else ""
                 conn.disconnect()
-                AppLog.i(TAG, "WakeUp $ep → $code ${if (body.isNotBlank()) "| $body" else ""}")
+                AppLog.i(TAG, "WakeUp $ep → $code ${if (body.isNotBlank()) "| ${body.take(150)}" else ""}")
+                // getmediainfo: RTSP-URL aus {"info":{"rtsp":"rtsp://..."}} extrahieren
+                if (ep.endsWith("getmediainfo") && body.isNotBlank()) {
+                    try {
+                        val rtsp = JSONObject(body).getJSONObject("info").optString("rtsp")
+                        if (rtsp.startsWith("rtsp://")) discoveredRtsp = rtsp
+                    } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
                 AppLog.i(TAG, "WakeUp $ep → ${e.javaClass.simpleName}")
             }
             try { Thread.sleep(50) } catch (_: Exception) {}
         }
+        return discoveredRtsp
     }
 
     /** Prüft ob ein Port via TCP-Connect offen ist. */
