@@ -236,8 +236,22 @@ class RtspPipeline(
                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
                 .build()
         }
+        // LoadControl: extrem kleine Puffer, damit Wiedergabe sofort startet.
+        // Default bufferForPlaybackMs=2500 → ExoPlayer wartet 2.5s Video-Daten bevor READY.
+        // Bei SGK mit ~30fps braucht das 75 Frames — verträgt sich nicht mit Segment-Reconnects.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                1000,   // minBufferMs
+                10000,  // maxBufferMs
+                100,    // bufferForPlaybackMs
+                200     // bufferForPlaybackAfterRebufferMs
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
         val exo = ExoPlayer.Builder(context)
             .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
             .build()
         player = exo
 

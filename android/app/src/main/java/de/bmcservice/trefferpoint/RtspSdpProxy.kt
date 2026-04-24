@@ -285,6 +285,13 @@ class RtspSdpProxy(
         val cOutLock = Any()
         val mBitFixed = mutableSetOf<Int>()  // NAL-Typen, für die M-bit bereits geloggt wurde
 
+        // Diagnose: NAL-Typ-Verteilung + M-bit-Statistik.
+        // nalCounts[t] = (total, with M=1 vor Fix, with FU-A end-bit) für NAL-Typ t.
+        // Für FU-A (Typ 28) wird der ORIGINAL-Typ aus FU-Header[17]&0x1F gezählt, nicht 28.
+        val nalTotal = IntArray(32)
+        val nalWithM = IntArray(32)
+        val fuaEndBits = IntArray(32)  // FU-A Pakete mit E-Bit gesetzt, indexiert nach FU-Typ
+
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
 
@@ -358,6 +365,24 @@ class RtspSdpProxy(
                     seqState[0]++
                 }
 
+                // Diagnose-Zählung (nur RTP-Daten, nicht RTCP)
+                if (ch % 2 == 0 && len >= 13) {
+                    val nt = pktBuf[16].toInt() and 0x1F
+                    val mSet = (pktBuf[5].toInt() and 0x80) != 0
+                    if (nt == 28 && len >= 14) {
+                        val fuOrig = pktBuf[17].toInt() and 0x1F
+                        val fuEnd = (pktBuf[17].toInt() and 0x40) != 0
+                        if (fuOrig in 0..31) {
+                            nalTotal[fuOrig]++
+                            if (mSet) nalWithM[fuOrig]++
+                            if (fuEnd) fuaEndBits[fuOrig]++
+                        }
+                    } else if (nt in 0..31) {
+                        nalTotal[nt]++
+                        if (mSet) nalWithM[nt]++
+                    }
+                }
+
                 // M-bit Fix (Firmware-Bug #5): SGK setzt M=0 auf allen Paketen.
                 // ExoPlayer's RtpH264Reader emittiert Samples NUR wenn M=1 (letztes Paket
                 // eines Access Units) ODER FU-A End-Bit gesetzt ist. Ohne M=1 bleibt der
@@ -412,6 +437,16 @@ class RtspSdpProxy(
         }
 
         AppLog.i(TAG, "RTP-Relay: ${totalBytes}B von Kamera | cameraFirst=$cameraClosedFirst")
+
+        // NAL-Statistik dumpen (nur Typen die tatsächlich auftraten)
+        val stats = (0 until 32)
+            .filter { nalTotal[it] > 0 }
+            .joinToString(" ") { t ->
+                val desc = when (t) { 1->"P"; 5->"IDR"; 6->"SEI"; 7->"SPS"; 8->"PPS"; 9->"AUD"; else->"t$t" }
+                "$desc=${nalTotal[t]}(M=${nalWithM[t]},E=${fuaEndBits[t]})"
+            }
+        if (stats.isNotEmpty()) AppLog.i(TAG, "NAL-Stats: $stats")
+
         t.join(500)
         return cameraClosedFirst
     }
