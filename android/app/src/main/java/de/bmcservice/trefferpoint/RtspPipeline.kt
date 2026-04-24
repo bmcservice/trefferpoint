@@ -132,7 +132,10 @@ class RtspPipeline(
             "http://$host:80/app/getdeviceattr",
             "http://$host:80/app/capability",
             "http://$host:80/app/getproductinfo",
-            "http://$host:80/app/getmediainfo"
+            "http://$host:80/app/getmediainfo",
+            // Mail-Heartbeat zeigt rec:value=1 (Aufnahme aktiv, keine SD-Karte).
+            // Aufnahme stoppen — Kamera-Firmware liefert ggf. keinen RTSP-Stream im Aufnahme-Modus.
+            "http://$host:80/app/setrec?rec=0"
         )
         for (ep in endpoints) {
             try {

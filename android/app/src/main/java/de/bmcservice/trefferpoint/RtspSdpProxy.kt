@@ -60,25 +60,45 @@ class RtspSdpProxy(
 
             while (true) {
                 val req = readMsg(cIn) ?: break
+                val method = req.substringBefore(" ")
 
                 // URL in Anfrage-Zeile umschreiben: 127.0.0.1:proxyPort → cameraHost
-                val camReq = req.replaceFirst(
+                var camReq = req.replaceFirst(
                     "rtsp://127.0.0.1:$proxyPort",
                     if (cameraPort == 554) "rtsp://$cameraHost"
                     else "rtsp://$cameraHost:$cameraPort"
                 )
+
+                // SETUP: Transport explizit auf TCP-Interleaved forcieren —
+                // einige Kameras ignorieren den Transport-Wunsch des Clients und
+                // antworten mit UDP, obwohl TCP angefordert wurde.
+                if (method == "SETUP") {
+                    camReq = Regex("Transport:[^\r\n]*", RegexOption.IGNORE_CASE)
+                        .replace(camReq, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1")
+                    AppLog.i(TAG, "SETUP → Kamera (TCP-Interleaved erzwungen)")
+                }
+
                 camOut.write(camReq.toByteArray(Charsets.UTF_8))
                 camOut.flush()
 
                 val resp = readMsg(camIn) ?: break
 
+                // Vollständige Kamera-Antwort auf SETUP und PLAY loggen
+                if (method == "SETUP" || method == "PLAY") {
+                    val statusLine = resp.substringBefore("\r\n").take(60)
+                    val transport = resp.lineSequence()
+                        .firstOrNull { it.startsWith("Transport:", ignoreCase = true) }
+                        ?.take(120) ?: "(kein Transport-Header)"
+                    AppLog.i(TAG, "Kamera→$method: $statusLine | $transport")
+                }
+
                 // DESCRIBE-Antwort: a=recvonly aus SDP entfernen
-                val fwd = if (req.startsWith("DESCRIBE")) patchSdp(resp) else resp
+                val fwd = if (method == "DESCRIBE") patchSdp(resp) else resp
                 cOut.write(fwd.toByteArray(Charsets.UTF_8))
                 cOut.flush()
 
                 // Nach PLAY 200 OK: transparentes Byte-Relay (RTP-Interleaved)
-                if (req.startsWith("PLAY") && resp.contains("RTSP/1.0 200")) {
+                if (method == "PLAY" && resp.contains("RTSP/1.0 200")) {
                     clientSock.soTimeout = 0
                     cameraSock.soTimeout = 0
                     AppLog.i(TAG, "PLAY OK — wechsle in RTP-Relay-Modus")
@@ -165,15 +185,25 @@ class RtspSdpProxy(
                 }
             } catch (_: Exception) {}
         }
+        var totalBytes = 0L
         try {
             val buf = ByteArray(8192)
             while (true) {
                 val n = camIn.read(buf)
                 if (n <= 0) break
+                if (totalBytes == 0L) {
+                    // Ersten Chunk analysieren — bei TCP-Interleaved beginnt RTP mit '$'
+                    val firstByte = "0x${buf[0].toInt().and(0xFF).toString(16).uppercase()}"
+                    AppLog.i(TAG, "Erster RTP-Chunk von Kamera: ${n}B, erstes Byte=$firstByte")
+                }
+                totalBytes += n
                 cOut.write(buf, 0, n)
                 cOut.flush()
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            AppLog.w(TAG, "RTP-Relay cam→client Ende: ${e.javaClass.simpleName}")
+        }
+        AppLog.i(TAG, "RTP-Relay beendet: ${totalBytes}B gesamt von Kamera empfangen")
         t.join(500)
     }
 }
