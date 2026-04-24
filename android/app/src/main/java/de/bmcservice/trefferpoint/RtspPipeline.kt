@@ -126,7 +126,7 @@ class RtspPipeline(
             "http://$host:80/app/getdeviceattr",
             "http://$host:80/app/capability",
             "http://$host:80/app/getproductinfo",
-            "http://$host:80/app/getmediainfo"  // liefert RTSP-URL-Bestätigung
+            "http://$host:80/app/getmediainfo"
         )
         for (ep in endpoints) {
             try {
@@ -146,6 +146,42 @@ class RtspPipeline(
             }
         }
         AppLog.i(TAG, "HTTP Wake-Up abgeschlossen")
+        // Vollständigen SDP per rohem RTSP DESCRIBE loggen — zeigt exakte Codec-Parameter
+        describeRtsp(host, "rtsp://$host/live/tcp/ch1")
+    }
+
+    /**
+     * Roher RTSP DESCRIBE ohne ExoPlayer — loggt das vollständige SDP für Diagnose.
+     * ExoPlayer macht DESCRIBE intern, aber der SDP bleibt unsichtbar.
+     * Hier können wir Format-Parameter, Payload-Typen und Custom-Attributes sehen.
+     */
+    private fun describeRtsp(host: String, rtspUrl: String) {
+        try {
+            val sock = Socket()
+            sock.connect(InetSocketAddress(host, 554), 3000)
+            sock.soTimeout = 3000
+            val req = "DESCRIBE $rtspUrl RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: TrefferPoint/2.3.18\r\nAccept: application/sdp\r\n\r\n"
+            sock.getOutputStream().write(req.toByteArray(Charsets.UTF_8))
+            val sb = StringBuilder()
+            val buf = ByteArray(4096)
+            val deadline = System.currentTimeMillis() + 3000
+            while (System.currentTimeMillis() < deadline) {
+                val n = try { sock.getInputStream().read(buf) } catch (_: Exception) { break }
+                if (n <= 0) break
+                sb.append(String(buf, 0, n, Charsets.UTF_8))
+                // Abbruch wenn vollständige Antwort (Header + Content-Length Bytes)
+                val hEnd = sb.indexOf("\r\n\r\n")
+                if (hEnd >= 0) {
+                    val cl = Regex("Content-Length:\\s*(\\d+)", RegexOption.IGNORE_CASE)
+                        .find(sb.substring(0, hEnd))?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    if (sb.length >= hEnd + 4 + cl) break
+                }
+            }
+            sock.close()
+            AppLog.i(TAG, "DESCRIBE SDP (${sb.length}B):\n${sb.take(2000)}")
+        } catch (e: Exception) {
+            AppLog.w(TAG, "DESCRIBE fehlgeschlagen: ${e.message}")
+        }
     }
 
     private fun startInternal(url: String, useTcp: Boolean) {
@@ -235,6 +271,16 @@ class RtspPipeline(
                     for (i in 0 until g.length) {
                         val fmt = g.getTrackFormat(i)
                         AppLog.i(TAG, "Track[$i]: mime=${fmt.sampleMimeType} codec=${fmt.codecs} ${fmt.width}x${fmt.height} selected=${g.isTrackSelected(i)}")
+                        // ImageReader muss exakt die Decoder-Ausgabegröße haben —
+                        // sonst kann MediaCodec keine Output-Buffer dequeuen (stille Frame-Drops).
+                        // onVideoSizeChanged feuert erst nach dem ersten Frame → Henne-Ei-Problem.
+                        // Hier kennen wir die Größe aus dem SDP, noch vor PLAY → sofort korrigieren.
+                        if (fmt.sampleMimeType?.startsWith("video/") == true
+                            && g.isTrackSelected(i)
+                            && fmt.width > 0 && fmt.height > 0) {
+                            AppLog.i(TAG, "→ ImageReader auf ${fmt.width}x${fmt.height} anpassen (vor PLAY)")
+                            recreateImageReader(fmt.width, fmt.height)
+                        }
                     }
                 }
             }
@@ -250,18 +296,18 @@ class RtspPipeline(
 
         exo.prepare()
 
-        // Watchdog: Wenn nach 6s immer noch keine Frames angekommen sind, und wir sind auf TCP,
+        // Watchdog: Wenn nach 20s keine Frames ankommen und wir TCP verwendet haben,
         // automatischer Fallback auf UDP. Viele OEM-Kameras machen TCP-Interleaving kaputt.
         mainHandler.postDelayed({
             if (!running) return@postDelayed
             if (frameCount > 0) return@postDelayed
             if (!useTcp || triedUdpFallback) {
-                AppLog.w(TAG, "Keine Frames nach 6s — beide Transport-Arten probiert")
+                AppLog.w(TAG, "Keine Frames nach 20s — beide Transport-Arten probiert, aufgegeben")
                 onStatus("RTSP: keine Video-Pakete empfangen (Kamera neu starten?)")
                 return@postDelayed
             }
-            AppLog.i(TAG, "Keine Frames nach 6s mit TCP — Fallback auf UDP")
-            onStatus("RTSP: TCP-Pakete kommen nicht — versuche UDP")
+            AppLog.i(TAG, "Keine Frames nach 20s mit TCP — Fallback auf UDP")
+            onStatus("RTSP: TCP liefert keine Frames — versuche UDP")
             triedUdpFallback = true
             startInternal(currentUrl, useTcp = false)
         }, 20000)
