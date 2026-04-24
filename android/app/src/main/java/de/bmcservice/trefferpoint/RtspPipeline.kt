@@ -66,20 +66,26 @@ class RtspPipeline(
     // muss offen bleiben während RTSP läuft, sonst blockt die Kamera den Stream.
     @Volatile private var mailSocket: Socket? = null
 
+    // SDP-Proxy: patcht "a=recvonly"-Bug in der Kamera-Firmware, bevor ExoPlayer den SDP sieht.
+    @Volatile private var sdpProxy: RtspSdpProxy? = null
+
     fun start(url: String) {
         currentUrl = url
         triedUdpFallback = false
-        // Viidure-SGK-Kameras wollen eine HTTP-Wake-Up-Sequenz bevor sie Stream liefern.
-        // Wir machen das im Hintergrund, damit der Start nicht blockiert.
         thread(start = true, name = "rtsp-wakeup") {
             val hostMatch = Regex("rtsp://([^:/]+)").find(url)
             val host = hostMatch?.groupValues?.get(1)
+            var rtspUrl = url
             if (host != null && host.startsWith("192.168.")) {
                 wakeupCameraHttp(host)
+                // SDP-Proxy starten: kamera-seitiger Bug a=recvonly → wird zu sendrecv gepatcht
+                sdpProxy?.stop()
+                val proxy = RtspSdpProxy(host)
+                rtspUrl = proxy.start()
+                sdpProxy = proxy
                 openMailSocket(host, 6035)
             }
-            // Danach eigentlichen Stream starten (auf Main-Thread weil ExoPlayer dies verlangt)
-            mainHandler.post { startInternal(url, useTcp = true) }
+            mainHandler.post { startInternal(rtspUrl, useTcp = true) }
         }
     }
 
@@ -342,6 +348,8 @@ class RtspPipeline(
         triedUdpFallback = false
         currentUrl = ""
         stopInternal()
+        sdpProxy?.stop()
+        sdpProxy = null
         try { mailSocket?.close() } catch (_: Exception) {}
         mailSocket = null
     }
