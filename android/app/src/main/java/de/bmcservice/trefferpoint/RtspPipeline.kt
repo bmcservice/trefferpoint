@@ -106,6 +106,32 @@ class RtspPipeline(
             s.soTimeout = 15000
             mailSocket = s
             AppLog.i(TAG, "Mail-Socket offen auf $host:$port")
+
+            // Firmware-Bug #6 Probes via Mail-Socket: probiere mehrere JSON-Kommandos
+            // für "force I-frame". Antworten kommen asynchron im mail-socket-rx Reader.
+            try {
+                val probes = listOf(
+                    "{\"msgid\":\"ikeyframe\"}\n",
+                    "{\"msgid\":\"forceikeyframe\"}\n",
+                    "{\"msgid\":\"req_iframe\"}\n",
+                    "{\"msgid\":\"setencode\",\"info\":{\"iframe\":1}}\n",
+                    "{\"msgid\":\"setgop\",\"info\":{\"value\":1}}\n",
+                    "{\"msgid\":\"getencode\"}\n",
+                    "{\"msgid\":\"capability\"}\n",
+                    "{\"msgid\":\"listcmd\"}\n"
+                )
+                for (p in probes) {
+                    try {
+                        s.getOutputStream().write(p.toByteArray(Charsets.UTF_8))
+                        s.getOutputStream().flush()
+                        AppLog.i(TAG, "Mail-TX: ${p.trim()}")
+                    } catch (e: Exception) {
+                        AppLog.w(TAG, "Mail-TX fehlgeschlagen: ${e.message}")
+                        break
+                    }
+                }
+            } catch (_: Exception) {}
+
             thread(start = true, name = "mail-socket-rx") {
                 try {
                     val buf = ByteArray(4096)
@@ -137,7 +163,25 @@ class RtspPipeline(
             "http://$host:80/app/getmediainfo",
             // Mail-Heartbeat zeigt rec:value=1 (Aufnahme aktiv, keine SD-Karte).
             // Aufnahme stoppen — Kamera-Firmware liefert ggf. keinen RTSP-Stream im Aufnahme-Modus.
-            "http://$host:80/app/setrec?rec=0"
+            "http://$host:80/app/setrec?rec=0",
+            // Firmware-Bug #6 Probes: Kamera sendet KEIN IDR-Keyframe → MediaCodec kann
+            // P-Frames nicht dekodieren → frameCount=0. Probiere typische "force-IDR" Endpoints.
+            "http://$host:80/app/forceikeyframe",
+            "http://$host:80/app/ikeyframe",
+            "http://$host:80/app/reqikeyframe",
+            "http://$host:80/app/requestkeyframe",
+            "http://$host:80/app/keyframe",
+            "http://$host:80/app/forceiframe",
+            "http://$host:80/app/reqiframe",
+            "http://$host:80/app/setiframe?value=1",
+            "http://$host:80/app/setencode?iframe=1",
+            "http://$host:80/app/setencode?gop=1",
+            "http://$host:80/app/setgop?value=1",
+            "http://$host:80/app/setconfig?iframe=1",
+            "http://$host:80/app/getencode",
+            "http://$host:80/app/getgop",
+            "http://$host:80/app/streamctrl?action=iframe",
+            "http://$host:80/app/videoconfig?iframe=1"
         )
         for (ep in endpoints) {
             try {
