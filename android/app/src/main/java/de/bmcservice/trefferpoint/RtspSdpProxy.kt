@@ -174,15 +174,35 @@ class RtspSdpProxy(
 
     /** Transparentes bidirektionales Byte-Relay für die RTP-Streaming-Phase. */
     private fun relay(cIn: InputStream, cOut: OutputStream, camIn: InputStream, camOut: OutputStream) {
-        // Richtung ExoPlayer→Kamera (RTCP, keepalives)
+        // Richtung ExoPlayer→Kamera (RTCP + Keepalives)
+        // ExoPlayer sendet nach ~5s einen OPTIONS-Keepalive über den Relay.
+        // Die SGK-Kamera versteht keine RTSP-Nachrichten während sie streamt → TCP RST.
+        // Lösung: '$'-Frames (TCP-Interleaved RTCP) normal weiterleiten,
+        //         RTSP-Textnachrichten (OPTIONS/GET_PARAMETER) lokal beantworten.
         val t = thread(name = "proxy-c2cam") {
             try {
                 val buf = ByteArray(8192)
                 while (true) {
-                    val n = cIn.read(buf)
-                    if (n <= 0) { AppLog.i(TAG, "proxy-c2cam: ExoPlayer EOF (n=$n)"); break }
-                    camOut.write(buf, 0, n)
-                    camOut.flush()
+                    val n = try { cIn.read(buf) } catch (e: Exception) {
+                        AppLog.w(TAG, "proxy-c2cam cIn: ${e.javaClass.simpleName}: ${e.message?.take(50)}")
+                        break
+                    }
+                    if (n <= 0) { AppLog.i(TAG, "proxy-c2cam: ExoPlayer EOF"); break }
+
+                    if (buf[0] == 0x24.toByte()) {
+                        // TCP-Interleaved RTCP → an Kamera weiterleiten
+                        camOut.write(buf, 0, n)
+                        camOut.flush()
+                    } else {
+                        // RTSP-Keepalive (OPTIONS / GET_PARAMETER) → lokal beantworten
+                        val msg = String(buf, 0, n, Charsets.UTF_8)
+                        val cseq = Regex("CSeq:\\s*(\\d+)", RegexOption.IGNORE_CASE)
+                            .find(msg)?.groupValues?.get(1) ?: "0"
+                        val method = msg.substringBefore(" ").take(20)
+                        AppLog.i(TAG, "Keepalive abgefangen: $method CSeq=$cseq — lokal beantwortet")
+                        cOut.write("RTSP/1.0 200 OK\r\nCSeq: $cseq\r\n\r\n".toByteArray())
+                        cOut.flush()
+                    }
                 }
             } catch (e: Exception) {
                 AppLog.w(TAG, "proxy-c2cam Ende: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
