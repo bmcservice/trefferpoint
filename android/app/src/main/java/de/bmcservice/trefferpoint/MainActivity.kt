@@ -333,6 +333,14 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             AppLog.w(TAG, "UVC: setWhiteBalanceAuto nicht unterstützt: ${e.message}")
         }
+        // Gain (AGC) einfrieren — laufende AGC ist häufigste Flacker-Ursache bei Spektiv-Szenen
+        try {
+            val g = uvc.gain
+            uvc.setGain(g)
+            AppLog.i(TAG, "UVC: Gain fixiert auf $g")
+        } catch (e: Exception) {
+            AppLog.w(TAG, "UVC: Gain-Fixierung nicht unterstützt: ${e.message}")
+        }
     }
 
     private fun pushFrameToWebView(jpeg: ByteArray) {
@@ -538,6 +546,7 @@ class MainActivity : AppCompatActivity() {
                     try { uvc.setExposureTimeAbsolute(millis * 10) } catch (e: Exception) {
                         AppLog.w(TAG, "setExposureTimeAbsolute fehlgeschlagen: ${e.message}")
                     }
+                    try { uvc.setGain(uvc.gain) } catch (_: Exception) {}
                     AppLog.i(TAG, "UVC: Exposure manuell auf ${millis} ms (${millis * 10} UVC-Units)")
                 } catch (e: Exception) {
                     AppLog.e(TAG, "setExposureTime Exception", e)
@@ -557,6 +566,21 @@ class MainActivity : AppCompatActivity() {
                     AppLog.i(TAG, "UVC: Exposure zurück auf AUTO")
                 } catch (e: Exception) {
                     AppLog.e(TAG, "setExposureAuto Exception", e)
+                }
+            }
+        }
+
+        /** Setzt UVC-Gain manuell (0–255 typisch). */
+        @JavascriptInterface
+        fun setUvcGain(value: Int) {
+            val helper = cameraHelper ?: return
+            runOnUiThread {
+                try {
+                    val uvc = helper.uvcControl ?: return@runOnUiThread
+                    uvc.setGain(value)
+                    AppLog.i(TAG, "UVC: Gain manuell auf $value")
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "setUvcGain Exception", e)
                 }
             }
         }

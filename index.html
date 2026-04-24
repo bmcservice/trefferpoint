@@ -661,6 +661,7 @@
                 <div class="tv-empty" id="tvEmpty">Noch keine Treffer registriert</div>
             </div>
         </div>
+        <button class="btn" id="btnExportTv" style="margin:8px 16px;display:none">💾 Testbericht speichern</button>
     </div>
 
     <!-- SIDE PANEL -->
@@ -777,6 +778,11 @@
                     <button class="btn" id="btnExposureAuto" style="flex:1;font-size:11px;padding:5px">Auto</button>
                 </div>
                 <div id="shutterStatus" style="font-size:10px;color:var(--text-dim);margin-top:3px;font-family:'Share Tech Mono',monospace"></div>
+                <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+                    <span style="font-size:10px;color:var(--text-dim);font-family:'Share Tech Mono',monospace;white-space:nowrap">Gain</span>
+                    <input type="range" id="uvcGain" min="0" max="255" step="1" value="128" style="flex:1;accent-color:var(--accent)">
+                    <span style="font-size:10px;color:var(--text-dim);font-family:'Share Tech Mono',monospace;min-width:28px;text-align:right" id="gainVal">128</span>
+                </div>
             </div>
 
             <button class="btn btn-primary" id="btnAutoOpt" style="margin-top:8px">⚙ Auto-Optimieren</button>
@@ -843,7 +849,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.25';
+const APP_VERSION = '2.3.26';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3036,6 +3042,17 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
             statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
         }
     });
+    const gainSlider = document.getElementById('uvcGain');
+    const gainValEl  = document.getElementById('gainVal');
+    gainSlider.addEventListener('input', () => { gainValEl.textContent = gainSlider.value; });
+    gainSlider.addEventListener('change', () => {
+        try {
+            window.tpBridge.setUvcGain(parseInt(gainSlider.value));
+            statusEl.textContent = '✓ Gain auf ' + gainSlider.value + ' gesetzt';
+        } catch (e) {
+            statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
+        }
+    });
 })();
 
 document.getElementById('btnRotateCam').addEventListener('click', () => {
@@ -3075,9 +3092,13 @@ document.getElementById('btnDemo').addEventListener('click', runDemo);
         window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
     if (inAndroidApp) {
         document.getElementById('btnExport').style.display = '';
+        document.getElementById('btnExportTv').style.display = '';
         document.getElementById('btnScanSubnet').style.display = '';
     }
 })();
+document.getElementById('btnExportTv').addEventListener('click', () => {
+    document.getElementById('btnExport').click();
+});
 document.getElementById('btnExport').addEventListener('click', function() {
     try {
         const discKey = document.getElementById('discSel').value;
