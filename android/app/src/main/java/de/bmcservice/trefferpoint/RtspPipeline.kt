@@ -2,6 +2,7 @@ package de.bmcservice.trefferpoint
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.SurfaceTexture
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -75,6 +76,9 @@ class RtspPipeline(
 
     // capturePending: verhindert Stau wenn JPEG-Kompression länger als Poll-Intervall dauert
     @Volatile private var capturePending = false
+
+    // Frische SurfaceTexture pro ExoPlayer-Lifecycle (stark referenziert gegen GC)
+    private var ownedSt: SurfaceTexture? = null
 
     // Viidure/SGK-spezifisch: TCP-Socket auf Port 6035 ("mail_tcp_socket")
     @Volatile private var mailSocket: Socket? = null
@@ -351,6 +355,24 @@ class RtspPipeline(
         frameCount = 0
         capturePending = false
 
+        // Frische SurfaceTexture: nach player.release() kann der c2.android.avc.decoder
+        // nicht mehr in die alte SurfaceTexture schreiben (Y bleibt 0 → G=135 nach UV-Fix).
+        // Neue, nie benutzte SurfaceTexture garantiert sauberen Decoder-Start.
+        // SurfaceTexture(false) = detached vom GL-Kontext (API 26+); ExoPlayer verwaltet GL intern.
+        val prevSt = ownedSt
+        val freshSt = SurfaceTexture(false)
+        freshSt.setDefaultBufferSize(INITIAL_WIDTH, INITIAL_HEIGHT)
+        ownedSt = freshSt
+        val tvAvail = textureView.isAvailable
+        if (tvAvail) {
+            textureView.setSurfaceTexture(freshSt)
+            AppLog.i(TAG, "start: frische SurfaceTexture gesetzt (TV=available)")
+        } else {
+            AppLog.w(TAG, "start: TextureView nicht verfügbar — alte ST bleibt! (TV=unavailable)")
+        }
+        // Alte ST nach sicherer Verzögerung freigeben (nicht sofort: alter Player läuft noch kurz)
+        mainHandler.postDelayed({ try { prevSt?.release() } catch (_: Exception) {} }, 500L)
+
         AppLog.i(TAG, "start: $url (RTP über ${if (useTcp) "TCP" else "UDP"})")
         onStatus("RTSP: Verbinde (${if (useTcp) "TCP" else "UDP"}) zu $url")
 
@@ -524,6 +546,10 @@ class RtspPipeline(
         AppLog.i(TAG, "stop")
         // Polling stoppen (sowohl auf Main- als auch auf captureThread)
         mainHandler.removeCallbacks(captureRunnable)
+        // Explizit von TextureView detachen vor release() — verhindert ST-Invalidierung
+        // durch player.release() (Samsung-Quirk: release() macht SurfaceTexture für Folge-
+        // Decoder unbrauchbar wenn nicht vorher sauber getrennt).
+        try { player?.clearVideoTextureView(textureView) } catch (_: Exception) {}
         try { captureThread?.quitSafely() } catch (_: Exception) {}
         captureThread = null
         captureHandler = null
