@@ -55,10 +55,18 @@ class RtspSdpProxy(
 
     private fun session(clientSock: Socket) {
         var cameraSock: Socket? = null
-        var trackUrl = if (cameraPort == 554)
+        val defaultVideoTrackUrl = if (cameraPort == 554)
             "rtsp://$cameraHost/live/tcp/ch1/video/track0"
         else
             "rtsp://$cameraHost:$cameraPort/live/tcp/ch1/video/track0"
+        var trackUrl = defaultVideoTrackUrl
+        // Firmware-Bug #7: ExoPlayer SETUPs Video-Track zuerst, dann Audio-Track.
+        // trackUrl zeigt nach dem letzten SETUP auf den Audio-Track. Für transparente
+        // Reconnects MUSS jedoch der Video-Track neu geöffnet werden, sonst schickt
+        // die Kamera nach dem Reconnect nur Audio → kein Video → frameCount bleibt bei 1.
+        var videoTrackUrl = defaultVideoTrackUrl
+        // Wird beim SETUP gesetzt, damit die SETUP-Antwort an ExoPlayer korrekt gepatcht wird.
+        var lastSetupIsAudio = false
 
         try {
             cameraSock = Socket(cameraHost, cameraPort)
@@ -79,10 +87,22 @@ class RtspSdpProxy(
                 )
                 if (method == "SETUP") {
                     val setupUrl = camReq.substringAfter("SETUP ").substringBefore(" RTSP")
-                    if (setupUrl.startsWith("rtsp://")) trackUrl = setupUrl
+                    if (setupUrl.startsWith("rtsp://")) {
+                        trackUrl = setupUrl
+                        // Video-Track-URL nur für nicht-Audio-Tracks merken
+                        if (!setupUrl.contains("/audio/", ignoreCase = true)) {
+                            videoTrackUrl = setupUrl
+                        }
+                    }
+                    lastSetupIsAudio = setupUrl.contains("/audio/", ignoreCase = true)
+                    // Firmware-Bug #7b: Kamera weist Video und Audio beide interleaved=0-1 zu
+                    // → Channel-Kollision: Audio-Pakete landen auf dem Video-Channel (ch=0).
+                    // Fix: Video bekommt ch0-1, Audio bekommt ch2-3. In relay() werden
+                    // Audio-Pakete (PT≠96) auf ch=0 nach ch=2 umgemappt.
+                    val interleavedCh = if (lastSetupIsAudio) "2-3" else "0-1"
                     camReq = Regex("Transport:[^\r\n]*", RegexOption.IGNORE_CASE)
-                        .replace(camReq, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1")
-                    AppLog.i(TAG, "SETUP → Kamera (TCP-Interleaved erzwungen)")
+                        .replace(camReq, "Transport: RTP/AVP/TCP;unicast;interleaved=$interleavedCh")
+                    AppLog.i(TAG, "SETUP → Kamera (${if (lastSetupIsAudio) "Audio ch2-3" else "Video ch0-1"})")
                 }
                 cameraSock!!.getOutputStream().write(camReq.toByteArray(Charsets.UTF_8))
                 cameraSock!!.getOutputStream().flush()
@@ -98,6 +118,9 @@ class RtspSdpProxy(
                 val fwd = when (method) {
                     "DESCRIBE" -> patchSdp(resp)
                     "PLAY"     -> patchPlayResponse(resp)
+                    // Sicherstellen dass ExoPlayer die korrekten Interleaved-Channels sieht:
+                    // Video → 0-1, Audio → 2-3 (auch wenn Kamera immer 0-1 antwortet)
+                    "SETUP"    -> if (lastSetupIsAudio) patchSetupInterleaved(resp, "2-3") else resp
                     else       -> resp
                 }
                 cOut.write(fwd.toByteArray(Charsets.UTF_8))
@@ -106,7 +129,7 @@ class RtspSdpProxy(
                 if (method == "PLAY" && resp.contains("RTSP/1.0 200")) {
                     clientSock.soTimeout = 0
                     cameraSock!!.soTimeout = 0
-                    AppLog.i(TAG, "PLAY OK — starte RTP-Relay (trackUrl=$trackUrl)")
+                    AppLog.i(TAG, "PLAY OK — starte RTP-Relay (videoTrack=$videoTrackUrl)")
                     break@loop
                 }
             }
@@ -131,7 +154,8 @@ class RtspSdpProxy(
                 try { cameraSock?.close() } catch (_: Exception) {}
 
                 cameraSock = Socket(cameraHost, cameraPort)
-                if (!doCameraHandshake(cameraSock!!, trackUrl)) {
+                // Reconnect mit Video-Track-URL (nicht Audio!) — Bug #7 Fix
+                if (!doCameraHandshake(cameraSock!!, videoTrackUrl)) {
                     AppLog.w(TAG, "Reconnect #$reconnects fehlgeschlagen — Stream Ende")
                     break
                 }
@@ -239,6 +263,12 @@ class RtspSdpProxy(
             .firstOrNull { it.startsWith("RTP-Info:", ignoreCase = true) }?.take(150) ?: ""
         AppLog.i(TAG, "PLAY-Antwort RTP-Info: ${rtpInfo.ifEmpty { "(kein RTP-Info Header)" }}")
         return patched
+    }
+
+    /** Patcht interleaved=X-Y in einer SETUP-Antwort auf den gewünschten Wert. */
+    private fun patchSetupInterleaved(response: String, newInterleaved: String): String {
+        return Regex("interleaved=\\d+-\\d+", RegexOption.IGNORE_CASE)
+            .replace(response, "interleaved=$newInterleaved")
     }
 
     /** Entfernt alle "a=recvonly"-Zeilen aus dem SDP und aktualisiert Content-Length. */
@@ -356,122 +386,137 @@ class RtspSdpProxy(
                 if (read < len) { cameraClosedFirst = true; break }
                 totalBytes += 4 + len
 
-                // RTP-Sequenznummern (gerade Kanäle = Daten, nicht RTCP) kontinuierlich halten.
-                // RTP-Seq liegt bei Offset 2..3 des RTP-Packets, d.h. pktBuf[6..7].
-                if (ch % 2 == 0 && len >= 4) {
-                    if (seqState[0] < 0) {
-                        // Erste Initialisierung: Kamera-Startseq übernehmen (typisch 256)
-                        val camSeq = ((pktBuf[6].toInt() and 0xFF) shl 8) or (pktBuf[7].toInt() and 0xFF)
-                        seqState[0] = camSeq
-                    }
-                    val outSeq = seqState[0] and 0xFFFF
-                    pktBuf[6] = (outSeq ushr 8).toByte()
-                    pktBuf[7] = (outSeq and 0xFF).toByte()
-                    seqState[0]++
+                // Audio-Paket-Erkennung: Kamera sendet Video (PT=96) und Audio (PT=97) beide
+                // auf Interleaved-Channel 0 (Firmware-Bug #7b). Wir biegen Audio-Pakete auf
+                // ch=2 um (was ExoPlayer durch die gepatchte SETUP-Antwort erwartet), damit
+                // Audio und Video sauber getrennt sind und keine Seq/IDR-Verarbeitung für
+                // Audio-Pakete stattfindet.
+                // RTP-Byte 1 (= pktBuf[5]): Bit 7 = M-Flag, Bits 6-0 = Payload-Type
+                val isAudioPacket = ch == 0 && len >= 2 && (pktBuf[5].toInt() and 0x7F) != 96
+                if (isAudioPacket) {
+                    pktBuf[1] = 2.toByte()  // Channel 0 → 2 für Audio
                 }
 
-                // Diagnose-Zählung (nur RTP-Daten, nicht RTCP)
-                if (ch % 2 == 0 && len >= 13) {
-                    val nt = pktBuf[16].toInt() and 0x1F
-                    val mSet = (pktBuf[5].toInt() and 0x80) != 0
-                    if (nt == 28 && len >= 14) {
-                        val fuOrig = pktBuf[17].toInt() and 0x1F
-                        val fuEnd = (pktBuf[17].toInt() and 0x40) != 0
-                        if (fuOrig in 0..31) {
-                            nalTotal[fuOrig]++
-                            if (mSet) nalWithM[fuOrig]++
-                            if (fuEnd) fuaEndBits[fuOrig]++
+                // Video-spezifische Verarbeitung: Seq-Rewrite, NAL-Stats, IDR-Hack, M-Bit-Fix.
+                // Wird für Audio-Pakete (bereits auf ch=2 umgebogen) übersprungen.
+                if (!isAudioPacket) {
+                    // RTP-Sequenznummern (gerade Kanäle = Daten, nicht RTCP) kontinuierlich halten.
+                    // RTP-Seq liegt bei Offset 2..3 des RTP-Packets, d.h. pktBuf[6..7].
+                    if (ch % 2 == 0 && len >= 4) {
+                        if (seqState[0] < 0) {
+                            // Erste Initialisierung: Kamera-Startseq übernehmen (typisch 256)
+                            val camSeq = ((pktBuf[6].toInt() and 0xFF) shl 8) or (pktBuf[7].toInt() and 0xFF)
+                            seqState[0] = camSeq
                         }
-                    } else if (nt in 0..31) {
-                        nalTotal[nt]++
-                        if (mSet) nalWithM[nt]++
+                        val outSeq = seqState[0] and 0xFFFF
+                        pktBuf[6] = (outSeq ushr 8).toByte()
+                        pktBuf[7] = (outSeq and 0xFF).toByte()
+                        seqState[0]++
                     }
-                }
 
-                // IDR-Hack: NUR DAS ERSTE P-Frame jedes relay()-Laufs als IDR umlabeln.
-                // Begründung: Wenn JEDES P-Frame als IDR markiert wird, resetet der Decoder
-                // bei jedem Frame seinen Reference-Buffer → Output bleibt schwarz, weil
-                // P-Slice-Daten ohne Referenz nichts Sichtbares ergeben. Wenn wir aber nur
-                // den ERSTEN als Sync-Sample markieren, hat der Decoder von da an einen
-                // (anfangs Müll-) Reference-Frame, und alle folgenden P-Frames bauen
-                // korrekt darauf auf → das Bild konvergiert über 1-2 Sekunden auf den
-                // echten Live-Inhalt.
-                //
-                // FU-A: alle Fragmente desselben P-Frames müssen konsistent gelabelt werden,
-                // da der Reassembler sonst inkonsistent ist. Wir tracken via
-                // labelingFrameInProgress ob wir gerade beim ersten P-Frame sind.
-                if (ch % 2 == 0 && len >= 13 && !idrSeen) {
-                    val nt = pktBuf[16].toInt() and 0x1F
-                    if (nt == 28 && len >= 14) {
-                        val fuOrig = pktBuf[17].toInt() and 0x1F
-                        val fuStart = (pktBuf[17].toInt() and 0x80) != 0
-                        val fuEnd = (pktBuf[17].toInt() and 0x40) != 0
-                        if (fuOrig == 1) {
-                            if (fuStart) labelingFirstPFrame = true
-                            if (labelingFirstPFrame) {
-                                // Type-Bits → 5 (IDR), NRI → 11 (höchste Importance)
-                                pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
-                                pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
-                                idrRelabeled++
-                                if (fuEnd) {
-                                    labelingFirstPFrame = false
-                                    idrSeen = true  // erster P-Frame fertig — nicht mehr labeln
+                    // Diagnose-Zählung (nur RTP-Daten, nicht RTCP)
+                    if (ch % 2 == 0 && len >= 13) {
+                        val nt = pktBuf[16].toInt() and 0x1F
+                        val mSet = (pktBuf[5].toInt() and 0x80) != 0
+                        if (nt == 28 && len >= 14) {
+                            val fuOrig = pktBuf[17].toInt() and 0x1F
+                            val fuEnd = (pktBuf[17].toInt() and 0x40) != 0
+                            if (fuOrig in 0..31) {
+                                nalTotal[fuOrig]++
+                                if (mSet) nalWithM[fuOrig]++
+                                if (fuEnd) fuaEndBits[fuOrig]++
+                            }
+                        } else if (nt in 0..31) {
+                            nalTotal[nt]++
+                            if (mSet) nalWithM[nt]++
+                        }
+                    }
+
+                    // IDR-Hack: NUR DAS ERSTE P-Frame jedes relay()-Laufs als IDR umlabeln.
+                    // Begründung: Wenn JEDES P-Frame als IDR markiert wird, resetet der Decoder
+                    // bei jedem Frame seinen Reference-Buffer → Output bleibt schwarz, weil
+                    // P-Slice-Daten ohne Referenz nichts Sichtbares ergeben. Wenn wir aber nur
+                    // den ERSTEN als Sync-Sample markieren, hat der Decoder von da an einen
+                    // (anfangs Müll-) Reference-Frame, und alle folgenden P-Frames bauen
+                    // korrekt darauf auf → das Bild konvergiert über 1-2 Sekunden auf den
+                    // echten Live-Inhalt.
+                    //
+                    // FU-A: alle Fragmente desselben P-Frames müssen konsistent gelabelt werden,
+                    // da der Reassembler sonst inkonsistent ist. Wir tracken via
+                    // labelingFrameInProgress ob wir gerade beim ersten P-Frame sind.
+                    if (ch % 2 == 0 && len >= 13 && !idrSeen) {
+                        val nt = pktBuf[16].toInt() and 0x1F
+                        if (nt == 28 && len >= 14) {
+                            val fuOrig = pktBuf[17].toInt() and 0x1F
+                            val fuStart = (pktBuf[17].toInt() and 0x80) != 0
+                            val fuEnd = (pktBuf[17].toInt() and 0x40) != 0
+                            if (fuOrig == 1) {
+                                if (fuStart) labelingFirstPFrame = true
+                                if (labelingFirstPFrame) {
+                                    // Type-Bits → 5 (IDR), NRI → 11 (höchste Importance)
+                                    pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
+                                    pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
+                                    idrRelabeled++
+                                    if (fuEnd) {
+                                        labelingFirstPFrame = false
+                                        idrSeen = true  // erster P-Frame fertig — nicht mehr labeln
+                                    }
+                                }
+                            }
+                        } else if (nt == 1) {
+                            // Single-NAL P-Frame → als IDR umlabeln (einmalig)
+                            pktBuf[16] = ((pktBuf[16].toInt() and 0x80) or 0x65).toByte()
+                            idrRelabeled++
+                            idrSeen = true
+                        }
+                    }
+
+                    // M-bit Fix (Firmware-Bug #5): SGK setzt M=0 auf allen Paketen.
+                    // ExoPlayer's RtpH264Reader emittiert Samples NUR wenn M=1 (letztes Paket
+                    // eines Access Units) ODER FU-A End-Bit gesetzt ist. Ohne M=1 bleibt der
+                    // Sample-Buffer leer → ExoPlayer hängt ewig in BUFFERING.
+                    // Fix: M=1 setzen für NAL-Typen, die einen kompletten Frame signalisieren.
+                    if (ch % 2 == 0 && len >= 13) {
+                        val nalType = pktBuf[16].toInt() and 0x1F
+                        val mAlreadySet = (pktBuf[5].toInt() and 0x80) != 0
+                        if (!mAlreadySet) {
+                            val shouldFix = when (nalType) {
+                                1, 5 -> true  // Non-IDR / IDR als Single-NAL-Paket = vollständiger Frame
+                                28   -> len >= 14 && (pktBuf[17].toInt() and 0x40) != 0  // FU-A End-Bit
+                                else -> false
+                            }
+                            if (shouldFix) {
+                                pktBuf[5] = (pktBuf[5].toInt() or 0x80).toByte()
+                                if (mBitFixed.add(nalType)) {
+                                    AppLog.i(TAG, "M-bit Fix: NAL=$nalType → M=1 (Firmware-Bug #5)")
                                 }
                             }
                         }
-                    } else if (nt == 1) {
-                        // Single-NAL P-Frame → als IDR umlabeln (einmalig)
-                        pktBuf[16] = ((pktBuf[16].toInt() and 0x80) or 0x65).toByte()
-                        idrRelabeled++
-                        idrSeen = true
                     }
-                }
 
-                // M-bit Fix (Firmware-Bug #5): SGK setzt M=0 auf allen Paketen.
-                // ExoPlayer's RtpH264Reader emittiert Samples NUR wenn M=1 (letztes Paket
-                // eines Access Units) ODER FU-A End-Bit gesetzt ist. Ohne M=1 bleibt der
-                // Sample-Buffer leer → ExoPlayer hängt ewig in BUFFERING.
-                // Fix: M=1 setzen für NAL-Typen, die einen kompletten Frame signalisieren.
-                if (ch % 2 == 0 && len >= 13) {
-                    val nalType = pktBuf[16].toInt() and 0x1F
-                    val mAlreadySet = (pktBuf[5].toInt() and 0x80) != 0
-                    if (!mAlreadySet) {
-                        val shouldFix = when (nalType) {
-                            1, 5 -> true  // Non-IDR / IDR als Single-NAL-Paket = vollständiger Frame
-                            28   -> len >= 14 && (pktBuf[17].toInt() and 0x40) != 0  // FU-A End-Bit
-                            else -> false
-                        }
-                        if (shouldFix) {
-                            pktBuf[5] = (pktBuf[5].toInt() or 0x80).toByte()
-                            if (mBitFixed.add(nalType)) {
-                                AppLog.i(TAG, "M-bit Fix: NAL=$nalType → M=1 (Firmware-Bug #5)")
+                    if (!firstChunkLogged) {
+                        val hex = (0 until minOf(4 + len, 16))
+                            .joinToString(" ") { "%02X".format(pktBuf[it].toInt() and 0xFF) }
+                        // NAL-Typ aus erstem Byte nach 12-Byte RTP-Header (pktBuf[4+12] = pktBuf[16])
+                        val nalDesc = if (ch % 2 == 0 && len >= 13) {
+                            val nalByte = pktBuf[16].toInt() and 0xFF
+                            val nalType = nalByte and 0x1F
+                            when (nalType) {
+                                1  -> "NAL=NonIDR(P/B)"
+                                5  -> "NAL=IDR(Keyframe)"
+                                7  -> "NAL=SPS"
+                                8  -> "NAL=PPS"
+                                28 -> if (len >= 14) {
+                                    val fu = pktBuf[17].toInt() and 0xFF
+                                    "NAL=FU-A(start=${(fu and 0x80)!=0},type=${fu and 0x1F}${if((fu and 0x1F)==5)"/IDR" else ""})"
+                                } else "NAL=FU-A"
+                                else -> "NAL=type$nalType"
                             }
-                        }
+                        } else ""
+                        AppLog.i(TAG, "Erster RTP-Chunk: ${4 + len}B → $hex ${nalDesc}".trim())
+                        firstChunkLogged = true
                     }
-                }
-
-                if (!firstChunkLogged) {
-                    val hex = (0 until minOf(4 + len, 16))
-                        .joinToString(" ") { "%02X".format(pktBuf[it].toInt() and 0xFF) }
-                    // NAL-Typ aus erstem Byte nach 12-Byte RTP-Header (pktBuf[4+12] = pktBuf[16])
-                    val nalDesc = if (ch % 2 == 0 && len >= 13) {
-                        val nalByte = pktBuf[16].toInt() and 0xFF
-                        val nalType = nalByte and 0x1F
-                        when (nalType) {
-                            1  -> "NAL=NonIDR(P/B)"
-                            5  -> "NAL=IDR(Keyframe)"
-                            7  -> "NAL=SPS"
-                            8  -> "NAL=PPS"
-                            28 -> if (len >= 14) {
-                                val fu = pktBuf[17].toInt() and 0xFF
-                                "NAL=FU-A(start=${(fu and 0x80)!=0},type=${fu and 0x1F}${if((fu and 0x1F)==5)"/IDR" else ""})"
-                            } else "NAL=FU-A"
-                            else -> "NAL=type$nalType"
-                        }
-                    } else ""
-                    AppLog.i(TAG, "Erster RTP-Chunk: ${4 + len}B → $hex ${nalDesc}".trim())
-                    firstChunkLogged = true
-                }
+                } // end !isAudioPacket
 
                 synchronized(cOutLock) { cOut.write(pktBuf, 0, 4 + len); cOut.flush() }
             }

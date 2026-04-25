@@ -20,10 +20,15 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.MimeTypes
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 
@@ -291,7 +296,39 @@ class RtspPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        val exo = ExoPlayer.Builder(context)
+        // Software-First Decoder: c2.android.avc.decoder bevorzugen vor Hardware-Decoder.
+        // Hintergrund: Samsung Exynos Hardware-Decoder benötigt konformes IDR (I-Slice-Daten).
+        // Unser IDR-Hack injiziert einen P-Frame als IDR → Hardware-Decoder produziert 1 Frame,
+        // dann Error-Concealment-Stall (kein Output mehr). c2.android.avc.decoder (AOSP libavc)
+        // ist toleranter und dekodiert P-Frames auch ohne valides IDR weiter.
+        val softwareFirstFactory = object : DefaultRenderersFactory(context) {
+            override fun buildVideoRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                eventHandler: Handler,
+                eventListener: VideoRendererEventListener,
+                allowedVideoJoiningTimeMs: Long,
+                out: ArrayList<Renderer>
+            ) {
+                val softFirst = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                    val decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunneledDecoder)
+                    if (mimeType == MimeTypes.VIDEO_H264) {
+                        val sorted = decoders.sortedBy { info ->
+                            // Software-Decoder (c2.android.*, OMX.google.*) an erste Stelle
+                            if (info.name.startsWith("c2.android") || info.name.startsWith("OMX.google")) 0 else 1
+                        }
+                        AppLog.i(TAG, "H264-Decoder: ${sorted.firstOrNull()?.name ?: "(none)"} (von ${decoders.size})")
+                        sorted
+                    } else decoders
+                }
+                super.buildVideoRenderers(context, extensionRendererMode, softFirst,
+                    enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out)
+            }
+        }
+
+        val exo = ExoPlayer.Builder(context, softwareFirstFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .build()
