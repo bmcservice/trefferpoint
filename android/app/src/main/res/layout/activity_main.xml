@@ -4,6 +4,13 @@
     android:layout_height="match_parent"
     android:background="@color/tp_bg">
 
+    <!-- RTSP TextureView: 1×1dp, hinter WebView. ExoPlayer rendert hier Video per GPU.
+         Muss attached + visible sein, damit SurfaceTexture existiert und getBitmap() klappt. -->
+    <TextureView
+        android:id="@+id/rtspTextureView"
+        android:layout_width="1dp"
+        android:layout_height="1dp" />
+
     <WebView
         android:id="@+id/webview"
         android:layout_width="match_parent"
