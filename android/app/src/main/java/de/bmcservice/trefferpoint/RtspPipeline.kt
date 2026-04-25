@@ -117,8 +117,14 @@ class RtspPipeline(
         var gMin = 255; var gMax = 0
         for (p in pixels) { val g = (p shr 8) and 0xFF; if (g < gMin) gMin = g; if (g > gMax) gMax = g }
         val gSpan = gMax - gMin
-        if (frameCount <= 1L || frameCount % 30L == 0L)
-            AppLog.i(TAG, "uvFix: gMin=$gMin gMax=$gMax span=$gSpan")
+        if (frameCount <= 1L || frameCount % 30L == 0L) {
+            // R,G,B-Sample aus 4 Center-Pixeln für vollständige Farb-Diagnose
+            val sample = pixels.take(100)
+            val avgR = sample.sumOf { (it shr 16) and 0xFF } / sample.size
+            val avgG = sample.sumOf { (it shr 8) and 0xFF } / sample.size
+            val avgB = sample.sumOf { it and 0xFF } / sample.size
+            AppLog.i(TAG, "uvFix: gMin=$gMin gMax=$gMax span=$gSpan | sampleRGB=($avgR,$avgG,$avgB)")
+        }
         if (gSpan < 20) {
             // Bild fast uniform (gSpan<20): G-Kanal direkt als Helligkeit ausgeben.
             // Normalisierung würde range≈1 → alle Pixel auf 0 treiben (komplett schwarz).
@@ -463,16 +469,17 @@ class RtspPipeline(
 
                 if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
                     && sdpProxy != null) {
-                    // SW-Decoder (c2.android.avc.decoder) crasht an Segment-Boundaries.
-                    // Proxy bleibt mit Kamera verbunden → recycleExoPlayer reconnectet nur zum Proxy,
-                    // nicht zur Kamera → kein Vicious Cycle. ExoPlayer-Neustart ~alle 3–5s nötig.
+                    // SW-Decoder (c2.android.avc.decoder) kann an Segment-Boundaries crashen
+                    // (frame_num-Reset der Kamera). Proxy-Session wird neu gestartet → Kamera
+                    // liefert frische SPS+PPS+IDR → Decoder initialisiert sauber.
+                    // Verzögerung 1.5s: Kamera braucht einen Moment nach ihrem Segment-Ende.
                     decodeErrorRestarts++
-                    AppLog.i(TAG, "DECODING_FAILED (SW-Decoder) → RecycleExoPlayer #$decodeErrorRestarts über Proxy")
+                    AppLog.i(TAG, "DECODING_FAILED → RecycleExoPlayer #$decodeErrorRestarts (1.5s Delay)")
                     if (running && currentUrl.isNotEmpty() && decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
                         mainHandler.postDelayed({
                             if (currentUrl.isEmpty()) return@postDelayed
                             recycleExoPlayer("rtsp://127.0.0.1:15554/live/tcp/ch1")
-                        }, 300)
+                        }, 1500)
                     }
                     return
                 }
@@ -533,12 +540,14 @@ class RtspPipeline(
     }
 
     /**
-     * ExoPlayer recyceln ohne Proxy-Neustart (Segment-Boundary alle ~4-5s).
+     * ExoPlayer recyceln — Proxy-Neustart inklusive, damit Kamera frische SPS+PPS+IDR sendet.
      */
     private fun recycleExoPlayer(proxyUrl: String) {
         if (!running || currentUrl.isEmpty()) return
-        decodeErrorRestarts++
-        AppLog.i(TAG, "Segment-Boundary: ExoPlayer-Recycle #$decodeErrorRestarts → proxyUrl=$proxyUrl")
+        // decodeErrorRestarts wird bereits vom Aufrufer (onPlayerError) inkrementiert — KEIN
+        // weiteres ++ hier, da das sonst zu doppeltem Zählen führt und MAX_DECODE_RESTARTS
+        // zu früh erreicht wird.
+        AppLog.i(TAG, "ExoPlayer-Recycle #$decodeErrorRestarts → proxyUrl=$proxyUrl")
         onStatus("RTSP: Segment-Wechsel, Decoder-Reset #$decodeErrorRestarts")
         stopInternal()
         mainHandler.postDelayed({

@@ -33,11 +33,9 @@ class RtspSdpProxy(
     @Volatile private var active = false
     private var serverSock: ServerSocket? = null
 
-    // Persistent über alle relay()-Calls einer Session: einmal IDR injiziert, NIE wieder.
-    // Hintergrund: Bei jedem Reconnect ein zweites Mal P-Frame als IDR labeln → Decoder
-    // erkennt Inkonsistenz beim 2. fake IDR → IllegalStateException → ERROR_CODE_DECODING_FAILED.
-    // Stattdessen nur EINMAL pro Session relabeln; folgende Segmente liefern P-Frames
-    // direkt an Decoder, der mit der existing reference weiter dekodiert.
+    // Persistenter State: true sobald der erste echte IDR der Kamera an ExoPlayer
+    // weitergeleitet wurde. Aktiviert ab diesem Punkt SPS/PPS-Dedup (verwerfe
+    // wiederholte SPS+PPS an Segment-Grenzen, damit ExoPlayer keinen Decoder-Reset versucht).
     @Volatile private var idrEverInjected = false
 
     /**
@@ -374,13 +372,6 @@ class RtspSdpProxy(
         val nalWithM = IntArray(32)
         val fuaEndBits = IntArray(32)  // FU-A Pakete mit E-Bit gesetzt, indexiert nach FU-Typ
 
-        // IDR-Hack: Nur EIN P-Frame pro RTSP-Session als IDR umlabeln (NICHT pro Segment).
-        // Bei Reconnects bleibt idrEverInjected=true → idrSeen wird true initialisiert →
-        // KEIN weiteres Labeling im 2./n.-Segment → ExoPlayer's Decoder bleibt stabil.
-        var idrRelabeled = 0
-        var labelingFirstPFrame = false  // true während wir die FU-A-Fragmente des ersten P-Frames sehen
-        var idrSeen = idrEverInjected     // persistenter State — einmal injected, immer skip
-
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
 
@@ -540,44 +531,22 @@ class RtspSdpProxy(
                         }
                     }
 
-                    // IDR-Hack: NUR DAS ERSTE P-Frame jedes relay()-Laufs als IDR umlabeln.
-                    // Begründung: Wenn JEDES P-Frame als IDR markiert wird, resetet der Decoder
-                    // bei jedem Frame seinen Reference-Buffer → Output bleibt schwarz, weil
-                    // P-Slice-Daten ohne Referenz nichts Sichtbares ergeben. Wenn wir aber nur
-                    // den ERSTEN als Sync-Sample markieren, hat der Decoder von da an einen
-                    // (anfangs Müll-) Reference-Frame, und alle folgenden P-Frames bauen
-                    // korrekt darauf auf → das Bild konvergiert über 1-2 Sekunden auf den
-                    // echten Live-Inhalt.
-                    //
-                    // FU-A: alle Fragmente desselben P-Frames müssen konsistent gelabelt werden,
-                    // da der Reassembler sonst inkonsistent ist. Wir tracken via
-                    // labelingFrameInProgress ob wir gerade beim ersten P-Frame sind.
-                    if (ch % 2 == 0 && len >= 13 && !idrSeen) {
+                    // IDR-Erkennung: Ersten echten IDR-Frame der Kamera erkennen →
+                    // SPS/PPS-Dedup für Folge-Segmente aktivieren.
+                    // Die Kamera schickt SPS+PPS+IDR am Anfang jedes ~5s-Segments.
+                    // Nach dem ersten weitergeleiteten IDR können folgende SPS/PPS-Pakete
+                    // verworfen werden, da ExoPlayer sonst einen Decoder-Reset versucht
+                    // → IllegalStateException → DECODING_FAILED.
+                    if (!isAudioPacket && !idrEverInjected && ch % 2 == 0 && len >= 13) {
                         val nt = pktBuf[16].toInt() and 0x1F
-                        if (nt == 28 && len >= 14) {
-                            val fuOrig = pktBuf[17].toInt() and 0x1F
-                            val fuStart = (pktBuf[17].toInt() and 0x80) != 0
-                            val fuEnd = (pktBuf[17].toInt() and 0x40) != 0
-                            if (fuOrig == 1) {
-                                if (fuStart) labelingFirstPFrame = true
-                                if (labelingFirstPFrame) {
-                                    // Type-Bits → 5 (IDR), NRI → 11 (höchste Importance)
-                                    pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
-                                    pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
-                                    idrRelabeled++
-                                    if (fuEnd) {
-                                        labelingFirstPFrame = false
-                                        idrSeen = true  // erster P-Frame fertig — nicht mehr labeln
-                                    idrEverInjected = true  // session-persistent — auch über Reconnects skip
-                                    }
-                                }
-                            }
-                        } else if (nt == 1) {
-                            // Single-NAL P-Frame → als IDR umlabeln (einmalig)
-                            pktBuf[16] = ((pktBuf[16].toInt() and 0x80) or 0x65).toByte()
-                            idrRelabeled++
-                            idrSeen = true
-                            idrEverInjected = true  // session-persistent
+                        // Single-NAL IDR (type=5) oder FU-A-Start-Fragment eines IDR
+                        val isRealIdr = nt == 5 ||
+                            (nt == 28 && len >= 14 &&
+                             (pktBuf[17].toInt() and 0x1F) == 5 &&
+                             (pktBuf[17].toInt() and 0x80) != 0)  // FU-A Start-Bit
+                        if (isRealIdr) {
+                            idrEverInjected = true
+                            AppLog.i(TAG, "Erster IDR-Frame erkannt → SPS/PPS-Dedup ab jetzt aktiv")
                         }
                     }
 
@@ -646,7 +615,6 @@ class RtspSdpProxy(
                 "$desc=${nalTotal[t]}(M=${nalWithM[t]},E=${fuaEndBits[t]})"
             }
         if (stats.isNotEmpty()) AppLog.i(TAG, "NAL-Stats: $stats")
-        if (idrRelabeled > 0) AppLog.i(TAG, "IDR-Relabel: $idrRelabeled P-Frame-Pakete als IDR markiert")
 
         t.join(500)
         return cameraClosedFirst
