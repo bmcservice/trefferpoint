@@ -849,7 +849,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.38';
+const APP_VERSION = '2.3.42';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1797,7 +1797,7 @@ function startLoop() {
 }
 
 function loop() {
-    if (!mediaStream && inputMode !== 'stream') return;
+    if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
 
     // FPS
     frameCount++;
@@ -1813,7 +1813,7 @@ function loop() {
     ctx.save();
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const src = (inputMode === 'stream' && imgEl) ? imgEl : videoEl;
+    const src = ((inputMode === 'stream' || inputMode === 'rtsp') && imgEl) ? imgEl : videoEl;
     if (camRotation === 0) {
         const sw = canvas.width * softwareZoom;
         const sh = canvas.height * softwareZoom;
@@ -2151,7 +2151,7 @@ canvas.addEventListener('click', e => {
 
 // --- Hit Detection ---
 function setRef() {
-    if (!mediaStream && inputMode !== 'stream') return;
+    if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
     try {
         ctx.getImageData(0, 0, 1, 1);
         refFrame = null;
