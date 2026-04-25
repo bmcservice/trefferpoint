@@ -4,15 +4,16 @@
     android:layout_height="match_parent"
     android:background="@color/tp_bg">
 
-    <!-- TextureView HINTER WebView (Z-Order 0).
-         match_parent: Hardware-Compositor zeichnet sie vollständig →
-         TextureView.draw() wird garantiert aufgerufen → updateTexImage() läuft →
-         onSurfaceTextureUpdated feuert → getBitmap() liefert frische Frames.
-         Nutzer sieht nur die WebView; TextureView bleibt unsichtbar darunter. -->
-    <TextureView
-        android:id="@+id/rtspTextureView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+    <!-- SurfaceView für RTSP-Stream (ExoPlayer-Ausgabe).
+         1dp×1dp: für den Nutzer unsichtbar hinter der WebView.
+         ExoPlayer rendert in SurfaceView.holder.getSurface() — nativer Video-Surface.
+         PixelCopy.request() liest Frames direkt aus dem SurfaceFlinger-Buffer
+         (960×540 via holder.setFixedSize) — unabhängig von der View-Größe.
+         Kein lockHardwareCanvas / Hardware-Layer-Problem wie bei TextureView.getBitmap(). -->
+    <SurfaceView
+        android:id="@+id/rtspSurfaceView"
+        android:layout_width="1dp"
+        android:layout_height="1dp" />
 
     <WebView
         android:id="@+id/webview"

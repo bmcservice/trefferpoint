@@ -2,11 +2,12 @@ package de.bmcservice.trefferpoint
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
-import android.graphics.SurfaceTexture
-import android.view.TextureView
+import android.view.PixelCopy
+import android.view.SurfaceView
 import androidx.media3.common.MediaItem
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
@@ -31,23 +32,31 @@ import java.io.ByteArrayOutputStream
 /**
  * RTSP-Stream Pipeline für WLAN-Okularkameras (Viidure etc.).
  *
- *   RTSP → ExoPlayer (Decoder: MediaCodec) → TextureView (GPU-Rendering)
- *        → textureView.getBitmap(960, 540) alle ~33ms → JPEG
+ *   RTSP → ExoPlayer (Decoder: MediaCodec) → SurfaceView (Hardware-Compositor)
+ *        → PixelCopy.request() alle ~33ms → JPEG
  *        → onJpegFrame Callback → TrefferPoint JS-Bridge
  *
- * TextureView statt ImageReader: Samsung c2.android.avc.decoder schreibt keine Pixel
- * in ImageReader-Puffer wenn exo.setVideoSurface() verwendet wird (YUV_420_888 bleibt
- * all-zero → zuerst grün, nach ChromaFix schwarz). TextureView + getBitmap() nutzt
- * den GPU-Rendering-Pfad der korrekte Frames liefert.
+ * SurfaceView + PixelCopy statt TextureView + getBitmap():
+ *   TextureView.getBitmap() liest via lockHardwareCanvas() aus dem Hardware-Layer.
+ *   Auf Samsung-Geräten ist dieser NICHT mit dem OpenGL-Renderer synchronisiert →
+ *   getBitmap() liefert immer Y=0 (schwarze/grüne Pixel), obwohl TextureView
+ *   das Video korrekt anzeigt. Dieser Bug trat in v2.3.47–v2.3.51 auf.
  *
- * Frame-Polling-Strategie:
- *   - captureRunnable läuft auf mainHandler (alle 33ms) → getBitmap() auf Main-Thread
- *   - JPEG-Kompression auf captureThread (HandlerThread) → Main-Thread bleibt frei
- *   - capturePending verhindert Stau bei langsamer JPEG-Kompression
+ *   SurfaceView + PixelCopy (ab v2.3.52):
+ *   - ExoPlayer rendert in SurfaceView.holder.getSurface() (nativer Video-Surface)
+ *   - holder.setFixedSize(960, 540) setzt den Surface-Buffer unabhängig von View-Größe
+ *   - PixelCopy.request(surfaceView, null, bitmap, ...) liest direkt aus dem
+ *     SurfaceFlinger-Compositor-Buffer → korrekte Pixel, unabhängig vom Hardware-Layer
+ *   - API 26 (= minSdk) → keine @RequiresApi-Annotation nötig
+ *
+ * Frame-Capture-Strategie:
+ *   - captureRunnable auf mainHandler (alle ~33ms)
+ *   - PixelCopy.request() async → Callback auf captureThread (HandlerThread)
+ *   - capturePending verhindert gleichzeitige PixelCopy-Requests
  */
 class RtspPipeline(
     private val context: Context,
-    private val textureView: TextureView,
+    private val surfaceView: SurfaceView,
     private val onJpegFrame: (ByteArray) -> Unit,
     private val onStatus: (String) -> Unit
 ) {
@@ -74,11 +83,8 @@ class RtspPipeline(
     @Volatile private var decodeErrorRestarts = 0
     private val MAX_DECODE_RESTARTS = 30
 
-    // capturePending: verhindert Stau wenn JPEG-Kompression länger als Poll-Intervall dauert
+    // capturePending: verhindert gleichzeitige PixelCopy-Requests
     @Volatile private var capturePending = false
-
-    // Zählt wie oft onSurfaceTextureUpdated gefeuert hat (Diagnose)
-    @Volatile private var stuCount = 0L
 
     // Viidure/SGK-spezifisch: TCP-Socket auf Port 6035 ("mail_tcp_socket")
     @Volatile private var mailSocket: Socket? = null
@@ -87,115 +93,62 @@ class RtspPipeline(
     @Volatile private var sdpProxy: RtspSdpProxy? = null
 
     /**
-     * Liefert einen Frame an den captureHandler.
-     * Aufruf von onSurfaceTextureUpdated (primär) oder captureRunnable (Fallback).
-     * MUSS auf dem Main-Thread aufgerufen werden.
+     * Einen Frame per PixelCopy aus dem SurfaceView-Buffer lesen.
+     * MUSS auf dem Main-Thread aufgerufen werden (PixelCopy.request braucht Main-Thread
+     * für die SurfaceView-Koordination).
+     *
+     * Callback wird auf captureThread ausgeführt (JPEG-Kompression off Main-Thread).
      */
     private fun captureFrame() {
         if (!running || capturePending) return
-        val bmp = try {
-            textureView.getBitmap(INITIAL_WIDTH, INITIAL_HEIGHT)
-        } catch (e: Exception) {
-            AppLog.w(TAG, "getBitmap Exception: ${e.message}")
-            return
-        } ?: return
-
+        val handler = captureHandler ?: return
         capturePending = true
-        val posted = captureHandler?.post {
-            var outBmp: Bitmap? = null
-            try {
-                // UV=0-Fix: c2.android.avc.decoder schreibt UV=0 in SurfaceTexture
-                // → GPU macht YCbCr→ARGB mit Cb=Cr=0 → grünes Bild (G≈Y, R≈0, B≈0).
-                // Fix: detektiere grünen Tint und extrahiere Y aus G-Kanal → Graustufe.
-                outBmp = fixGreenTintIfNeeded(bmp)
-                val out = ByteArrayOutputStream((INITIAL_WIDTH * INITIAL_HEIGHT) / 4)
-                outBmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-                val jpeg = out.toByteArray()
-                frameCount++
-                if (frameCount == 1L || frameCount % 30L == 0L) {
-                    AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG @ ${INITIAL_WIDTH}x${INITIAL_HEIGHT} uvFix=${outBmp !== bmp}")
-                    if (frameCount == 1L) decodeErrorRestarts = 0
-                }
-                onJpegFrame(jpeg)
-            } finally {
-                if (outBmp != null && outBmp !== bmp) outBmp.recycle()
-                bmp.recycle()
-                capturePending = false
-            }
-        }
-        if (posted != true) {
+        val bmp = Bitmap.createBitmap(INITIAL_WIDTH, INITIAL_HEIGHT, Bitmap.Config.ARGB_8888)
+        try {
+            PixelCopy.request(
+                surfaceView,
+                null,  // null = gesamter Surface-Buffer (INITIAL_WIDTH × INITIAL_HEIGHT)
+                bmp,
+                { result ->
+                    // Callback auf captureThread
+                    try {
+                        if (result == PixelCopy.SUCCESS) {
+                            val out = ByteArrayOutputStream((INITIAL_WIDTH * INITIAL_HEIGHT) / 4)
+                            bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                            val jpeg = out.toByteArray()
+                            frameCount++
+                            if (frameCount == 1L || frameCount % 30L == 0L) {
+                                AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG (PixelCopy)")
+                                if (frameCount == 1L) decodeErrorRestarts = 0
+                            }
+                            onJpegFrame(jpeg)
+                        } else {
+                            // ERROR_SOURCE_NO_DATA ist normal während Buffering → kein Log-Spam
+                            if (result != PixelCopy.ERROR_SOURCE_NO_DATA) {
+                                AppLog.w(TAG, "PixelCopy result=$result (0=SUCCESS, 1=UNKNOWN, 2=TIMEOUT, 3=SOURCE_NO_DATA, 4=SOURCE_INVALID, 5=DEST_INVALID)")
+                            }
+                        }
+                    } finally {
+                        bmp.recycle()
+                        capturePending = false
+                    }
+                },
+                handler
+            )
+        } catch (e: Exception) {
+            AppLog.w(TAG, "PixelCopy Exception: ${e.message}")
             bmp.recycle()
             capturePending = false
         }
     }
 
-    // Fallback-Polling: greift nur wenn onSurfaceTextureUpdated nicht feuert
-    // (z. B. TextureView nicht gezeichnet). Wird nach dem Setzen des STL deaktiviert sobald
-    // der erste STU-Callback eintrifft.
+    // Frame-Polling auf Main-Thread: captureFrame() → PixelCopy → JPEG auf captureThread
     private val captureRunnable = object : Runnable {
         override fun run() {
             if (!running) return
-            if (stuCount == 0L) {
-                // Noch kein STU-Callback → Fallback-Polling aktiv
-                captureFrame()
-            }
+            captureFrame()
             mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
-    }
-
-    /**
-     * Detektiert UV=0-Bug des c2.android.avc.decoder: Pixel haben G >> R und G >> B (grüner Tint).
-     * Falls erkannt: adaptive Min-Max-Normalisierung via G-Kanal → volles Graustufen-Bild.
-     *
-     * Warum Min-Max? Bei UV=0 gilt (BT.601 Limited Range): G ≈ 1.164*(Y-16) + 154
-     * → G-Werte liegen zwischen ~154 (schwarz) und 255 (bei Y≈88). Direkte G-Übernahme
-     * quetscht alles in die obere Grau-Hälfte → kein Kontrast. Min-Max streckt auf [0..255].
-     *
-     * Bei normalen Farbbildern (korrekte UV): gibt die Original-Bitmap zurück.
-     * WICHTIG: Aufrufer muss BEIDE Bitmaps recyceln wenn return !== original.
-     */
-    private fun fixGreenTintIfNeeded(bmp: Bitmap): Bitmap {
-        // Stichprobe: 4 Pixel in Bildmitte — grüner Tint detektieren
-        val cx = bmp.width / 2; val cy = bmp.height / 2
-        var greenExcess = 0
-        for (dx in 0..1) for (dy in 0..1) {
-            val p = bmp.getPixel(cx + dx, cy + dy)
-            val r = (p shr 16) and 0xFF
-            val g = (p shr 8) and 0xFF
-            val b = p and 0xFF
-            if (g > r + 40 && g > b + 40) greenExcess++
-        }
-        if (greenExcess < 3) return bmp  // Normales Farbbild → unverändert
-
-        // UV=0 bestätigt. Alle Pixel: R≈0, G≈Y+Offset, B≈0
-        // → G-Kanal enthält Luma, aber mit konstantem Offset → kein Kontrast wenn direkt genutzt.
-        // Lösung: adaptiv Min-Max auf G normalisieren → volles Graustufen-Spektrum 0..255.
-        val w = bmp.width; val h = bmp.height
-        val pixels = IntArray(w * h)
-        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-
-        // Pass 1: G-Minimum und Maximum finden
-        var gMin = 255; var gMax = 0
-        for (p in pixels) {
-            val g = (p shr 8) and 0xFF
-            if (g < gMin) gMin = g
-            if (g > gMax) gMax = g
-        }
-        val range = (gMax - gMin).coerceAtLeast(1)
-        if (frameCount <= 1L || frameCount % 30L == 0L) {
-            AppLog.i(TAG, "uvFix: gMin=$gMin gMax=$gMax range=$range")
-        }
-
-        // Pass 2: G-Kanal auf [0..255] strecken → Graustufen-Pixel
-        for (i in pixels.indices) {
-            val g = (pixels[i] shr 8) and 0xFF
-            val y = (g - gMin) * 255 / range
-            pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
-        }
-
-        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        result.setPixels(pixels, 0, w, 0, 0, w, h)
-        return result
     }
 
     fun start(url: String) {
@@ -361,15 +314,17 @@ class RtspPipeline(
         running = true
         lastError = null
         frameCount = 0
-        stuCount = 0
         capturePending = false
 
-        AppLog.i(TAG, "start: $url (TV.isAvailable=${textureView.isAvailable}) (RTP über ${if (useTcp) "TCP" else "UDP"})")
+        AppLog.i(TAG, "start: $url (SV.surface=${surfaceView.holder.surface != null}) (RTP über ${if (useTcp) "TCP" else "UDP"})")
         onStatus("RTSP: Verbinde (${if (useTcp) "TCP" else "UDP"}) zu $url")
 
-        // Capture-Thread für JPEG-Kompression starten
+        // Capture-Thread für JPEG-Kompression + PixelCopy-Callback
         captureThread = HandlerThread("RtspCapture").apply { start() }
         captureHandler = Handler(captureThread!!.looper)
+
+        // SurfaceView-Buffer-Größe fix setzen — PixelCopy liest genau diesen Buffer
+        surfaceView.holder.setFixedSize(INITIAL_WIDTH, INITIAL_HEIGHT)
 
         val trackSelector = DefaultTrackSelector(context)
         val loadControl = DefaultLoadControl.Builder()
@@ -382,12 +337,9 @@ class RtspPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Software-Decoder c2.android.avc.decoder bevorzugen.
-        // OMX.qcom.video.decoder.avc (HW) rendert nicht korrekt in TextureView-SurfaceTexture
-        // auf diesem Gerät → getBitmap() liefert schwarze Pixel.
-        // c2.android.avc.decoder liefert grünes Bild (UV=0) aber mit korrektem Y-Kanal
-        // → Treffererkennung via Frame-Differenz funktioniert auf Y-Kanal.
-        // UV-Korrektur: captureFrame() detektiert grünen Tint und konvertiert zu Graustufe.
+        // Software-Decoder bevorzugen (Fallback falls HW-Decoder Problem macht).
+        // Mit SurfaceView + PixelCopy ist der UV=0/Hardware-Layer-Bug irrelevant —
+        // YUV→RGB wird korrekt vom SurfaceFlinger-Compositor konvertiert.
         val softwareFirstFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
@@ -427,35 +379,10 @@ class RtspPipeline(
             .createMediaSource(MediaItem.fromUri(url))
 
         exo.setMediaSource(rtspSource)
-        // TextureView statt ImageReader: GPU-Rendering-Pfad → korrekte Pixel-Ausgabe
-        exo.setVideoTextureView(textureView)
+        // SurfaceView: nativer Video-Surface → Hardware-Compositor rendert Frames
+        // PixelCopy liest dann aus dem Compositor-Buffer (korrekte Pixel, kein Samsung-Bug)
+        exo.setVideoSurfaceView(surfaceView)
         exo.playWhenReady = true
-
-        // onSurfaceTextureUpdated feuert nach JEDEM updateTexImage() — exakt dann ist
-        // getBitmap() garantiert frisch. Ersetzt das Poll-Timing-Problem (33ms-Intervall
-        // kann vor updateTexImage landen → liest alte/leere Pixel).
-        // Falls der Callback nicht feuert (TV nicht gezeichnet), greift captureRunnable als
-        // Fallback (stuCount == 0 → Polling aktiv).
-        textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                AppLog.i(TAG, "STL.onAvailable: ${w}x${h}")
-                st.setDefaultBufferSize(INITIAL_WIDTH, INITIAL_HEIGHT)
-            }
-            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                AppLog.i(TAG, "STL.onDestroyed")
-                return false  // ST nicht freigeben — wir verwalten den Lifecycle
-            }
-            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                AppLog.i(TAG, "STL.onSizeChanged: ${w}x${h}")
-            }
-            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {
-                stuCount++
-                if (stuCount == 1L || stuCount % 150L == 0L) {
-                    AppLog.i(TAG, "STL.onUpdated #$stuCount (frame=$frameCount)")
-                }
-                captureFrame()
-            }
-        }
 
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -511,7 +438,7 @@ class RtspPipeline(
             }
 
             override fun onRenderedFirstFrame() {
-                AppLog.i(TAG, "onRenderedFirstFrame — erste Frame in SurfaceTexture geschrieben")
+                AppLog.i(TAG, "onRenderedFirstFrame — erste Frame in SurfaceView gerendert")
             }
         })
 
@@ -520,7 +447,7 @@ class RtspPipeline(
         // Frame-Polling starten (200ms Verzögerung — Decoder braucht erste Frames)
         mainHandler.postDelayed(captureRunnable, 200L)
 
-        // Watchdog: kein UDP-Fallback nötig bei TextureView (war für ImageReader-Diagnose)
+        // Watchdog: keine Frames nach 30s → UDP-Fallback
         mainHandler.postDelayed({
             if (!running) return@postDelayed
             if (frameCount > 0) return@postDelayed
@@ -566,7 +493,6 @@ class RtspPipeline(
         running = false
         AppLog.i(TAG, "stop")
         mainHandler.removeCallbacks(captureRunnable)
-        textureView.surfaceTextureListener = null
         try { captureThread?.quitSafely() } catch (_: Exception) {}
         captureThread = null
         captureHandler = null

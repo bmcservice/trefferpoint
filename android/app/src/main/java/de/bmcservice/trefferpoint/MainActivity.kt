@@ -7,7 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
-import android.view.TextureView
+import android.view.SurfaceView
 import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
-    private lateinit var rtspTextureView: TextureView
+    private lateinit var rtspSurfaceView: SurfaceView
 
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
@@ -91,7 +91,7 @@ class MainActivity : AppCompatActivity() {
         AppLog.i(TAG, "Launch intent: ${intent?.action}")
 
         webView = findViewById(R.id.webview)
-        rtspTextureView = findViewById(R.id.rtspTextureView)
+        rtspSurfaceView = findViewById(R.id.rtspSurfaceView)
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -494,7 +494,7 @@ class MainActivity : AppCompatActivity() {
                         p.start(finalUrl)
                     } else {
                         AppLog.i(TAG, "startStream (RTSP): $finalUrl")
-                        val p = RtspPipeline(applicationContext, rtspTextureView, onJpeg, onStatus)
+                        val p = RtspPipeline(applicationContext, rtspSurfaceView, onJpeg, onStatus)
                         rtspPipeline = p
                         activeMode = "rtsp"
                         p.start(finalUrl)
