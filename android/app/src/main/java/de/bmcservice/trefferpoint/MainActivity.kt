@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
+import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
@@ -92,6 +93,21 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webview)
         rtspSurfaceView = findViewById(R.id.rtspSurfaceView)
+
+        // Surface-Buffer-Größe einmalig auf 960×540 fixieren, sobald der Surface existiert.
+        // Wird exakt EINMAL aufgerufen — vor dem ersten RtspPipeline-Start.
+        // match_parent-Layout stellt sicher, dass die Surface groß genug ist bevor setFixedSize.
+        rtspSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                holder.setFixedSize(960, 540)
+                AppLog.i(TAG, "rtspSurfaceView.surfaceCreated → setFixedSize(960×540)")
+            }
+            override fun surfaceChanged(holder: SurfaceHolder, f: Int, w: Int, h: Int) {}
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                AppLog.i(TAG, "rtspSurfaceView.surfaceDestroyed")
+            }
+        })
+
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true

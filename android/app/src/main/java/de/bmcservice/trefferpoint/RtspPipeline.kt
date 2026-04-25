@@ -6,7 +6,6 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.view.PixelCopy
-import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.media3.common.MediaItem
 import java.net.HttpURLConnection
@@ -69,23 +68,9 @@ class RtspPipeline(
         private const val POLL_INTERVAL_MS = 33L  // ~30fps
     }
 
-    init {
-        // SurfaceView-Buffer-Größe einmalig setzen — NICHT bei jedem startInternal()!
-        // setFixedSize() in startInternal() löste bei jedem Recycle eine Surface-Neuformatierung
-        // aus, die ExoPlayer kurz die Surface wegnahm → DECODING_FAILED → vicious cycle.
-        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-                holder.setFixedSize(INITIAL_WIDTH, INITIAL_HEIGHT)
-                AppLog.i(TAG, "SurfaceHolder.Created → setFixedSize(${INITIAL_WIDTH}×${INITIAL_HEIGHT})")
-            }
-            override fun surfaceChanged(holder: SurfaceHolder, f: Int, w: Int, h: Int) {}
-            override fun surfaceDestroyed(holder: SurfaceHolder) {}
-        })
-        // Falls Surface bereits existiert (Activity already running)
-        if (surfaceView.holder.surface?.isValid == true) {
-            surfaceView.holder.setFixedSize(INITIAL_WIDTH, INITIAL_HEIGHT)
-        }
-    }
+    // setFixedSize(960×540) wird in MainActivity.surfaceCreated() gesetzt — einmalig
+    // beim ersten Surface-Aufbau, bevor RtspPipeline überhaupt instanziiert wird.
+    // match_parent-Layout garantiert einen ausreichend großen Surface-Buffer für PixelCopy.
 
     private var player: ExoPlayer? = null
     private var captureThread: HandlerThread? = null
