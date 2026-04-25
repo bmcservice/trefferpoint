@@ -147,13 +147,21 @@ class RtspSdpProxy(
             // monoton, auch wenn die Kamera bei jedem Segment von vorne beginnt.
             // seqState[0] = -1 bedeutet "noch nicht initialisiert".
             val seqState = IntArray(1) { -1 }
+            // tsState: Continuity der RTP-Timestamps über Reconnects.
+            // Kamera setzt Timestamps bei jedem Segment auf eigenen Wert → ExoPlayer
+            // interpretiert das als Discontinuity → Decoder-Flush → IllegalStateException.
+            // tsState[0] = aktueller Offset, der zu Kamera-Timestamps addiert wird.
+            // tsState[1] = letzter ausgegebener Timestamp (für nahtlose Fortsetzung).
+            // Beide auf -1 initialisiert: noch keine Timestamps gesehen.
+            val tsState = LongArray(2) { -1L }
             var reconnects = 0
             while (true) {
                 val cameraClosedFirst = relay(
                     cIn, cOut,
                     cameraSock!!.getInputStream(),
                     cameraSock!!.getOutputStream(),
-                    seqState
+                    seqState,
+                    tsState
                 )
                 if (!cameraClosedFirst) break  // ExoPlayer hat Verbindung getrennt
 
@@ -315,7 +323,8 @@ class RtspSdpProxy(
     private fun relay(
         cIn: InputStream, cOut: OutputStream,
         camIn: InputStream, camOut: OutputStream,
-        seqState: IntArray
+        seqState: IntArray,
+        tsState: LongArray
     ): Boolean {
         var cameraClosedFirst = false
         var firstChunkLogged = false
@@ -323,6 +332,13 @@ class RtspSdpProxy(
         val cOutLock = Any()
         val mBitFixed = mutableSetOf<Int>()  // NAL-Typen, für die M-bit bereits geloggt wurde
         var spsPpsDropped = 0                // Anzahl verworfener SPS/PPS-Pakete (nach erstem IDR)
+        // Timestamp-Continuity: berechne Offset beim ersten Paket dieses Segments.
+        // Innerhalb eines relay()-Calls bleibt der Offset konstant → relative Frame-
+        // Abstände (90kHz-Ticks) der Kamera bleiben erhalten, nur die Basis verschiebt
+        // sich so dass der Stream nahtlos an das vorherige Segment anschlieszt.
+        var tsOffsetCalculated = false
+        // Frame-Spacing für nahtlose Fortsetzung: 3000 Ticks @ 90kHz = 33ms ≈ 30fps
+        val tsFrameInterval = 3000L
 
         // Diagnose: NAL-Typ-Verteilung + M-bit-Statistik.
         // nalCounts[t] = (total, with M=1 vor Fix, with FU-A end-bit) für NAL-Typ t.
@@ -446,6 +462,37 @@ class RtspSdpProxy(
                         pktBuf[6] = (outSeq ushr 8).toByte()
                         pktBuf[7] = (outSeq and 0xFF).toByte()
                         seqState[0]++
+                    }
+
+                    // RTP-Timestamps (Bytes 4..7 des RTP-Packets, d.h. pktBuf[8..11])
+                    // umschreiben so dass sie nahtlos an das vorherige Segment anschlieszen.
+                    // Beim ersten Paket eines neuen relay()-Calls den Offset einmalig
+                    // berechnen, dann konstant lassen (so bleiben Frame-Intervalle erhalten).
+                    if (ch % 2 == 0 && len >= 8) {
+                        val tsCam = ((pktBuf[8].toLong() and 0xFF) shl 24) or
+                                    ((pktBuf[9].toLong() and 0xFF) shl 16) or
+                                    ((pktBuf[10].toLong() and 0xFF) shl 8) or
+                                     (pktBuf[11].toLong() and 0xFF)
+                        if (!tsOffsetCalculated) {
+                            tsOffsetCalculated = true
+                            if (tsState[1] < 0) {
+                                // Erste Session-Initialisierung: kein Offset.
+                                tsState[0] = 0L
+                            } else {
+                                // Reconnect: nahtlose Fortsetzung mit einem Frame-Tick-Abstand.
+                                // tsOut = lastTsOut + tsFrameInterval
+                                // tsOut = tsCam + tsState[0] → tsState[0] = lastTsOut + interval - tsCam
+                                tsState[0] = tsState[1] + tsFrameInterval - tsCam
+                                AppLog.i(TAG, "TS-Continuity: camTS=0x%08X offset=%d → outTS=0x%08X"
+                                    .format(tsCam, tsState[0], (tsCam + tsState[0]) and 0xFFFFFFFFL))
+                            }
+                        }
+                        val tsOut = (tsCam + tsState[0]) and 0xFFFFFFFFL
+                        pktBuf[8]  = (tsOut ushr 24).toByte()
+                        pktBuf[9]  = (tsOut ushr 16).toByte()
+                        pktBuf[10] = (tsOut ushr 8).toByte()
+                        pktBuf[11] = (tsOut and 0xFF).toByte()
+                        tsState[1] = tsOut  // immer letzten ausgegebenen TS speichern
                     }
 
                     // Diagnose-Zählung (nur RTP-Daten, nicht RTCP)
