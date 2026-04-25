@@ -292,6 +292,18 @@ class RtspSdpProxy(
         val nalWithM = IntArray(32)
         val fuaEndBits = IntArray(32)  // FU-A Pakete mit E-Bit gesetzt, indexiert nach FU-Typ
 
+        // IDR-Hack: Wireshark-Capture der Viidure-App hat gezeigt: SGK-Cams senden NIE
+        // einen IDR-Keyframe (NAL=5), nur P-Frames (NAL=1) und SPS (NAL=7). Viidure
+        // dekodiert mit FFmpeg (toleriert das), unser ExoPlayer/MediaCodec verlangt
+        // strikt einen IDR und hängt sonst ewig in BUFFERING.
+        //
+        // Workaround: Wir labeln ALLE FU-A-Fragmente mit Original-Typ=1 (P) auf 5 (IDR)
+        // um. Der Decoder sieht dann jedes P-Frame als Sync-Sample und beginnt sofort
+        // zu dekodieren. Das erste Bild ist evtl. grünes Rauschen (P-Frame braucht
+        // einen Vorgänger den's nicht gibt), aber spätestens nach 1-2 Frames konvergiert
+        // das Bild auf den korrekten Inhalt — gleicher Mechanismus wie bei FFmpeg.
+        var idrRelabeled = 0
+
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
 
@@ -383,6 +395,30 @@ class RtspSdpProxy(
                     }
                 }
 
+                // IDR-Hack: P-Frame (NAL=1) → IDR (NAL=5) umlabeln.
+                // FU-A Fragmente (Typ 28): unteren 5 Bits des FU-Headers[17] umsetzen.
+                // Single-NAL Pakete (Typ 1 direkt in pktBuf[16]): die unteren 5 Bits dort.
+                // Die NRI-Bits (Bits 5-6) lassen wir unverändert — die signalisieren
+                // nur Importance, nicht den Frame-Typ.
+                if (ch % 2 == 0 && len >= 13) {
+                    val nt = pktBuf[16].toInt() and 0x1F
+                    if (nt == 28 && len >= 14) {
+                        val fuOrig = pktBuf[17].toInt() and 0x1F
+                        if (fuOrig == 1) {
+                            // FU-Header: S(1) | E(1) | R(1) | Type(5) — Typ-Bits auf 5
+                            pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
+                            // FU-Indicator (pktBuf[16]) NRI-Bits auf 11 (höchste Importance, wie IDR)
+                            pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
+                            idrRelabeled++
+                        }
+                    } else if (nt == 1) {
+                        // Single-NAL P-Frame → als IDR umlabeln
+                        pktBuf[16] = ((pktBuf[16].toInt() and 0x80) or 0x65).toByte()
+                        // = F(0)|NRI(11)|Type(5) bei NRI 11
+                        idrRelabeled++
+                    }
+                }
+
                 // M-bit Fix (Firmware-Bug #5): SGK setzt M=0 auf allen Paketen.
                 // ExoPlayer's RtpH264Reader emittiert Samples NUR wenn M=1 (letztes Paket
                 // eines Access Units) ODER FU-A End-Bit gesetzt ist. Ohne M=1 bleibt der
@@ -446,6 +482,7 @@ class RtspSdpProxy(
                 "$desc=${nalTotal[t]}(M=${nalWithM[t]},E=${fuaEndBits[t]})"
             }
         if (stats.isNotEmpty()) AppLog.i(TAG, "NAL-Stats: $stats")
+        if (idrRelabeled > 0) AppLog.i(TAG, "IDR-Relabel: $idrRelabeled P-Frame-Pakete als IDR markiert")
 
         t.join(500)
         return cameraClosedFirst

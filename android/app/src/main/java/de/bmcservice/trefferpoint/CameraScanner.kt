@@ -257,11 +257,13 @@ object CameraScanner {
             }
             try { Thread.sleep(50) } catch (_: Exception) {}
         }
-        // SGK GoPlus → MJPEG auf Port 8080 erzwingen (echter Stream-Endpoint)
-        if (isSgkGoPlus) {
-            val mjpegUrl = "http://$host:8080/?action=stream"
-            AppLog.i(TAG, "SGK GoPlus erkannt → MJPEG-URL $mjpegUrl (Port 8080, nicht 554)")
-            return mjpegUrl
+        // SGK GoPlus → RTSP auf Port 554 (Wireshark-Mitschnitt der Viidure-App bestätigt:
+        // sie nutzt Port 554 mit /live/tcp/ch1, NICHT Port 8080 wie zwischenzeitlich
+        // angenommen). Falls getmediainfo eine RTSP-URL gemeldet hat: die nehmen.
+        if (isSgkGoPlus && discoveredRtsp == null) {
+            val rtspUrl = "rtsp://$host:554/live/tcp/ch1"
+            AppLog.i(TAG, "SGK GoPlus erkannt → Standard-RTSP $rtspUrl")
+            return rtspUrl
         }
         return discoveredRtsp
     }

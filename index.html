@@ -849,7 +849,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.31';
+const APP_VERSION = '2.3.32';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2788,12 +2788,14 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     document.getElementById('btnRtsp').addEventListener('click', () => {
         const url = document.getElementById('rtspUrl').value.trim();
         localStorage.setItem('tp_rtsp_url', url);
-        setStatus('RTSP verbinden\u2026', 'warn');
-        setMsg('Starte RTSP-Stream\u2026');
+        const isMjpeg = /^https?:\/\//i.test(url);
+        const lbl = isMjpeg ? 'MJPEG' : 'RTSP';
+        setStatus(lbl + ' verbinden\u2026', 'warn');
+        setMsg('Starte ' + lbl + '-Stream\u2026');
         // Wichtig: Frame-Receiver einmal aufsetzen (dasselbe wie für USB)
         setupBridgeFrameReceiver();
         try { window.tpBridge.startRtsp(url); } catch(e) {
-            setStatus('\u26a0 RTSP-Bridge-Fehler', 'warn');
+            setStatus('\u26a0 ' + lbl + '-Bridge-Fehler', 'warn');
             setMsg('' + e);
         }
         document.getElementById('btnRtspStop').style.display = '';

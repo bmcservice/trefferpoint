@@ -273,13 +273,11 @@ class RtspPipeline(
             }, imageHandler)
         }
 
-        // Audio deaktivieren — SGK/Viidure-Kameras verstehen multi-track SETUP nicht:
-        // sie senden keine Video-Daten wenn ExoPlayer auch SETUP für Audio schickt.
-        val trackSelector = DefaultTrackSelector(context).apply {
-            parameters = buildUponParameters()
-                .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                .build()
-        }
+        // Track-Selektor ohne Audio-Disable — Wireshark-Analyse der Viidure-App hat
+        // gezeigt: SGK-Cams brauchen SETUP für Video UND Audio (interleaved=0-1 + 2-3),
+        // sonst läuft der Stream nicht stabil. Audio-Track wird im Renderer einfach
+        // ignoriert (kein AudioOutput-Setup), aber RTSP-SETUP muss durchlaufen.
+        val trackSelector = DefaultTrackSelector(context)
         // LoadControl: extrem kleine Puffer, damit Wiedergabe sofort startet.
         // Default bufferForPlaybackMs=2500 → ExoPlayer wartet 2.5s Video-Daten bevor READY.
         // Bei SGK mit ~30fps braucht das 75 Frames — verträgt sich nicht mit Segment-Reconnects.
@@ -299,13 +297,14 @@ class RtspPipeline(
             .build()
         player = exo
 
-        // Scanner-Test hat gezeigt: Lavf57.83.100 (was Viidure selbst schickt) wird vom
-        // OPTIONS-Handler abgewiesen. Aber ExoPlayer-default, VLC und Lavf58 bekommen 200 OK.
-        // Nehmen wir Lavf58 — neutral und getestet funktionierend.
+        // User-Agent EXAKT wie Viidure-App (Wireshark-Mitschnitt v3.3.1): Lavf57.83.100.
+        // Die SGK-Firmware filtert offenbar nach UA und verhält sich für Lavf57 anders
+        // (sendet beim ersten Connect zumindest die SPS+P-Frame-Sequenz die ihr Decoder
+        // dann ohne IDR durchsetzt).
         val rtspSource = RtspMediaSource.Factory()
             .setForceUseRtpTcp(useTcp)
             .setTimeoutMs(8000)
-            .setUserAgent("Lavf58.76.100")
+            .setUserAgent("Lavf57.83.100")
             .createMediaSource(MediaItem.fromUri(url))
 
         exo.setMediaSource(rtspSource)
