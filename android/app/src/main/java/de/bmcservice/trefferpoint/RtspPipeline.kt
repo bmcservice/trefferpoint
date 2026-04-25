@@ -98,17 +98,23 @@ class RtspPipeline(
                     capturePending = true
                     val handler = captureHandler
                     val posted = handler?.post {
+                        var outBmp: Bitmap? = null
                         try {
+                            // UV=0-Fix: c2.android.avc.decoder schreibt UV=0 in SurfaceTexture
+                            // → GPU macht YCbCr→ARGB mit Cb=Cr=0 → grünes Bild (G≈Y, R≈0, B≈0).
+                            // Fix: detektiere grünen Tint und extrahiere Y aus G-Kanal → Graustufe.
+                            outBmp = fixGreenTintIfNeeded(bmp)
                             val out = ByteArrayOutputStream((INITIAL_WIDTH * INITIAL_HEIGHT) / 4)
-                            bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                            outBmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
                             val jpeg = out.toByteArray()
                             frameCount++
                             if (frameCount == 1L) {
-                                AppLog.i(TAG, "Erster RTSP-Frame (TextureView): ${jpeg.size}B JPEG @ ${INITIAL_WIDTH}x${INITIAL_HEIGHT}")
+                                AppLog.i(TAG, "Erster RTSP-Frame (TextureView): ${jpeg.size}B JPEG @ ${INITIAL_WIDTH}x${INITIAL_HEIGHT} uvFix=${outBmp !== bmp}")
                                 decodeErrorRestarts = 0
                             }
                             onJpegFrame(jpeg)
                         } finally {
+                            if (outBmp != null && outBmp !== bmp) outBmp.recycle()
                             bmp.recycle()
                             capturePending = false
                         }
@@ -123,6 +129,38 @@ class RtspPipeline(
 
             mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
+    }
+
+    /**
+     * Detektiert UV=0-Bug des c2.android.avc.decoder: Pixel haben G >> R und G >> B (grüner Tint).
+     * Falls erkannt: Y-Kanal aus G extrahieren und Graustufen-Bitmap zurückgeben.
+     * Bei normalen Farbbildern (korrekte UV): gibt die Original-Bitmap zurück.
+     * WICHTIG: Aufrufer muss BEIDE Bitmaps (original + return) recyceln wenn return !== original.
+     */
+    private fun fixGreenTintIfNeeded(bmp: Bitmap): Bitmap {
+        // Stichprobe: 4 Pixel in Bildmitte analysieren
+        val cx = bmp.width / 2; val cy = bmp.height / 2
+        var greenExcess = 0
+        for (dx in 0..1) for (dy in 0..1) {
+            val p = bmp.getPixel(cx + dx, cy + dy)
+            val r = (p shr 16) and 0xFF
+            val g = (p shr 8) and 0xFF
+            val b = p and 0xFF
+            if (g > r + 40 && g > b + 40) greenExcess++
+        }
+        if (greenExcess < 3) return bmp  // Normales Bild → unverändert zurückgeben
+
+        // UV=0 bestätigt: G-Kanal ≈ Y (Luma). Konvertiere zu Graustufe.
+        val w = bmp.width; val h = bmp.height
+        val pixels = IntArray(w * h)
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        for (i in pixels.indices) {
+            val g = (pixels[i] shr 8) and 0xFF
+            pixels[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
+        }
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(pixels, 0, w, 0, 0, w, h)
+        return result
     }
 
     fun start(url: String) {
@@ -308,13 +346,13 @@ class RtspPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Hardware-Decoder bevorzugen (Standard-ExoPlayer-Reihenfolge).
-        // c2.android.avc.decoder (Software) liefert UV=0 → grünes Bild.
-        // Exynos Hardware-Decoder liefert korrekte YUV-Werte.
-        // Mit SDP-Proxy + IDR-Injection sind jetzt echte IDR-Frames vorhanden
-        // → Hardware-Decoder kommt mit dem Stream zurecht.
-        // Logging: ersten gefundenen H264-Decoder protokollieren.
-        val rendererFactory = object : DefaultRenderersFactory(context) {
+        // Software-Decoder c2.android.avc.decoder bevorzugen.
+        // OMX.qcom.video.decoder.avc (HW) rendert nicht korrekt in TextureView-SurfaceTexture
+        // auf diesem Gerät → getBitmap() liefert schwarze Pixel.
+        // c2.android.avc.decoder liefert grünes Bild (UV=0) aber mit korrektem Y-Kanal
+        // → Treffererkennung via Frame-Differenz funktioniert auf Y-Kanal.
+        // UV-Korrektur: captureFrame() detektiert grünen Tint und konvertiert zu Graustufe.
+        val softwareFirstFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
                 extensionRendererMode: Int,
@@ -325,23 +363,22 @@ class RtspPipeline(
                 allowedVideoJoiningTimeMs: Long,
                 out: ArrayList<Renderer>
             ) {
-                val loggingSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                val softFirst = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
                     val decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunneledDecoder)
                     if (mimeType == MimeTypes.VIDEO_H264) {
-                        AppLog.i(TAG, "H264-Decoder (Standard-Reihenfolge): ${decoders.firstOrNull()?.name ?: "(none)"} (von ${decoders.size})")
-                        decoders.also { list ->
-                            list.forEachIndexed { i, d ->
-                                AppLog.i(TAG, "  [$i] ${d.name} hw=${d.hardwareAccelerated}")
-                            }
+                        val sorted = decoders.sortedBy { info ->
+                            if (info.name.startsWith("c2.android") || info.name.startsWith("OMX.google")) 0 else 1
                         }
+                        AppLog.i(TAG, "H264-Decoder: ${sorted.firstOrNull()?.name ?: "(none)"} (von ${decoders.size})")
+                        sorted
                     } else decoders
                 }
-                super.buildVideoRenderers(context, extensionRendererMode, loggingSelector,
+                super.buildVideoRenderers(context, extensionRendererMode, softFirst,
                     enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out)
             }
         }
 
-        val exo = ExoPlayer.Builder(context, rendererFactory)
+        val exo = ExoPlayer.Builder(context, softwareFirstFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .build()
