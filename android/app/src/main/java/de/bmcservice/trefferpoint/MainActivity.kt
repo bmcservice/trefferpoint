@@ -68,9 +68,10 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile private var frameCount: Long = 0
     @Volatile private var lastFrameSize: Int = 0
-    @Volatile private var activeMode: String = "none"  // "usb" | "rtsp" | "none"
+    @Volatile private var activeMode: String = "none"  // "usb" | "rtsp" | "mjpeg" | "none"
 
     private var rtspPipeline: RtspPipeline? = null
+    private var mjpegPipeline: MjpegHttpPipeline? = null
 
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
@@ -223,9 +224,11 @@ class MainActivity : AppCompatActivity() {
                     AppLog.i(TAG, "→ onCameraOpen: ${device?.productName} — ${w}x${h}")
                     cameraOpened = true
                     activeMode = "usb"
-                    // Falls RTSP noch lief, stoppen — USB hat Vorrang bei direktem Anschluss
+                    // Falls RTSP/MJPEG noch lief, stoppen — USB hat Vorrang bei direktem Anschluss
                     rtspPipeline?.stop()
                     rtspPipeline = null
+                    mjpegPipeline?.stop()
+                    mjpegPipeline = null
 
                     // Offizielle Reihenfolge: startPreview → addSurface → setFrameCallback
                     try { helper.startPreview(); AppLog.i(TAG, "   1) startPreview()") }
@@ -372,6 +375,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try { rtspPipeline?.stop() } catch (_: Exception) {}
+        try { mjpegPipeline?.stop() } catch (_: Exception) {}
         try { dummySurface?.release() } catch (_: Exception) {}
         try { dummySurfaceTex?.release() } catch (_: Exception) {}
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
@@ -388,8 +392,11 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun getStatus(): String {
             val rtspFC = rtspPipeline?.frameCount ?: 0
+            val mjpegFC = mjpegPipeline?.frameCount ?: 0
             val rtspErr = rtspPipeline?.lastError?.let { ",\"rtspError\":\"${it.replace("\"","'")}\"" } ?: ""
-            return """{"mode":"$activeMode","cameraConnected":${cameraOpened || activeMode == "rtsp"},"frameCount":$frameCount,"rtspFrameCount":$rtspFC,"lastFrameBytes":$lastFrameSize$rtspErr}"""
+            val mjpegErr = mjpegPipeline?.lastError?.let { ",\"mjpegError\":\"${it.replace("\"","'")}\"" } ?: ""
+            val connected = cameraOpened || activeMode == "rtsp" || activeMode == "mjpeg"
+            return """{"mode":"$activeMode","cameraConnected":$connected,"frameCount":$frameCount,"rtspFrameCount":$rtspFC,"mjpegFrameCount":$mjpegFC,"lastFrameBytes":$lastFrameSize$rtspErr$mjpegErr}"""
         }
 
         @JavascriptInterface
@@ -439,7 +446,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        /** RTSP-Stream starten. Wenn url leer, wird Gateway-IP + Standard-Pfade probiert. */
+        /**
+         * Stream starten. URL-Schema entscheidet die Pipeline:
+         *   - http://...:8080/?action=stream  →  MjpegHttpPipeline (SGK GoPlus / Generalplus)
+         *   - rtsp://...                      →  RtspPipeline (Legacy)
+         *   - leer                            →  Default für SGK: MJPEG auf Gateway:8080
+         *
+         * Hintergrund: Reverse-Engineering der Viidure-App v3.3.1 hat gezeigt dass
+         * die SGK GK720X Live-Frames als MJPEG-over-HTTP auf Port 8080 liefert.
+         * Der `/app/getmediainfo`-Hint mit RTSP auf 554 liefert nie IDR-Keyframes.
+         */
         @JavascriptInterface
         fun startRtsp(url: String) {
             runOnUiThread {
@@ -447,28 +463,39 @@ class MainActivity : AppCompatActivity() {
                     // Bestehende Pipelines stoppen
                     rtspPipeline?.stop()
                     rtspPipeline = null
+                    mjpegPipeline?.stop()
+                    mjpegPipeline = null
                     try { cameraHelper?.closeCamera() } catch (_: Exception) {}
                     cameraOpened = false
 
                     val finalUrl = if (url.isNotBlank()) url else {
-                        val gw = getWifiGateway()
-                        if (gw.isNotBlank()) "rtsp://$gw:554/live/tcp/ch1"
-                        else "rtsp://192.168.0.1:554/live/tcp/ch1"
+                        // Default: MJPEG auf Gateway:8080 (SGK-Standard)
+                        val gw = getWifiGateway().ifBlank { "192.168.0.1" }
+                        "http://$gw:8080/?action=stream"
                     }
 
-                    AppLog.i(TAG, "startRtsp: $finalUrl")
-                    val pipeline = RtspPipeline(
-                        applicationContext,
-                        onJpegFrame = { jpeg ->
-                            frameCount++
-                            lastFrameSize = jpeg.size
-                            pushFrameToWebView(jpeg)
-                        },
-                        onStatus = { status -> AppLog.i(TAG, "RTSP: $status") }
-                    )
-                    rtspPipeline = pipeline
-                    activeMode = "rtsp"
-                    pipeline.start(finalUrl)
+                    val onJpeg: (ByteArray) -> Unit = { jpeg ->
+                        frameCount++
+                        lastFrameSize = jpeg.size
+                        pushFrameToWebView(jpeg)
+                    }
+                    val onStatus: (String) -> Unit = { status -> AppLog.i(TAG, "Stream: $status") }
+
+                    val isMjpeg = finalUrl.startsWith("http://", ignoreCase = true) ||
+                                  finalUrl.startsWith("https://", ignoreCase = true)
+                    if (isMjpeg) {
+                        AppLog.i(TAG, "startStream (MJPEG): $finalUrl")
+                        val p = MjpegHttpPipeline(applicationContext, onJpeg, onStatus)
+                        mjpegPipeline = p
+                        activeMode = "mjpeg"
+                        p.start(finalUrl)
+                    } else {
+                        AppLog.i(TAG, "startStream (RTSP): $finalUrl")
+                        val p = RtspPipeline(applicationContext, onJpeg, onStatus)
+                        rtspPipeline = p
+                        activeMode = "rtsp"
+                        p.start(finalUrl)
+                    }
                 } catch (e: Exception) {
                     AppLog.e(TAG, "startRtsp Exception", e)
                 }
@@ -607,7 +634,9 @@ class MainActivity : AppCompatActivity() {
                 try {
                     rtspPipeline?.stop()
                     rtspPipeline = null
-                    if (activeMode == "rtsp") activeMode = "none"
+                    mjpegPipeline?.stop()
+                    mjpegPipeline = null
+                    if (activeMode == "rtsp" || activeMode == "mjpeg") activeMode = "none"
                     AppLog.i(TAG, "stopRtsp")
                 } catch (e: Exception) { AppLog.e(TAG, "stopRtsp Exception", e) }
             }

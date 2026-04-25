@@ -104,20 +104,24 @@ object CameraScanner {
         for ((ip, ports) in ipPortMap) {
             // Wake-Up + URL-Discovery: SGK/Viidure-Kameras melden ihre RTSP-URL selbst via
             // getmediainfo. Wenn vorhanden: direkt vertrauen, Socket-Probe überspringen.
-            var discoveredRtspUrl: String? = null
+            var discoveredUrl: String? = null
             if (ports.contains(80) && (ports.contains(554) || ports.contains(8554))) {
-                discoveredRtspUrl = wakeupCameraHttp(ip)
+                discoveredUrl = wakeupCameraHttp(ip)
             }
-            if (discoveredRtspUrl != null) {
+            if (discoveredUrl != null) {
+                val isMjpeg = discoveredUrl.startsWith("http://") || discoveredUrl.startsWith("https://")
+                val portUsed = if (isMjpeg) 8080 else 554
+                val proto = if (isMjpeg) "mjpeg" else "rtsp"
+                val detail = if (isMjpeg) "MJPEG (SGK GoPlus, Port 8080)" else "via getmediainfo (SGK/Viidure)"
                 results.put(JSONObject().apply {
-                    put("url", discoveredRtspUrl)
-                    put("port", 554)
-                    put("proto", "rtsp")
-                    put("detail", "via getmediainfo (SGK/Viidure)")
+                    put("url", discoveredUrl)
+                    put("port", portUsed)
+                    put("proto", proto)
+                    put("detail", detail)
                 })
-                AppLog.i(TAG, "✓ RTSP via getmediainfo: $discoveredRtspUrl")
-                // HTTP-MJPEG noch prüfen (falls Kamera beides kann)
-                if (ports.contains(80)) probeHttpMjpeg(ip, 80).forEach { results.put(it) }
+                AppLog.i(TAG, "✓ Stream-URL: $discoveredUrl ($proto)")
+                // Bei RTSP-Cams zusätzlich HTTP-MJPEG-Probe (falls beides verfügbar)
+                if (!isMjpeg && ports.contains(80)) probeHttpMjpeg(ip, 80).forEach { results.put(it) }
             } else {
                 for (port in ports) {
                     val hits = when (port) {
@@ -171,17 +175,21 @@ object CameraScanner {
         val results = JSONArray()
         for ((ip, ports) in candidates) {
             AppLog.i(TAG, "Vollscan Probe $ip: Ports ${ports.joinToString()}")
-            var discoveredRtsp: String? = null
+            var discoveredUrl: String? = null
             if (ports.contains(80) && (ports.contains(554) || ports.contains(8554))) {
-                discoveredRtsp = wakeupCameraHttp(ip)
+                discoveredUrl = wakeupCameraHttp(ip)
             }
-            if (discoveredRtsp != null) {
+            if (discoveredUrl != null) {
+                val isMjpeg = discoveredUrl.startsWith("http://") || discoveredUrl.startsWith("https://")
+                val portUsed = if (isMjpeg) 8080 else 554
+                val proto = if (isMjpeg) "mjpeg" else "rtsp"
+                val detail = if (isMjpeg) "MJPEG (SGK GoPlus, Port 8080)" else "via getmediainfo (SGK/Viidure)"
                 results.put(JSONObject().apply {
-                    put("url", discoveredRtsp); put("port", 554)
-                    put("proto", "rtsp"); put("detail", "via getmediainfo (SGK/Viidure)")
+                    put("url", discoveredUrl); put("port", portUsed)
+                    put("proto", proto); put("detail", detail)
                 })
-                AppLog.i(TAG, "✓ RTSP via getmediainfo: $discoveredRtsp")
-                if (ports.contains(80)) probeHttpMjpeg(ip, 80).forEach { results.put(it) }
+                AppLog.i(TAG, "✓ Stream-URL: $discoveredUrl ($proto)")
+                if (!isMjpeg && ports.contains(80)) probeHttpMjpeg(ip, 80).forEach { results.put(it) }
             } else {
                 for (port in ports) {
                     val hits = when (port) {
@@ -201,11 +209,16 @@ object CameraScanner {
 
     /**
      * HTTP-Wake-Up-Sequenz für Viidure/SGK-Kameras. Ohne diesen Handshake ignorieren
-     * sie RTSP-Anfragen. Abgeleitet aus dem Crash-Log der Original-Viidure-App.
-     * Gibt RTSP-URL aus getmediainfo zurück wenn vorhanden, sonst null.
+     * sie Stream-Anfragen. Abgeleitet aus dem Crash-Log der Original-Viidure-App.
+     *
+     * Gibt für SGK GoPlus/Generalplus-Cams die MJPEG-URL `http://host:8080/?action=stream`
+     * zurück (siehe Reverse-Engineering der Viidure-App: der getmediainfo-RTSP-Hinweis
+     * mit Port 554 liefert NIE IDR-Keyframes — der echte Stream läuft auf Port 8080).
+     * Für andere Cams: die RTSP-URL aus getmediainfo (falls vorhanden), sonst null.
      */
     private fun wakeupCameraHttp(host: String): String? {
         var discoveredRtsp: String? = null
+        var isSgkGoPlus = false
         val endpoints = listOf(
             "http://$host:80/app/getdeviceattr",
             "http://$host:80/app/capability",
@@ -225,7 +238,14 @@ object CameraScanner {
                 } else ""
                 conn.disconnect()
                 AppLog.i(TAG, "WakeUp $ep → $code ${if (body.isNotBlank()) "| ${body.take(150)}" else ""}")
-                // getmediainfo: RTSP-URL aus {"info":{"rtsp":"rtsp://..."}} extrahieren
+                // getproductinfo prüft auf SGK/GoPlus/Generalplus
+                if (ep.endsWith("getproductinfo") && body.isNotBlank()) {
+                    val b = body.uppercase()
+                    if ("SGK" in b || "GK720" in b || "GENERALPLUS" in b || "GOPLUS" in b) {
+                        isSgkGoPlus = true
+                    }
+                }
+                // getmediainfo: RTSP-URL aus {"info":{"rtsp":"rtsp://..."}} extrahieren (nur Fallback)
                 if (ep.endsWith("getmediainfo") && body.isNotBlank()) {
                     try {
                         val rtsp = JSONObject(body).getJSONObject("info").optString("rtsp")
@@ -236,6 +256,12 @@ object CameraScanner {
                 AppLog.i(TAG, "WakeUp $ep → ${e.javaClass.simpleName}")
             }
             try { Thread.sleep(50) } catch (_: Exception) {}
+        }
+        // SGK GoPlus → MJPEG auf Port 8080 erzwingen (echter Stream-Endpoint)
+        if (isSgkGoPlus) {
+            val mjpegUrl = "http://$host:8080/?action=stream"
+            AppLog.i(TAG, "SGK GoPlus erkannt → MJPEG-URL $mjpegUrl (Port 8080, nicht 554)")
+            return mjpegUrl
         }
         return discoveredRtsp
     }
