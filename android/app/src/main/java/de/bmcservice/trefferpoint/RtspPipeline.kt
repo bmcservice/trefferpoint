@@ -68,6 +68,12 @@ class RtspPipeline(
     @Volatile private var currentUrl: String = ""
     @Volatile private var triedUdpFallback = false
 
+    // Automatischer Neustart nach Decoder-Crash (SGK sendet alle ~4s ein neues Segment
+    // mit frame_num-Reset → c2.android.avc.decoder crasht mit IllegalStateException).
+    // Zähler wird bei erstem Frame zurückgesetzt; Limit schützt vor Endlosschleife.
+    @Volatile private var decodeErrorRestarts = 0
+    private val MAX_DECODE_RESTARTS = 30
+
     // Viidure/SGK-spezifisch: TCP-Socket auf Port 6035 ("mail_tcp_socket")
     // muss offen bleiben während RTSP läuft, sonst blockt die Kamera den Stream.
     @Volatile private var mailSocket: Socket? = null
@@ -266,6 +272,7 @@ class RtspPipeline(
                         frameCount++
                         if (frameCount == 1L) {
                             AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${img.width}x${img.height}")
+                            decodeErrorRestarts = 0  // Verbindung erfolgreich — Zähler zurücksetzen
                         }
                         onJpegFrame(jpeg)
                     } finally {
@@ -364,6 +371,41 @@ class RtspPipeline(
                 AppLog.e(TAG, "ExoPlayer Fehler: ${error.errorCodeName} — ${error.message}", error)
                 lastError = "${error.errorCodeName}: ${error.message}"
                 onStatus("RTSP-Fehler: ${error.errorCodeName}")
+
+                // Auto-Restart bei Decoder-Absturz.
+                // Ursache: SGK GK720X sendet alle ~4-5s ein neues H.264-Segment mit
+                // frame_num-Reset (0, 1, 2…). Decoder erwartet höhere frame_num → crash.
+                // Fix: Proxy + ExoPlayer komplett neu starten (frische SPS/PPS-Initialisierung
+                // + IDR-Injection für das neue Segment). Proxy.stop() beendet auch den
+                // Broken-Pipe-Reconnect-Kaskade sofort, danach sauberer Neuaufbau.
+                if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+                    && running && currentUrl.isNotEmpty()) {
+                    decodeErrorRestarts++
+                    if (decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
+                        AppLog.i(TAG, "Decode-Fehler #$decodeErrorRestarts → Auto-Restart in 150ms")
+                        onStatus("RTSP: Decoder-Neustart #$decodeErrorRestarts…")
+                        val restartUrl = currentUrl
+                        mainHandler.postDelayed({
+                            if (!running || currentUrl != restartUrl) return@postDelayed
+                            AppLog.i(TAG, "Auto-Restart: stopInternal + Proxy-Reset + startInternal")
+                            stopInternal()
+                            sdpProxy?.stop()
+                            sdpProxy = null
+                            val hostMatch = Regex("rtsp://([^:/]+)").find(restartUrl)
+                            val host = hostMatch?.groupValues?.get(1)
+                            var proxyUrl = restartUrl
+                            if (host != null && host.startsWith("192.168.")) {
+                                val proxy = RtspSdpProxy(host)
+                                proxyUrl = proxy.start()
+                                sdpProxy = proxy
+                            }
+                            startInternal(proxyUrl, useTcp = true)
+                        }, 150)
+                    } else {
+                        AppLog.w(TAG, "Decode-Fehler #$decodeErrorRestarts — Limit erreicht, aufgegeben")
+                        onStatus("RTSP: Dauerhafter Decoder-Fehler (Kamera neu starten?)")
+                    }
+                }
             }
 
             override fun onTracksChanged(tracks: Tracks) {
