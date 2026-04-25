@@ -1,0 +1,396 @@
+﻿--------- beginning of main
+04-25 14:08:53.053 I/RtspPipeline(17932):   http://192.168.0.1:80/app/getgop → 404 
+04-25 14:08:53.061 I/RtspPipeline(17932):   http://192.168.0.1:80/app/streamctrl?action=iframe → 404 
+04-25 14:08:53.072 I/RtspPipeline(17932):   http://192.168.0.1:80/app/videoconfig?iframe=1 → 404 
+04-25 14:08:53.072 I/RtspPipeline(17932): HTTP Wake-Up abgeschlossen
+04-25 14:08:53.202 I/RtspPipeline(17932): DESCRIBE SDP (489B):
+04-25 14:08:53.202 I/RtspPipeline(17932): RTSP/1.0 200 OK
+
+04-25 14:08:53.202 I/RtspPipeline(17932): CSeq: 1
+
+04-25 14:08:53.202 I/RtspPipeline(17932): Date: Sat Apr 25 14:22:55 2026 GMT
+
+04-25 14:08:53.202 I/RtspPipeline(17932): Content-Type: application/sdp
+
+04-25 14:08:53.202 I/RtspPipeline(17932): Content-Length: 373
+
+04-25 14:08:53.202 I/RtspPipeline(17932): 
+
+04-25 14:08:53.202 I/RtspPipeline(17932): v=0
+
+04-25 14:08:53.202 I/RtspPipeline(17932): o=- 0 0 IN IPV4 192.168.0.1
+
+04-25 14:08:53.202 I/RtspPipeline(17932): t=0 0
+
+04-25 14:08:53.202 I/RtspPipeline(17932): s=SGK
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=control:*
+
+04-25 14:08:53.202 I/RtspPipeline(17932): c=IN IP4 192.168.0.1
+
+04-25 14:08:53.202 I/RtspPipeline(17932): m=video 0 RTP/AVP 96
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=rtpmap:96 H264/90000
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=fmtp:96 profile-level-id=42001f; packetization-mode=1;sprop-parameter-sets=Z0IAH5Y1QeAi/c3AQEBQAAADABAAAAMDyEA=,aM4xsg==
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=control:video/track0
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=recvonly
+
+04-25 14:08:53.202 I/RtspPipeline(17932): m=audio 0 RTP/AVP 97
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=rtpmap:97 PCMA/16000/1
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=control:audio/track1
+
+04-25 14:08:53.202 I/RtspPipeline(17932): a=recvonly
+
+04-25 14:08:53.224 I/RtspSdpProxy(17932): SDP-Proxy läuft: localhost:15554 → 192.168.0.1:554
+04-25 14:08:53.230 I/RtspPipeline(17932): Mail-Socket offen auf 192.168.0.1:6035
+04-25 14:08:53.232 I/RtspPipeline(17932): Mail-TX: {"msgid":"ikeyframe"}
+04-25 14:08:53.232 I/RtspPipeline(17932): Mail-TX: {"msgid":"forceikeyframe"}
+04-25 14:08:53.233 I/RtspPipeline(17932): Mail-TX: {"msgid":"req_iframe"}
+04-25 14:08:53.233 I/RtspPipeline(17932): Mail-TX: {"msgid":"setencode","info":{"iframe":1}}
+04-25 14:08:53.234 I/RtspPipeline(17932): Mail-TX: {"msgid":"setgop","info":{"value":1}}
+04-25 14:08:53.235 I/RtspPipeline(17932): Mail-TX: {"msgid":"getencode"}
+04-25 14:08:53.235 I/RtspPipeline(17932): Mail-TX: {"msgid":"capability"}
+04-25 14:08:53.236 I/RtspPipeline(17932): Mail-TX: {"msgid":"listcmd"}
+04-25 14:08:53.238 I/RtspPipeline(17932): start: rtsp://127.0.0.1:15554/live/tcp/ch1 (RTP über TCP)
+04-25 14:08:53.239 I/TrefferPoint(17932): Stream: RTSP: Verbinde (TCP) zu rtsp://127.0.0.1:15554/live/tcp/ch1
+04-25 14:08:53.360 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126975}
+04-25 14:08:53.361 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126975}{"msgid":"sd","info":{"status":0},"time":1777126975}
+04-25 14:08:53.470 I/RtspPipeline(17932): ExoPlayer state=BUFFERING
+--------- beginning of system
+04-25 14:08:53.810 I/RtspSdpProxy(17932): SDP gepatcht: a=recvonly entfernt, Content-Length=349
+04-25 14:08:53.811 I/RtspSdpProxy(17932): Gepatchtes SDP:
+04-25 14:08:53.811 I/RtspSdpProxy(17932): v=0
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): o=- 0 0 IN IPV4 192.168.0.1
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): t=0 0
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): s=SGK
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): a=control:*
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): c=IN IP4 192.168.0.1
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): m=video 0 RTP/AVP 96
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): a=rtpmap:96 H264/90000
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): a=fmtp:96 profile-level-id=42001f; packetization-mode=1;sprop-parameter-sets=Z0IAH5Y1QeAi/c3AQEBQAAADABAAAAMDyEA=,aM4xsg==
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): a=control:video/track0
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): m=audio 0 RTP/AVP 97
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): a=rtpmap:97 PCMA/16000/1
+
+04-25 14:08:53.811 I/RtspSdpProxy(17932): a=control:audio/track1
+
+04-25 14:08:53.859 I/RtspPipeline(17932): H264-Decoder: c2.android.avc.decoder (von 3)
+04-25 14:08:53.860 I/RtspPipeline(17932): H264-Decoder: (none) (von 0)
+04-25 14:08:53.861 I/RtspPipeline(17932): H264-Decoder: c2.android.avc.decoder (von 3)
+04-25 14:08:53.861 I/RtspPipeline(17932): H264-Decoder: (none) (von 0)
+04-25 14:08:53.948 I/RtspPipeline(17932): Track[0]: mime=video/avc codec=avc1.42001f 960x540 selected=true
+04-25 14:08:53.948 I/RtspPipeline(17932): Track[0]: mime=audio/g711-alaw codec=null -1x-1 selected=true
+04-25 14:08:53.948 I/RtspSdpProxy(17932): SETUP → Kamera (Video ch0-1)
+04-25 14:08:53.948 I/RtspPipeline(17932): → ImageReader auf 960x540 anpassen
+04-25 14:08:53.948 I/RtspPipeline(17932): ImageReader bereits 960x540 — kein Neustart
+04-25 14:08:53.949 I/RtspPipeline(17932): H264-Decoder: c2.android.avc.decoder (von 3)
+04-25 14:08:53.987 I/RtspSdpProxy(17932): Kamera→SETUP: RTSP/1.0 200 OK | Transport: RTP/AVP/TCP;interleaved=0-1
+04-25 14:08:54.236 I/RtspSdpProxy(17932): SETUP → Kamera (Audio ch2-3)
+04-25 14:08:54.262 I/RtspSdpProxy(17932): Kamera→SETUP: RTSP/1.0 200 OK | Transport: RTP/AVP/TCP;interleaved=2-3
+04-25 14:08:54.287 I/RtspSdpProxy(17932): Kamera→PLAY: RTSP/1.0 200 OK
+04-25 14:08:54.289 I/RtspSdpProxy(17932): PLAY-Antwort RTP-Info: (kein RTP-Info Header)
+04-25 14:08:54.291 I/RtspSdpProxy(17932): PLAY OK — starte RTP-Relay (videoTrack=rtsp://192.168.0.1/live/tcp/ch1/video/track0)
+04-25 14:08:54.307 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 01 00 43 FE 65 5E 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:08:54.786 I/RtspPipeline(17932): Video-Size: 960x540
+04-25 14:08:54.788 I/RtspPipeline(17932): ImageReader bereits 960x540 — kein Neustart
+04-25 14:08:54.851 I/RtspPipeline(17932): Erster RTSP-Frame: 8790B JPEG @ 960x540
+04-25 14:08:56.347 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126978}
+04-25 14:08:56.349 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126978}{"msgid":"sd","info":{"status":0},"time":1777126978}
+04-25 14:08:57.683 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Connection reset
+04-25 14:08:57.684 I/RtspSdpProxy(17932): RTP-Relay: 1101311B von Kamera | cameraFirst=true
+04-25 14:08:57.687 I/RtspSdpProxy(17932): NAL-Stats: P=711(M=51,E=51) SPS=67(M=2,E=2)
+04-25 14:08:57.688 I/RtspSdpProxy(17932): IDR-Relabel: 14 P-Frame-Pakete als IDR markiert
+04-25 14:08:58.190 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #1
+04-25 14:08:58.425 I/RtspSdpProxy(17932): Reconnect #1 OK → setze RTP-Relay fort (nextSeq=1034)
+04-25 14:08:58.467 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 04 0A 44 04 87 18 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:08:59.358 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126981}
+04-25 14:08:59.366 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126981}{"msgid":"sd","info":{"status":0},"time":1777126981}
+04-25 14:09:00.611 E/MediaCodec(17932): Codec reported err 0x80000000, actionCode 0, while in state 6
+04-25 14:09:00.636 I/RtspPipeline(17932): H264-Decoder: c2.android.avc.decoder (von 3)
+04-25 14:09:00.637 I/RtspPipeline(17932): H264-Decoder: (none) (von 0)
+04-25 14:09:00.646 I/RtspPipeline(17932): Video-Size: 0x0
+04-25 14:09:00.673 I/RtspSdpProxy(17932): Keepalive abgefangen: TEARDOWN CSeq=5
+04-25 14:09:00.673 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:00.674 I/RtspSdpProxy(17932): RTP-Relay: 676291B von Kamera | cameraFirst=true
+04-25 14:09:00.675 I/RtspSdpProxy(17932): NAL-Stats: P=410(M=29,E=29) SPS=66(M=2,E=2)
+04-25 14:09:00.676 I/RtspSdpProxy(17932): IDR-Relabel: 14 P-Frame-Pakete als IDR markiert
+04-25 14:09:00.676 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #2
+04-25 14:09:00.678 E/RtspPipeline(17932): ExoPlayer Fehler: ERROR_CODE_DECODING_FAILED — MediaCodecVideoRenderer error, index=0, format=Format(null, null, null, video/avc, avc1.42001f, -1, null, [960, 540, -1.0, ColorInfo(BT709, Full range, SDR SMPTE 170M, false, 8bit Luma, 8bit Chroma)], [-1, -1]), format_supported=YES
+04-25 14:09:00.678 E/RtspPipeline(17932): androidx.media3.exoplayer.ExoPlaybackException: MediaCodecVideoRenderer error, index=0, format=Format(null, null, null, video/avc, avc1.42001f, -1, null, [960, 540, -1.0, ColorInfo(BT709, Full range, SDR SMPTE 170M, false, 8bit Luma, 8bit Chroma)], [-1, -1]), format_supported=YES
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.ExoPlayerImplInternal.handleMessage(ExoPlayerImplInternal.java:623)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at android.os.Handler.dispatchMessage(Handler.java:103)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at android.os.Looper.loop(Looper.java:237)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at android.os.HandlerThread.run(HandlerThread.java:67)
+04-25 14:09:00.678 E/RtspPipeline(17932): Caused by: androidx.media3.exoplayer.video.MediaCodecVideoDecoderException: Decoder failed: c2.android.avc.decoder
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.video.MediaCodecVideoRenderer.createDecoderException(MediaCodecVideoRenderer.java:1915)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.mediacodec.MediaCodecRenderer.render(MediaCodecRenderer.java:848)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.video.MediaCodecVideoRenderer.render(MediaCodecVideoRenderer.java:940)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.ExoPlayerImplInternal.doSomeWork(ExoPlayerImplInternal.java:1112)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.ExoPlayerImplInternal.handleMessage(ExoPlayerImplInternal.java:544)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	... 3 more
+04-25 14:09:00.678 E/RtspPipeline(17932): Caused by: java.lang.IllegalStateException
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at android.media.MediaCodec.native_dequeueInputBuffer(Native Method)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at android.media.MediaCodec.dequeueInputBuffer(MediaCodec.java:2726)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.mediacodec.SynchronousMediaCodecAdapter.dequeueInputBufferIndex(SynchronousMediaCodecAdapter.java:101)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.mediacodec.MediaCodecRenderer.feedInputBuffer(MediaCodecRenderer.java:1283)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	at androidx.media3.exoplayer.mediacodec.MediaCodecRenderer.render(MediaCodecRenderer.java:829)
+04-25 14:09:00.678 E/RtspPipeline(17932): 	... 6 more
+04-25 14:09:00.679 I/TrefferPoint(17932): Stream: RTSP-Fehler: ERROR_CODE_DECODING_FAILED
+04-25 14:09:00.681 I/RtspPipeline(17932): ExoPlayer state=IDLE
+04-25 14:09:00.882 I/RtspSdpProxy(17932): Reconnect #2 OK → setze RTP-Relay fort (nextSeq=1510)
+04-25 14:09:00.895 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 E6 44 07 C6 8A 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:00.896 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:00.897 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:00.897 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:00.897 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #3
+04-25 14:09:01.063 I/RtspSdpProxy(17932): Reconnect #3 OK → setze RTP-Relay fort (nextSeq=1511)
+04-25 14:09:01.075 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 E7 44 08 18 CE 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:01.076 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:01.077 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:01.078 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:01.078 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #4
+04-25 14:09:01.563 I/RtspSdpProxy(17932): Reconnect #4 OK → setze RTP-Relay fort (nextSeq=1512)
+04-25 14:09:01.576 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 E8 44 08 BC A2 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:01.577 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:01.577 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:01.578 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:01.578 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #5
+04-25 14:09:01.860 I/RtspSdpProxy(17932): Reconnect #5 OK → setze RTP-Relay fort (nextSeq=1513)
+04-25 14:09:01.930 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 E9 44 09 4A AA 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:01.932 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:01.932 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:01.933 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:01.934 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #6
+04-25 14:09:02.420 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126984}
+04-25 14:09:02.422 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126984}{"msgid":"sd","info":{"status":0},"time":1777126984}
+04-25 14:09:02.852 I/RtspSdpProxy(17932): Reconnect #6 OK → setze RTP-Relay fort (nextSeq=1514)
+04-25 14:09:02.861 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 EA 44 0A 91 44 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:02.862 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:02.863 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:02.864 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:02.866 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #7
+04-25 14:09:03.153 I/RtspSdpProxy(17932): Reconnect #7 OK → setze RTP-Relay fort (nextSeq=1515)
+04-25 14:09:03.166 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 EB 44 0A FA BC 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:03.167 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:03.168 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:03.168 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:03.169 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #8
+04-25 14:09:03.815 I/RtspSdpProxy(17932): Reconnect #8 OK → setze RTP-Relay fort (nextSeq=1516)
+04-25 14:09:03.855 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 EC 44 0B F0 7A 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:03.856 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:03.857 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:03.857 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:03.857 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #9
+04-25 14:09:04.136 I/RtspSdpProxy(17932): Reconnect #9 OK → setze RTP-Relay fort (nextSeq=1517)
+04-25 14:09:04.149 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 ED 44 0C 42 BE 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:04.150 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:04.151 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:04.152 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:04.152 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #10
+04-25 14:09:04.423 I/RtspSdpProxy(17932): Reconnect #10 OK → setze RTP-Relay fort (nextSeq=1518)
+04-25 14:09:04.508 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 EE 44 0C D2 2E 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:04.509 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:04.510 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:04.510 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:04.511 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #11
+04-25 14:09:05.011 I/RtspSdpProxy(17932): Reconnect #11 OK → setze RTP-Relay fort (nextSeq=1519)
+04-25 14:09:05.023 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 EF 44 0D 8A C0 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:05.027 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:05.028 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:05.029 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:05.029 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #12
+04-25 14:09:05.309 I/RtspSdpProxy(17932): Reconnect #12 OK → setze RTP-Relay fort (nextSeq=1520)
+04-25 14:09:05.327 I/RtspSdpProxy(17932): Erster RTP-Chunk: 1464B → 24 00 05 B4 80 60 05 F0 44 0D F4 38 00 00 00 01 NAL=FU-A(start=true,type=7)
+04-25 14:09:05.329 W/RtspSdpProxy(17932): RTP-Relay Kamera→Client: SocketException: Broken pipe
+04-25 14:09:05.330 I/RtspSdpProxy(17932): RTP-Relay: 1464B von Kamera | cameraFirst=true
+04-25 14:09:05.331 I/RtspSdpProxy(17932): NAL-Stats: SPS=1(M=0,E=0)
+04-25 14:09:05.332 I/RtspSdpProxy(17932): Kamera-Segment-Ende → transparenter Reconnect #13
+04-25 14:09:05.699 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126988}
+04-25 14:09:05.699 W/RtspSdpProxy(17932): Session Fehler: Connection reset
+04-25 14:09:05.705 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126988}{"msgid":"sd","info":{"status":0},"time":1777126988}
+04-25 14:09:08.768 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126991}
+04-25 14:09:08.769 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126991}{"msgid":"sd","info":{"status":0},"time":1777126991}
+04-25 14:09:11.741 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126994}
+04-25 14:09:11.743 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126994}{"msgid":"sd","info":{"status":0},"time":1777126994}
+04-25 14:09:14.810 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777126997}
+04-25 14:09:14.812 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777126997}{"msgid":"sd","info":{"status":0},"time":1777126997}
+04-25 14:09:17.781 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127000}
+04-25 14:09:17.783 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127000}{"msgid":"sd","info":{"status":0},"time":1777127000}
+04-25 14:09:20.750 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127003}
+04-25 14:09:20.752 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127003}{"msgid":"sd","info":{"status":0},"time":1777127003}
+04-25 14:09:23.818 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127006}
+04-25 14:09:23.820 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127006}{"msgid":"sd","info":{"status":0},"time":1777127006}
+04-25 14:09:26.792 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127009}
+04-25 14:09:26.794 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127009}{"msgid":"sd","info":{"status":0},"time":1777127009}
+04-25 14:09:29.866 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127012}
+04-25 14:09:29.868 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127012}{"msgid":"sd","info":{"status":0},"time":1777127012}
+04-25 14:09:32.834 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127015}
+04-25 14:09:32.836 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127015}{"msgid":"sd","info":{"status":0},"time":1777127015}
+04-25 14:09:35.801 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127018}
+04-25 14:09:35.802 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127018}{"msgid":"sd","info":{"status":0},"time":1777127018}
+04-25 14:09:38.875 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127021}
+04-25 14:09:38.885 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127021}{"msgid":"sd","info":{"status":0},"time":1777127021}
+04-25 14:09:41.841 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127024}
+04-25 14:09:41.843 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127024}{"msgid":"sd","info":{"status":0},"time":1777127024}
+04-25 14:09:44.921 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127027}
+04-25 14:09:44.923 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127027}{"msgid":"sd","info":{"status":0},"time":1777127027}
+04-25 14:09:47.881 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127030}
+04-25 14:09:47.883 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127030}{"msgid":"sd","info":{"status":0},"time":1777127030}
+04-25 14:09:50.856 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127033}
+04-25 14:09:50.858 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127033}{"msgid":"sd","info":{"status":0},"time":1777127033}
+04-25 14:09:53.927 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127036}
+04-25 14:09:53.929 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127036}{"msgid":"sd","info":{"status":0},"time":1777127036}
+04-25 14:09:56.898 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127039}
+04-25 14:09:56.900 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127039}{"msgid":"sd","info":{"status":0},"time":1777127039}
+04-25 14:09:59.961 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127042}
+04-25 14:09:59.964 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127042}{"msgid":"sd","info":{"status":0},"time":1777127042}
+04-25 14:10:02.939 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127045}
+04-25 14:10:02.941 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127045}{"msgid":"sd","info":{"status":0},"time":1777127045}
+04-25 14:10:05.911 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127048}
+04-25 14:10:05.913 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127048}{"msgid":"sd","info":{"status":0},"time":1777127048}
+04-25 14:10:08.977 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127051}
+04-25 14:10:08.978 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127051}{"msgid":"sd","info":{"status":0},"time":1777127051}
+04-25 14:10:11.951 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127054}
+04-25 14:10:11.953 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127054}{"msgid":"sd","info":{"status":0},"time":1777127054}
+04-25 14:10:14.921 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127057}
+04-25 14:10:14.922 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127057}{"msgid":"sd","info":{"status":0},"time":1777127057}
+04-25 14:10:17.996 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127060}
+04-25 14:10:17.998 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127060}{"msgid":"sd","info":{"status":0},"time":1777127060}
+04-25 14:10:20.961 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127063}
+04-25 14:10:20.963 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127063}{"msgid":"sd","info":{"status":0},"time":1777127063}
+04-25 14:10:24.036 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127066}
+04-25 14:10:24.038 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127066}{"msgid":"sd","info":{"status":0},"time":1777127066}
+04-25 14:10:26.996 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127069}
+04-25 14:10:26.998 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127069}{"msgid":"sd","info":{"status":0},"time":1777127069}
+04-25 14:10:29.979 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127072}
+04-25 14:10:29.981 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127072}{"msgid":"sd","info":{"status":0},"time":1777127072}
+04-25 14:10:33.041 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127075}
+04-25 14:10:33.043 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127075}{"msgid":"sd","info":{"status":0},"time":1777127075}
+04-25 14:10:36.014 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127078}
+04-25 14:10:36.325 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127078}{"msgid":"sd","info":{"status":0},"time":1777127078}
+04-25 14:10:39.088 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127081}
+04-25 14:10:39.090 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127081}{"msgid":"sd","info":{"status":0},"time":1777127081}
+04-25 14:10:42.048 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127084}
+04-25 14:10:42.050 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127084}{"msgid":"sd","info":{"status":0},"time":1777127084}
+04-25 14:10:45.022 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127087}
+04-25 14:10:45.023 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127087}{"msgid":"sd","info":{"status":0},"time":1777127087}
+04-25 14:10:48.098 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127090}
+04-25 14:10:48.099 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127090}{"msgid":"sd","info":{"status":0},"time":1777127090}
+04-25 14:10:51.070 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127093}
+04-25 14:10:51.072 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127093}{"msgid":"sd","info":{"status":0},"time":1777127093}
+04-25 14:10:54.142 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127096}
+04-25 14:10:54.144 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127096}{"msgid":"sd","info":{"status":0},"time":1777127096}
+04-25 14:10:57.103 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127099}
+04-25 14:10:57.106 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127099}{"msgid":"sd","info":{"status":0},"time":1777127099}
+04-25 14:11:00.076 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127102}
+04-25 14:11:00.078 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127102}{"msgid":"sd","info":{"status":0},"time":1777127102}
+04-25 14:11:03.150 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127105}
+04-25 14:11:03.152 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127105}{"msgid":"sd","info":{"status":0},"time":1777127105}
+04-25 14:11:06.120 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127108}
+04-25 14:11:06.124 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127108}{"msgid":"sd","info":{"status":0},"time":1777127108}
+04-25 14:11:09.193 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127111}
+04-25 14:11:09.197 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127111}{"msgid":"sd","info":{"status":0},"time":1777127111}
+04-25 14:11:12.163 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127114}
+04-25 14:11:12.165 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127114}{"msgid":"sd","info":{"status":0},"time":1777127114}
+04-25 14:11:15.131 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127117}
+04-25 14:11:15.135 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127117}{"msgid":"sd","info":{"status":0},"time":1777127117}
+04-25 14:11:18.201 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127120}
+04-25 14:11:18.206 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127120}{"msgid":"sd","info":{"status":0},"time":1777127120}
+04-25 14:11:21.167 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127123}
+04-25 14:11:21.169 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127123}{"msgid":"sd","info":{"status":0},"time":1777127123}
+04-25 14:11:24.245 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127126}
+04-25 14:11:24.247 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127126}{"msgid":"sd","info":{"status":0},"time":1777127126}
+04-25 14:11:27.215 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127129}
+04-25 14:11:27.217 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127129}{"msgid":"sd","info":{"status":0},"time":1777127129}
+04-25 14:11:30.177 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127132}
+04-25 14:11:30.179 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127132}{"msgid":"sd","info":{"status":0},"time":1777127132}
+04-25 14:11:33.256 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127135}
+04-25 14:11:33.258 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127135}{"msgid":"sd","info":{"status":0},"time":1777127135}
+04-25 14:11:36.226 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127138}
+04-25 14:11:36.228 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127138}{"msgid":"sd","info":{"status":0},"time":1777127138}
+04-25 14:11:39.305 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127141}
+04-25 14:11:39.314 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127141}{"msgid":"sd","info":{"status":0},"time":1777127141}
+04-25 14:11:42.264 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127144}
+04-25 14:11:42.265 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127144}{"msgid":"sd","info":{"status":0},"time":1777127144}
+04-25 14:11:45.230 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127147}
+04-25 14:11:45.232 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127147}{"msgid":"sd","info":{"status":0},"time":1777127147}
+04-25 14:11:48.307 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127150}
+04-25 14:11:48.309 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127150}{"msgid":"sd","info":{"status":0},"time":1777127150}
+04-25 14:11:51.279 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127153}
+04-25 14:11:51.281 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127153}{"msgid":"sd","info":{"status":0},"time":1777127153}
+04-25 14:11:54.266 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127156}
+04-25 14:11:54.268 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127156}{"msgid":"sd","info":{"status":0},"time":1777127156}
+04-25 14:11:57.321 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127159}
+04-25 14:11:57.323 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127159}{"msgid":"sd","info":{"status":0},"time":1777127159}
+04-25 14:12:00.290 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127162}
+04-25 14:12:00.295 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127162}{"msgid":"sd","info":{"status":0},"time":1777127162}
+04-25 14:12:03.362 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127165}
+04-25 14:12:03.363 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127165}{"msgid":"sd","info":{"status":0},"time":1777127165}
+04-25 14:12:06.327 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127168}
+04-25 14:12:06.333 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127168}{"msgid":"sd","info":{"status":0},"time":1777127168}
+04-25 14:12:09.302 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127171}
+04-25 14:12:09.307 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127171}{"msgid":"sd","info":{"status":0},"time":1777127171}
+04-25 14:12:12.376 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127174}
+04-25 14:12:12.378 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127174}{"msgid":"sd","info":{"status":0},"time":1777127174}
+04-25 14:12:15.342 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127177}
+04-25 14:12:15.344 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127177}{"msgid":"sd","info":{"status":0},"time":1777127177}
+04-25 14:12:18.415 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127180}
+04-25 14:12:18.417 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127180}{"msgid":"sd","info":{"status":0},"time":1777127180}
+04-25 14:12:21.385 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127183}
+04-25 14:12:21.387 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127183}{"msgid":"sd","info":{"status":0},"time":1777127183}
+04-25 14:12:24.456 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127186}
+04-25 14:12:24.459 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127186}{"msgid":"sd","info":{"status":0},"time":1777127186}
+04-25 14:12:27.443 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127189}
+04-25 14:12:27.448 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127189}{"msgid":"sd","info":{"status":0},"time":1777127189}
+04-25 14:12:30.396 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127192}
+04-25 14:12:30.398 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127192}{"msgid":"sd","info":{"status":0},"time":1777127192}
+04-25 14:12:33.467 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127195}
+04-25 14:12:33.469 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127195}{"msgid":"sd","info":{"status":0},"time":1777127195}
+04-25 14:12:36.438 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127198}
+04-25 14:12:36.439 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127198}{"msgid":"sd","info":{"status":0},"time":1777127198}
+04-25 14:12:39.511 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127201}
+04-25 14:12:39.513 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127201}{"msgid":"sd","info":{"status":0},"time":1777127201}
+04-25 14:12:42.482 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127204}
+04-25 14:12:42.484 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127204}{"msgid":"sd","info":{"status":0},"time":1777127204}
+04-25 14:12:45.451 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127207}
+04-25 14:12:45.456 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127207}{"msgid":"sd","info":{"status":0},"time":1777127207}
+04-25 14:12:48.522 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127210}
+04-25 14:12:48.524 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127210}{"msgid":"sd","info":{"status":0},"time":1777127210}
+04-25 14:12:51.485 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127213}
+04-25 14:12:51.486 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127213}{"msgid":"sd","info":{"status":0},"time":1777127213}
+04-25 14:12:54.562 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127216}
+04-25 14:12:54.564 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127216}{"msgid":"sd","info":{"status":0},"time":1777127216}
+04-25 14:12:57.532 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127219}
+04-25 14:12:57.534 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127219}{"msgid":"sd","info":{"status":0},"time":1777127219}
+04-25 14:13:00.505 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127222}
+04-25 14:13:00.507 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127222}{"msgid":"sd","info":{"status":0},"time":1777127222}
+04-25 14:13:03.574 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127225}
+04-25 14:13:03.576 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127225}{"msgid":"sd","info":{"status":0},"time":1777127225}
+04-25 14:13:06.536 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127228}
+04-25 14:13:06.537 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127228}{"msgid":"sd","info":{"status":0},"time":1777127228}
+04-25 14:13:09.608 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127231}
+04-25 14:13:09.609 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127231}{"msgid":"sd","info":{"status":0},"time":1777127231}
+04-25 14:13:12.583 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127234}
+04-25 14:13:12.587 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127234}{"msgid":"sd","info":{"status":0},"time":1777127234}
+04-25 14:13:15.551 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127237}
+04-25 14:13:15.553 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127237}{"msgid":"sd","info":{"status":0},"time":1777127237}
+04-25 14:13:18.629 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127241}
+04-25 14:13:18.630 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127241}{"msgid":"sd","info":{"status":0},"time":1777127241}
+04-25 14:13:21.596 I/RtspPipeline(17932): Mail-RX: {"msgid":"battery","info":{"capacity":90,"charge":1},"time":1777127244}
+04-25 14:13:21.598 I/RtspPipeline(17932): Mail-RX: {"msgid":"rec","info":{"value":1},"time":1777127244}{"msgid":"sd","info":{"status":0},"time":1777127244}

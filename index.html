@@ -661,6 +661,7 @@
                 <div class="tv-empty" id="tvEmpty">Noch keine Treffer registriert</div>
             </div>
         </div>
+        <button class="btn" id="btnExportTv" style="margin:8px 16px;display:none">💾 Testbericht speichern</button>
     </div>
 
     <!-- SIDE PANEL -->
@@ -699,7 +700,8 @@
                     Leer = Auto (Gateway-IP des verbundenen WLANs probieren)
                 </div>
                 <button class="btn btn-primary" id="btnRtsp">▶ RTSP-Stream starten</button>
-                <button class="btn" id="btnScanCam" style="margin-top:5px">🔍 Kamera suchen (Auto-Discovery)</button>
+                <button class="btn" id="btnScanCam" style="margin-top:5px">🔍 Kamera suchen (Auto)</button>
+                <button class="btn" id="btnScanSubnet" style="margin-top:3px;display:none">🌐 Vollscan (Subnetz 1–254)</button>
                 <button class="btn" id="btnRtspStop" style="display:none;margin-top:5px">■ Stream stoppen</button>
                 <div id="scanResults" style="display:none;margin-top:8px;font-size:10px;font-family:'Share Tech Mono',monospace;color:var(--text-dim)"></div>
             </div>
@@ -776,6 +778,11 @@
                     <button class="btn" id="btnExposureAuto" style="flex:1;font-size:11px;padding:5px">Auto</button>
                 </div>
                 <div id="shutterStatus" style="font-size:10px;color:var(--text-dim);margin-top:3px;font-family:'Share Tech Mono',monospace"></div>
+                <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+                    <span style="font-size:10px;color:var(--text-dim);font-family:'Share Tech Mono',monospace;white-space:nowrap">Gain</span>
+                    <input type="range" id="uvcGain" min="0" max="255" step="1" value="128" style="flex:1;accent-color:var(--accent)">
+                    <span style="font-size:10px;color:var(--text-dim);font-family:'Share Tech Mono',monospace;min-width:28px;text-align:right" id="gainVal">128</span>
+                </div>
             </div>
 
             <button class="btn btn-primary" id="btnAutoOpt" style="margin-top:8px">⚙ Auto-Optimieren</button>
@@ -805,6 +812,7 @@
             <div class="ps-label">Gesamtergebnis</div>
             <div class="score-big" id="totalScore">0</div>
             <div class="score-meta" id="scoreMeta">— Treffer</div>
+            <button class="btn" id="btnExport" style="margin-top:8px;display:none">💾 Testbericht speichern</button>
         </div>
 
         <!-- Hit list -->
@@ -841,7 +849,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.13';
+const APP_VERSION = '2.3.38';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2382,7 +2390,9 @@ async function manualUpdateCheck() {
         if (!latest) throw new Error('Keine Version gefunden');
         if (versionGt(latest, APP_VERSION)) {
             if (inAndroidApp) {
-                alert('Neue Version verfügbar: v' + latest + '\n\nAPK herunterladen:\nhttps://github.com/bmcservice/trefferpoint/releases/latest');
+                if (confirm('Neue Version v' + latest + ' verfügbar.\nGitHub-Releases im Browser öffnen?')) {
+                    try { window.tpBridge.openUrl('https://github.com/bmcservice/trefferpoint/releases/latest'); } catch(e) {}
+                }
             } else if (confirm('Neue Version v' + latest + ' verfügbar — jetzt laden?')) {
                 applyUpdate();
             }
@@ -2778,12 +2788,14 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     document.getElementById('btnRtsp').addEventListener('click', () => {
         const url = document.getElementById('rtspUrl').value.trim();
         localStorage.setItem('tp_rtsp_url', url);
-        setStatus('RTSP verbinden\u2026', 'warn');
-        setMsg('Starte RTSP-Stream\u2026');
+        const isMjpeg = /^https?:\/\//i.test(url);
+        const lbl = isMjpeg ? 'MJPEG' : 'RTSP';
+        setStatus(lbl + ' verbinden\u2026', 'warn');
+        setMsg('Starte ' + lbl + '-Stream\u2026');
         // Wichtig: Frame-Receiver einmal aufsetzen (dasselbe wie für USB)
         setupBridgeFrameReceiver();
         try { window.tpBridge.startRtsp(url); } catch(e) {
-            setStatus('\u26a0 RTSP-Bridge-Fehler', 'warn');
+            setStatus('\u26a0 ' + lbl + '-Bridge-Fehler', 'warn');
             setMsg('' + e);
         }
         document.getElementById('btnRtspStop').style.display = '';
@@ -2834,7 +2846,12 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     function tpPickScan(idx) {
         const hit = (window._tpScanHits || [])[idx];
         if (!hit) return;
-        if ((hit.proto || '') === 'rtsp') {
+        const proto = (hit.proto || '').toLowerCase();
+        // RTSP und MJPEG laufen beide über die Android-Bridge (MjpegHttpPipeline / RtspPipeline).
+        // Nur "echte" Browser-MJPEGs (nicht-Android oder fremde Cams) nutzen den Stream-URL-Pfad
+        // mit <img>/<video>-Element.
+        const useBridge = (proto === 'rtsp' || proto === 'mjpeg') && window.tpBridge;
+        if (useBridge) {
             document.getElementById('rtspUrl').value = hit.url;
             localStorage.setItem('tp_rtsp_url', hit.url);
             document.getElementById('btnRtsp').click();
@@ -2862,20 +2879,37 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         if (!isNaN(idx)) { e.preventDefault(); tpPickScan(idx); }
     }, { passive: false });
 
-    scanBtn.addEventListener('click', () => {
+    function startScan(full) {
         scanBtn.disabled = true;
+        const subnetBtn = document.getElementById('btnScanSubnet');
+        if (subnetBtn) subnetBtn.disabled = true;
         scanBtn.textContent = '🔍 Suche läuft...';
         scanResults.style.display = '';
-        scanResults.innerHTML = '<div style="color:var(--accent)">Scanne...</div>';
+        scanResults.innerHTML = '<div style="color:var(--accent)">' + (full ? 'Vollscan läuft (~15s)...' : 'Scanne...') + '</div>';
         const manual = document.getElementById('rtspUrl').value.trim();
         let host = '';
+        try { if (manual) host = new URL(manual).hostname || ''; } catch(e) {}
         try {
-            if (manual) host = new URL(manual).hostname || '';
-        } catch(e) {}
-        try { window.tpBridge.scanForCameras(host); } catch(e) {
+            if (full) window.tpBridge.scanSubnet(host);
+            else window.tpBridge.scanForCameras(host);
+        } catch(e) {
             window.tpOnScanResult('[]', true, 'Bridge-Fehler: ' + e);
         }
-    });
+    }
+
+    // done-Callback: Buttons wieder freigeben
+    const _origOnScanResult = window.tpOnScanResult;
+    window.tpOnScanResult = function(json, done, progress) {
+        _origOnScanResult(json, done, progress);
+        if (done) {
+            const subnetBtn = document.getElementById('btnScanSubnet');
+            if (subnetBtn) subnetBtn.disabled = false;
+        }
+    };
+
+    scanBtn.addEventListener('click', () => startScan(false));
+    const subnetBtn = document.getElementById('btnScanSubnet');
+    if (subnetBtn) subnetBtn.addEventListener('click', () => startScan(true));
 })();
 
 // Stream-URL aus localStorage wiederherstellen
@@ -3015,6 +3049,17 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
             statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
         }
     });
+    const gainSlider = document.getElementById('uvcGain');
+    const gainValEl  = document.getElementById('gainVal');
+    gainSlider.addEventListener('input', () => { gainValEl.textContent = gainSlider.value; });
+    gainSlider.addEventListener('change', () => {
+        try {
+            window.tpBridge.setUvcGain(parseInt(gainSlider.value));
+            statusEl.textContent = '✓ Gain auf ' + gainSlider.value + ' gesetzt';
+        } catch (e) {
+            statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
+        }
+    });
 })();
 
 document.getElementById('btnRotateCam').addEventListener('click', () => {
@@ -3047,6 +3092,50 @@ document.getElementById('btnReset').addEventListener('click', resetSession);
 document.getElementById('btnAutoOpt').addEventListener('click', autoOptimizeCamera);
 
 document.getElementById('btnDemo').addEventListener('click', runDemo);
+
+// Buttons nur in Android-APK sichtbar
+(function() {
+    const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
+        window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
+    if (inAndroidApp) {
+        document.getElementById('btnExport').style.display = '';
+        document.getElementById('btnExportTv').style.display = '';
+        document.getElementById('btnScanSubnet').style.display = '';
+    }
+})();
+document.getElementById('btnExportTv').addEventListener('click', () => {
+    document.getElementById('btnExport').click();
+});
+document.getElementById('btnExport').addEventListener('click', function() {
+    try {
+        const discKey = document.getElementById('discSel').value;
+        const report = {
+            version: APP_VERSION,
+            timestamp: new Date().toISOString(),
+            discipline: discKey,
+            calib: calib ? {
+                cx: calib.cx, cy: calib.cy,
+                a: calib.a, b: calib.b,
+                angle: calib.angle, pxPerMm: calib.pxPerMm
+            } : null,
+            hits: hits.map(function(h) {
+                return { ring: h.ring, clock: h.clock, dx: h.dx, dy: h.dy };
+            }),
+            appLog: (typeof window.tpBridge !== 'undefined') ? window.tpBridge.getLog() : '',
+            appStatus: (typeof window.tpBridge !== 'undefined') ? window.tpBridge.getStatus() : ''
+        };
+        const json = JSON.stringify(report, null, 2);
+        const result = window.tpBridge.saveTestbericht(json);
+        if (result.startsWith('Fehler')) {
+            setStatus('Export fehlgeschlagen: ' + result, 'error');
+        } else {
+            setStatus('Testbericht gespeichert: Downloads/TrefferPoint/' + result, 'ok');
+        }
+    } catch(e) {
+        setStatus('Export Exception: ' + e.message, 'error');
+    }
+});
+
 document.getElementById('tabCam').addEventListener('click', () => setView('cam'));
 document.getElementById('tabAnzeige').addEventListener('click', () => setView('anzeige'));
 document.getElementById('tabTreffer').addEventListener('click', () => setView('treffer'));

@@ -17,9 +17,17 @@ import java.net.URL
 import kotlin.concurrent.thread
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.MimeTypes
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 
@@ -40,8 +48,10 @@ class RtspPipeline(
 ) {
     companion object {
         private const val TAG = "RtspPipeline"
-        private const val INITIAL_WIDTH = 1920
-        private const val INITIAL_HEIGHT = 1080
+        // SGK GK720X / Viidure liefert immer 960×540 laut SDP.
+        // Passend zur Kamera-Ausgabe → kein Surface-Wechsel nötig nach onTracksChanged.
+        private const val INITIAL_WIDTH = 960
+        private const val INITIAL_HEIGHT = 540
         private const val JPEG_QUALITY = 85
     }
 
@@ -58,24 +68,46 @@ class RtspPipeline(
     @Volatile private var currentUrl: String = ""
     @Volatile private var triedUdpFallback = false
 
+    // Automatischer Neustart nach Decoder-Crash (SGK sendet alle ~4s ein neues Segment
+    // mit frame_num-Reset → c2.android.avc.decoder crasht mit IllegalStateException).
+    // Zähler wird bei erstem Frame zurückgesetzt; Limit schützt vor Endlosschleife.
+    @Volatile private var decodeErrorRestarts = 0
+    private val MAX_DECODE_RESTARTS = 30
+
     // Viidure/SGK-spezifisch: TCP-Socket auf Port 6035 ("mail_tcp_socket")
     // muss offen bleiben während RTSP läuft, sonst blockt die Kamera den Stream.
     @Volatile private var mailSocket: Socket? = null
 
+    // SDP-Proxy: patcht "a=recvonly"-Bug in der Kamera-Firmware, bevor ExoPlayer den SDP sieht.
+    @Volatile private var sdpProxy: RtspSdpProxy? = null
+
     fun start(url: String) {
         currentUrl = url
         triedUdpFallback = false
-        // Viidure-SGK-Kameras wollen eine HTTP-Wake-Up-Sequenz bevor sie Stream liefern.
-        // Wir machen das im Hintergrund, damit der Start nicht blockiert.
         thread(start = true, name = "rtsp-wakeup") {
             val hostMatch = Regex("rtsp://([^:/]+)").find(url)
             val host = hostMatch?.groupValues?.get(1)
+            var rtspUrl = url
             if (host != null && host.startsWith("192.168.")) {
                 wakeupCameraHttp(host)
+                // SDP-Proxy starten: kamera-seitiger Bug a=recvonly → wird zu sendrecv gepatcht
+                sdpProxy?.stop()
+                val proxy = RtspSdpProxy(host)
+                rtspUrl = proxy.start()
+                // Segment-Boundary-Callback: wenn Kamera alle ~4-5s das Segment wechselt,
+                // ExoPlayer PROAKTIV neu starten — bevor die P-Frames mit frame_num=0 den
+                // Decoder erreichen. Proxy bleibt stehen (ServerSocket läuft weiter),
+                // nur ExoPlayer wird recycelt. session() setzt idrEverInjected=false,
+                // neue ExoPlayer-Verbindung bekommt frische SPS+PPS+IDR-Initialisierung.
+                val capturedProxyUrl = rtspUrl
+                proxy.onSegmentBoundary = {
+                    mainHandler.post { recycleExoPlayer(capturedProxyUrl) }
+                    true  // Session sofort abbrechen — kein nutzloser doCameraHandshake mehr
+                }
+                sdpProxy = proxy
                 openMailSocket(host, 6035)
             }
-            // Danach eigentlichen Stream starten (auf Main-Thread weil ExoPlayer dies verlangt)
-            mainHandler.post { startInternal(url, useTcp = true) }
+            mainHandler.post { startInternal(rtspUrl, useTcp = true) }
         }
     }
 
@@ -94,6 +126,32 @@ class RtspPipeline(
             s.soTimeout = 15000
             mailSocket = s
             AppLog.i(TAG, "Mail-Socket offen auf $host:$port")
+
+            // Firmware-Bug #6 Probes via Mail-Socket: probiere mehrere JSON-Kommandos
+            // für "force I-frame". Antworten kommen asynchron im mail-socket-rx Reader.
+            try {
+                val probes = listOf(
+                    "{\"msgid\":\"ikeyframe\"}\n",
+                    "{\"msgid\":\"forceikeyframe\"}\n",
+                    "{\"msgid\":\"req_iframe\"}\n",
+                    "{\"msgid\":\"setencode\",\"info\":{\"iframe\":1}}\n",
+                    "{\"msgid\":\"setgop\",\"info\":{\"value\":1}}\n",
+                    "{\"msgid\":\"getencode\"}\n",
+                    "{\"msgid\":\"capability\"}\n",
+                    "{\"msgid\":\"listcmd\"}\n"
+                )
+                for (p in probes) {
+                    try {
+                        s.getOutputStream().write(p.toByteArray(Charsets.UTF_8))
+                        s.getOutputStream().flush()
+                        AppLog.i(TAG, "Mail-TX: ${p.trim()}")
+                    } catch (e: Exception) {
+                        AppLog.w(TAG, "Mail-TX fehlgeschlagen: ${e.message}")
+                        break
+                    }
+                }
+            } catch (_: Exception) {}
+
             thread(start = true, name = "mail-socket-rx") {
                 try {
                     val buf = ByteArray(4096)
@@ -122,7 +180,28 @@ class RtspPipeline(
             "http://$host:80/app/getdeviceattr",
             "http://$host:80/app/capability",
             "http://$host:80/app/getproductinfo",
-            "http://$host:80/app/getmediainfo"  // liefert RTSP-URL-Bestätigung
+            "http://$host:80/app/getmediainfo",
+            // Mail-Heartbeat zeigt rec:value=1 (Aufnahme aktiv, keine SD-Karte).
+            // Aufnahme stoppen — Kamera-Firmware liefert ggf. keinen RTSP-Stream im Aufnahme-Modus.
+            "http://$host:80/app/setrec?rec=0",
+            // Firmware-Bug #6 Probes: Kamera sendet KEIN IDR-Keyframe → MediaCodec kann
+            // P-Frames nicht dekodieren → frameCount=0. Probiere typische "force-IDR" Endpoints.
+            "http://$host:80/app/forceikeyframe",
+            "http://$host:80/app/ikeyframe",
+            "http://$host:80/app/reqikeyframe",
+            "http://$host:80/app/requestkeyframe",
+            "http://$host:80/app/keyframe",
+            "http://$host:80/app/forceiframe",
+            "http://$host:80/app/reqiframe",
+            "http://$host:80/app/setiframe?value=1",
+            "http://$host:80/app/setencode?iframe=1",
+            "http://$host:80/app/setencode?gop=1",
+            "http://$host:80/app/setgop?value=1",
+            "http://$host:80/app/setconfig?iframe=1",
+            "http://$host:80/app/getencode",
+            "http://$host:80/app/getgop",
+            "http://$host:80/app/streamctrl?action=iframe",
+            "http://$host:80/app/videoconfig?iframe=1"
         )
         for (ep in endpoints) {
             try {
@@ -142,6 +221,42 @@ class RtspPipeline(
             }
         }
         AppLog.i(TAG, "HTTP Wake-Up abgeschlossen")
+        // Vollständigen SDP per rohem RTSP DESCRIBE loggen — zeigt exakte Codec-Parameter
+        describeRtsp(host, "rtsp://$host/live/tcp/ch1")
+    }
+
+    /**
+     * Roher RTSP DESCRIBE ohne ExoPlayer — loggt das vollständige SDP für Diagnose.
+     * ExoPlayer macht DESCRIBE intern, aber der SDP bleibt unsichtbar.
+     * Hier können wir Format-Parameter, Payload-Typen und Custom-Attributes sehen.
+     */
+    private fun describeRtsp(host: String, rtspUrl: String) {
+        try {
+            val sock = Socket()
+            sock.connect(InetSocketAddress(host, 554), 3000)
+            sock.soTimeout = 3000
+            val req = "DESCRIBE $rtspUrl RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: TrefferPoint/2.3.18\r\nAccept: application/sdp\r\n\r\n"
+            sock.getOutputStream().write(req.toByteArray(Charsets.UTF_8))
+            val sb = StringBuilder()
+            val buf = ByteArray(4096)
+            val deadline = System.currentTimeMillis() + 3000
+            while (System.currentTimeMillis() < deadline) {
+                val n = try { sock.getInputStream().read(buf) } catch (_: Exception) { break }
+                if (n <= 0) break
+                sb.append(String(buf, 0, n, Charsets.UTF_8))
+                // Abbruch wenn vollständige Antwort (Header + Content-Length Bytes)
+                val hEnd = sb.indexOf("\r\n\r\n")
+                if (hEnd >= 0) {
+                    val cl = Regex("Content-Length:\\s*(\\d+)", RegexOption.IGNORE_CASE)
+                        .find(sb.substring(0, hEnd))?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                    if (sb.length >= hEnd + 4 + cl) break
+                }
+            }
+            sock.close()
+            AppLog.i(TAG, "DESCRIBE SDP (${sb.length}B):\n${sb.take(2000)}")
+        } catch (e: Exception) {
+            AppLog.w(TAG, "DESCRIBE fehlgeschlagen: ${e.message}")
+        }
     }
 
     private fun startInternal(url: String, useTcp: Boolean) {
@@ -167,6 +282,7 @@ class RtspPipeline(
                         frameCount++
                         if (frameCount == 1L) {
                             AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${img.width}x${img.height}")
+                            decodeErrorRestarts = 0  // Verbindung erfolgreich — Zähler zurücksetzen
                         }
                         onJpegFrame(jpeg)
                     } finally {
@@ -178,16 +294,70 @@ class RtspPipeline(
             }, imageHandler)
         }
 
-        val exo = ExoPlayer.Builder(context).build()
+        // Track-Selektor ohne Audio-Disable — Wireshark-Analyse der Viidure-App hat
+        // gezeigt: SGK-Cams brauchen SETUP für Video UND Audio (interleaved=0-1 + 2-3),
+        // sonst läuft der Stream nicht stabil. Audio-Track wird im Renderer einfach
+        // ignoriert (kein AudioOutput-Setup), aber RTSP-SETUP muss durchlaufen.
+        val trackSelector = DefaultTrackSelector(context)
+        // LoadControl: extrem kleine Puffer, damit Wiedergabe sofort startet.
+        // Default bufferForPlaybackMs=2500 → ExoPlayer wartet 2.5s Video-Daten bevor READY.
+        // Bei SGK mit ~30fps braucht das 75 Frames — verträgt sich nicht mit Segment-Reconnects.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                1000,   // minBufferMs
+                10000,  // maxBufferMs
+                100,    // bufferForPlaybackMs
+                200     // bufferForPlaybackAfterRebufferMs
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
+        // Software-First Decoder: c2.android.avc.decoder bevorzugen vor Hardware-Decoder.
+        // Hintergrund: Samsung Exynos Hardware-Decoder benötigt konformes IDR (I-Slice-Daten).
+        // Unser IDR-Hack injiziert einen P-Frame als IDR → Hardware-Decoder produziert 1 Frame,
+        // dann Error-Concealment-Stall (kein Output mehr). c2.android.avc.decoder (AOSP libavc)
+        // ist toleranter und dekodiert P-Frames auch ohne valides IDR weiter.
+        val softwareFirstFactory = object : DefaultRenderersFactory(context) {
+            override fun buildVideoRenderers(
+                context: Context,
+                extensionRendererMode: Int,
+                mediaCodecSelector: MediaCodecSelector,
+                enableDecoderFallback: Boolean,
+                eventHandler: Handler,
+                eventListener: VideoRendererEventListener,
+                allowedVideoJoiningTimeMs: Long,
+                out: ArrayList<Renderer>
+            ) {
+                val softFirst = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                    val decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunneledDecoder)
+                    if (mimeType == MimeTypes.VIDEO_H264) {
+                        val sorted = decoders.sortedBy { info ->
+                            // Software-Decoder (c2.android.*, OMX.google.*) an erste Stelle
+                            if (info.name.startsWith("c2.android") || info.name.startsWith("OMX.google")) 0 else 1
+                        }
+                        AppLog.i(TAG, "H264-Decoder: ${sorted.firstOrNull()?.name ?: "(none)"} (von ${decoders.size})")
+                        sorted
+                    } else decoders
+                }
+                super.buildVideoRenderers(context, extensionRendererMode, softFirst,
+                    enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out)
+            }
+        }
+
+        val exo = ExoPlayer.Builder(context, softwareFirstFactory)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .build()
         player = exo
 
-        // Scanner-Test hat gezeigt: Lavf57.83.100 (was Viidure selbst schickt) wird vom
-        // OPTIONS-Handler abgewiesen. Aber ExoPlayer-default, VLC und Lavf58 bekommen 200 OK.
-        // Nehmen wir Lavf58 — neutral und getestet funktionierend.
+        // User-Agent EXAKT wie Viidure-App (Wireshark-Mitschnitt v3.3.1): Lavf57.83.100.
+        // Die SGK-Firmware filtert offenbar nach UA und verhält sich für Lavf57 anders
+        // (sendet beim ersten Connect zumindest die SPS+P-Frame-Sequenz die ihr Decoder
+        // dann ohne IDR durchsetzt).
         val rtspSource = RtspMediaSource.Factory()
             .setForceUseRtpTcp(useTcp)
             .setTimeoutMs(8000)
-            .setUserAgent("Lavf58.76.100")
+            .setUserAgent("Lavf57.83.100")
             .createMediaSource(MediaItem.fromUri(url))
 
         exo.setMediaSource(rtspSource)
@@ -211,65 +381,132 @@ class RtspPipeline(
                 AppLog.e(TAG, "ExoPlayer Fehler: ${error.errorCodeName} — ${error.message}", error)
                 lastError = "${error.errorCodeName}: ${error.message}"
                 onStatus("RTSP-Fehler: ${error.errorCodeName}")
+
+                // DECODING_FAILED + aktiver Proxy → Segment-Boundary-Callback übernimmt das Recycle
+                // (feuert typ. 3-50ms nach dem Crash). Kein doppeltes Recycle durch zusätzlichen
+                // 200ms-Fallback! Ohne diesen Early-Return: jede Segment-Grenze → 2× Recycle →
+                // ~1.5s Lücke statt ~750ms.
+                if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+                    && sdpProxy != null) {
+                    AppLog.i(TAG, "DECODING_FAILED mit Proxy → Segment-Boundary übernimmt Recycle")
+                    return
+                }
+
+                // Fallback-Restart für alle anderen Fehler (Netzwerk-Timeout, Codec-Init,
+                // RTSP-Protokoll-Fehler) oder wenn kein Proxy aktiv ist.
+                if (running && currentUrl.isNotEmpty()
+                    && decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
+                    val proxyUrl = sdpProxy?.let { "rtsp://127.0.0.1:15554/live/tcp/ch1" }
+                        ?: currentUrl
+                    AppLog.i(TAG, "Unerwarteter Fehler → Fallback-Recycle in 200ms")
+                    mainHandler.postDelayed({
+                        if (currentUrl.isEmpty()) return@postDelayed
+                        recycleExoPlayer(proxyUrl)
+                    }, 200)
+                }
+            }
+
+            override fun onTracksChanged(tracks: Tracks) {
+                if (tracks.groups.isEmpty()) {
+                    AppLog.w(TAG, "onTracksChanged: keine Tracks — SDP leer oder unbekanntes Format")
+                    return
+                }
+                for (g in tracks.groups) {
+                    for (i in 0 until g.length) {
+                        val fmt = g.getTrackFormat(i)
+                        AppLog.i(TAG, "Track[$i]: mime=${fmt.sampleMimeType} codec=${fmt.codecs} ${fmt.width}x${fmt.height} selected=${g.isTrackSelected(i)}")
+                        // WICHTIG: Für die SGK GK720X bleibt die Videogröße laut SDP konstant bei
+                        // 960x540. setVideoSurface() aus onTracksChanged/onVideoSizeChanged hat hier
+                        // keinen Nutzen, triggert aber bei Segment-Reconnects Codec-Reconfigure/
+                        // Flush-Pfade. Genau dabei sehen wir Video-Size 0x0 und danach den
+                        // IllegalStateException-Crash auf dequeueInputBuffer.
+                        //
+                        // Daher Surface bewusst NICHT mehr wechseln. Falls die Kamera künftig
+                        // wirklich andere Maße liefert, zuerst Slice/frame_num normalisieren und
+                        // dann gezielt einen kompletten Player-Neustart statt Surface-Swap machen.
+                        if (fmt.sampleMimeType?.startsWith("video/") == true
+                            && g.isTrackSelected(i)
+                            && fmt.width > 0 && fmt.height > 0) {
+                            val w = fmt.width; val h = fmt.height
+                            val current = imageReader
+                            if (current != null && (current.width != w || current.height != h)) {
+                                AppLog.w(
+                                    TAG,
+                                    "Video-Track meldet ${w}x${h}, Surface bleibt absichtlich bei " +
+                                        "${current.width}x${current.height} (kein setVideoSurface während Stream)"
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 AppLog.i(TAG, "Video-Size: ${videoSize.width}x${videoSize.height}")
-                // Bei Größenänderung neuen ImageReader anlegen damit Frames nicht verzerrt sind
-                if (videoSize.width > 0 && videoSize.height > 0) {
-                    recreateImageReader(videoSize.width, videoSize.height)
+                if (videoSize.width == 0 || videoSize.height == 0) {
+                    AppLog.w(TAG, "Video-Size 0x0 = Renderer/Codec hat Output-Format verworfen oder geflusht")
+                    return
+                }
+                val current = imageReader
+                if (current != null && (current.width != videoSize.width || current.height != videoSize.height)) {
+                    AppLog.w(
+                        TAG,
+                        "Video-Size-Wechsel auf ${videoSize.width}x${videoSize.height} erkannt, " +
+                            "Surface-Swap absichtlich unterdrückt"
+                    )
                 }
             }
         })
 
         exo.prepare()
 
-        // Watchdog: Wenn nach 6s immer noch keine Frames angekommen sind, und wir sind auf TCP,
+        // Watchdog: Wenn nach 30s keine Frames ankommen und wir TCP verwendet haben,
         // automatischer Fallback auf UDP. Viele OEM-Kameras machen TCP-Interleaving kaputt.
+        // 30s statt 20s: SGK-Segment-Streaming hat ~620ms Reconnect-Pause alle 4.4s →
+        // ExoPlayer braucht mehrere Segmente bis der Puffer gefüllt ist.
         mainHandler.postDelayed({
             if (!running) return@postDelayed
             if (frameCount > 0) return@postDelayed
             if (!useTcp || triedUdpFallback) {
-                AppLog.w(TAG, "Keine Frames nach 6s — beide Transport-Arten probiert")
+                AppLog.w(TAG, "Keine Frames nach 20s — beide Transport-Arten probiert, aufgegeben")
                 onStatus("RTSP: keine Video-Pakete empfangen (Kamera neu starten?)")
                 return@postDelayed
             }
-            AppLog.i(TAG, "Keine Frames nach 6s mit TCP — Fallback auf UDP")
-            onStatus("RTSP: TCP-Pakete kommen nicht — versuche UDP")
+            AppLog.i(TAG, "Keine Frames nach 20s mit TCP — Fallback auf UDP")
+            onStatus("RTSP: TCP liefert keine Frames — versuche UDP")
             triedUdpFallback = true
             startInternal(currentUrl, useTcp = false)
-        }, 6000)
+        }, 30000)
     }
 
-    private fun recreateImageReader(w: Int, h: Int) {
-        try {
-            val oldReader = imageReader
-            val newReader = ImageReader.newInstance(w, h, ImageFormat.YUV_420_888, 2)
-            newReader.setOnImageAvailableListener({ r ->
-                try {
-                    val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val jpeg = imageToJpeg(img)
-                        frameCount++
-                        onJpegFrame(jpeg)
-                    } finally { img.close() }
-                } catch (e: Exception) {
-                    AppLog.e(TAG, "Image-Verarbeitung fehlgeschlagen", e)
-                }
-            }, imageHandler)
-            player?.setVideoSurface(newReader.surface)
-            imageReader = newReader
-            oldReader?.close()
-            AppLog.i(TAG, "ImageReader neu erstellt @ ${w}x${h}")
-        } catch (e: Exception) {
-            AppLog.e(TAG, "recreateImageReader fehlgeschlagen", e)
-        }
+    /**
+     * ExoPlayer recyceln ohne Proxy-Neustart.
+     * Wird aufgerufen wenn der Proxy eine Kamera-Segment-Boundary erkennt (~alle 4-5s).
+     * Proxy-ServerSocket und Mail-Socket bleiben offen. Nur ExoPlayer + ImageReader
+     * werden neu gestartet, sodass die neue session() in proxy saubere SPS+PPS+IDR
+     * Initialisierung bekommt (idrEverInjected=false wurde in session() gesetzt).
+     */
+    private fun recycleExoPlayer(proxyUrl: String) {
+        if (!running || currentUrl.isEmpty()) return
+        decodeErrorRestarts++
+        AppLog.i(TAG, "Segment-Boundary: ExoPlayer-Recycle #$decodeErrorRestarts → proxyUrl=$proxyUrl")
+        onStatus("RTSP: Segment-Wechsel, Decoder-Reset #$decodeErrorRestarts")
+        stopInternal()
+        // 150ms Pause: alte proxy-session() macht noch doCameraHandshake (~100ms),
+        // danach relay()-Broken-Pipe und Exit. Nach 150ms ist die Kamera-Verbindung
+        // frei und die neue session() kann sauber RTSP-Handshake machen.
+        mainHandler.postDelayed({
+            if (currentUrl.isEmpty()) return@postDelayed  // stop() wurde extern aufgerufen
+            startInternal(proxyUrl, useTcp = true)
+        }, 150)
     }
 
     fun stop() {
         triedUdpFallback = false
         currentUrl = ""
         stopInternal()
+        sdpProxy?.stop()
+        sdpProxy = null
         try { mailSocket?.close() } catch (_: Exception) {}
         mailSocket = null
     }
