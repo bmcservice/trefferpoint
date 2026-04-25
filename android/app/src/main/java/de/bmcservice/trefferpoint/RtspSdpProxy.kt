@@ -33,9 +33,17 @@ class RtspSdpProxy(
     @Volatile private var active = false
     private var serverSock: ServerSocket? = null
 
+    // Persistent über alle relay()-Calls einer Session: einmal IDR injiziert, NIE wieder.
+    // Hintergrund: Bei jedem Reconnect ein zweites Mal P-Frame als IDR labeln → Decoder
+    // erkennt Inkonsistenz beim 2. fake IDR → IllegalStateException → ERROR_CODE_DECODING_FAILED.
+    // Stattdessen nur EINMAL pro Session relabeln; folgende Segmente liefern P-Frames
+    // direkt an Decoder, der mit der existing reference weiter dekodiert.
+    @Volatile private var idrEverInjected = false
+
     fun start(): String {
         serverSock = ServerSocket(proxyPort)
         active = true
+        idrEverInjected = false  // neue Session — IDR-Relabel wieder erlauben
         thread(name = "rtsp-proxy-accept") {
             try {
                 while (active) {
@@ -322,10 +330,12 @@ class RtspSdpProxy(
         val nalWithM = IntArray(32)
         val fuaEndBits = IntArray(32)  // FU-A Pakete mit E-Bit gesetzt, indexiert nach FU-Typ
 
-        // IDR-Hack: Nur ERSTER P-Frame als IDR umlabeln (siehe Detail-Kommentar unten).
+        // IDR-Hack: Nur EIN P-Frame pro RTSP-Session als IDR umlabeln (NICHT pro Segment).
+        // Bei Reconnects bleibt idrEverInjected=true → idrSeen wird true initialisiert →
+        // KEIN weiteres Labeling im 2./n.-Segment → ExoPlayer's Decoder bleibt stabil.
         var idrRelabeled = 0
         var labelingFirstPFrame = false  // true während wir die FU-A-Fragmente des ersten P-Frames sehen
-        var idrSeen = false               // true sobald erster P-Frame komplett umgelabelt — danach kein Labeling mehr
+        var idrSeen = idrEverInjected     // persistenter State — einmal injected, immer skip
 
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
@@ -460,6 +470,7 @@ class RtspSdpProxy(
                                     if (fuEnd) {
                                         labelingFirstPFrame = false
                                         idrSeen = true  // erster P-Frame fertig — nicht mehr labeln
+                                    idrEverInjected = true  // session-persistent — auch über Reconnects skip
                                     }
                                 }
                             }
@@ -468,6 +479,7 @@ class RtspSdpProxy(
                             pktBuf[16] = ((pktBuf[16].toInt() and 0x80) or 0x65).toByte()
                             idrRelabeled++
                             idrSeen = true
+                            idrEverInjected = true  // session-persistent
                         }
                     }
 
