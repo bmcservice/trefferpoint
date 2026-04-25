@@ -4,16 +4,19 @@
     android:layout_height="match_parent"
     android:background="@color/tp_bg">
 
+    <!-- TextureView HINTER WebView (Z-Order 0).
+         match_parent: Hardware-Compositor zeichnet sie vollständig →
+         TextureView.draw() wird garantiert aufgerufen → updateTexImage() läuft →
+         onSurfaceTextureUpdated feuert → getBitmap() liefert frische Frames.
+         Nutzer sieht nur die WebView; TextureView bleibt unsichtbar darunter. -->
+    <TextureView
+        android:id="@+id/rtspTextureView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <WebView
         android:id="@+id/webview"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
-
-    <!-- TextureView VOR WebView (Diagnose): Zeigt ob Decoder überhaupt rendert.
-         96×54dp sichtbar oben-links. Nach Diagnose wieder hinter WebView. -->
-    <TextureView
-        android:id="@+id/rtspTextureView"
-        android:layout_width="96dp"
-        android:layout_height="54dp" />
 
 </FrameLayout>

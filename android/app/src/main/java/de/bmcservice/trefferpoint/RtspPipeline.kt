@@ -2,10 +2,10 @@ package de.bmcservice.trefferpoint
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.SurfaceTexture
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.graphics.SurfaceTexture
 import android.view.TextureView
 import androidx.media3.common.MediaItem
 import java.net.HttpURLConnection
@@ -77,8 +77,8 @@ class RtspPipeline(
     // capturePending: verhindert Stau wenn JPEG-Kompression länger als Poll-Intervall dauert
     @Volatile private var capturePending = false
 
-    // Frische SurfaceTexture pro ExoPlayer-Lifecycle (stark referenziert gegen GC)
-    private var ownedSt: SurfaceTexture? = null
+    // Zählt wie oft onSurfaceTextureUpdated gefeuert hat (Diagnose)
+    @Volatile private var stuCount = 0L
 
     // Viidure/SGK-spezifisch: TCP-Socket auf Port 6035 ("mail_tcp_socket")
     @Volatile private var mailSocket: Socket? = null
@@ -86,51 +86,59 @@ class RtspPipeline(
     // SDP-Proxy: patcht "a=recvonly"-Bug in der Kamera-Firmware
     @Volatile private var sdpProxy: RtspSdpProxy? = null
 
-    // Frame-Polling: läuft auf mainHandler, JPEG-Kompression auf captureThread
+    /**
+     * Liefert einen Frame an den captureHandler.
+     * Aufruf von onSurfaceTextureUpdated (primär) oder captureRunnable (Fallback).
+     * MUSS auf dem Main-Thread aufgerufen werden.
+     */
+    private fun captureFrame() {
+        if (!running || capturePending) return
+        val bmp = try {
+            textureView.getBitmap(INITIAL_WIDTH, INITIAL_HEIGHT)
+        } catch (e: Exception) {
+            AppLog.w(TAG, "getBitmap Exception: ${e.message}")
+            return
+        } ?: return
+
+        capturePending = true
+        val posted = captureHandler?.post {
+            var outBmp: Bitmap? = null
+            try {
+                // UV=0-Fix: c2.android.avc.decoder schreibt UV=0 in SurfaceTexture
+                // → GPU macht YCbCr→ARGB mit Cb=Cr=0 → grünes Bild (G≈Y, R≈0, B≈0).
+                // Fix: detektiere grünen Tint und extrahiere Y aus G-Kanal → Graustufe.
+                outBmp = fixGreenTintIfNeeded(bmp)
+                val out = ByteArrayOutputStream((INITIAL_WIDTH * INITIAL_HEIGHT) / 4)
+                outBmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                val jpeg = out.toByteArray()
+                frameCount++
+                if (frameCount == 1L || frameCount % 30L == 0L) {
+                    AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG @ ${INITIAL_WIDTH}x${INITIAL_HEIGHT} uvFix=${outBmp !== bmp}")
+                    if (frameCount == 1L) decodeErrorRestarts = 0
+                }
+                onJpegFrame(jpeg)
+            } finally {
+                if (outBmp != null && outBmp !== bmp) outBmp.recycle()
+                bmp.recycle()
+                capturePending = false
+            }
+        }
+        if (posted != true) {
+            bmp.recycle()
+            capturePending = false
+        }
+    }
+
+    // Fallback-Polling: greift nur wenn onSurfaceTextureUpdated nicht feuert
+    // (z. B. TextureView nicht gezeichnet). Wird nach dem Setzen des STL deaktiviert sobald
+    // der erste STU-Callback eintrifft.
     private val captureRunnable = object : Runnable {
         override fun run() {
             if (!running) return
-
-            if (!capturePending) {
-                val bmp = try {
-                    textureView.getBitmap(INITIAL_WIDTH, INITIAL_HEIGHT)
-                } catch (e: Exception) {
-                    AppLog.w(TAG, "getBitmap Exception: ${e.message}")
-                    null
-                }
-                if (bmp != null) {
-                    capturePending = true
-                    val handler = captureHandler
-                    val posted = handler?.post {
-                        var outBmp: Bitmap? = null
-                        try {
-                            // UV=0-Fix: c2.android.avc.decoder schreibt UV=0 in SurfaceTexture
-                            // → GPU macht YCbCr→ARGB mit Cb=Cr=0 → grünes Bild (G≈Y, R≈0, B≈0).
-                            // Fix: detektiere grünen Tint und extrahiere Y aus G-Kanal → Graustufe.
-                            outBmp = fixGreenTintIfNeeded(bmp)
-                            val out = ByteArrayOutputStream((INITIAL_WIDTH * INITIAL_HEIGHT) / 4)
-                            outBmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-                            val jpeg = out.toByteArray()
-                            frameCount++
-                            if (frameCount == 1L || frameCount % 30L == 0L) {
-                                AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG @ ${INITIAL_WIDTH}x${INITIAL_HEIGHT} uvFix=${outBmp !== bmp}")
-                                if (frameCount == 1L) decodeErrorRestarts = 0
-                            }
-                            onJpegFrame(jpeg)
-                        } finally {
-                            if (outBmp != null && outBmp !== bmp) outBmp.recycle()
-                            bmp.recycle()
-                            capturePending = false
-                        }
-                    }
-                    // captureHandler bereits gestoppt (stop() während getBitmap lief)
-                    if (posted != true) {
-                        bmp.recycle()
-                        capturePending = false
-                    }
-                }
+            if (stuCount == 0L) {
+                // Noch kein STU-Callback → Fallback-Polling aktiv
+                captureFrame()
             }
-
             mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
     }
@@ -353,27 +361,10 @@ class RtspPipeline(
         running = true
         lastError = null
         frameCount = 0
+        stuCount = 0
         capturePending = false
 
-        // Frische SurfaceTexture: nach player.release() kann der c2.android.avc.decoder
-        // nicht mehr in die alte SurfaceTexture schreiben (Y bleibt 0 → G=135 nach UV-Fix).
-        // Neue, nie benutzte SurfaceTexture garantiert sauberen Decoder-Start.
-        // SurfaceTexture(false) = detached vom GL-Kontext (API 26+); ExoPlayer verwaltet GL intern.
-        val prevSt = ownedSt
-        val freshSt = SurfaceTexture(false)
-        freshSt.setDefaultBufferSize(INITIAL_WIDTH, INITIAL_HEIGHT)
-        ownedSt = freshSt
-        val tvAvail = textureView.isAvailable
-        if (tvAvail) {
-            textureView.setSurfaceTexture(freshSt)
-            AppLog.i(TAG, "start: frische SurfaceTexture gesetzt (TV=available)")
-        } else {
-            AppLog.w(TAG, "start: TextureView nicht verfügbar — alte ST bleibt! (TV=unavailable)")
-        }
-        // Alte ST nach sicherer Verzögerung freigeben (nicht sofort: alter Player läuft noch kurz)
-        mainHandler.postDelayed({ try { prevSt?.release() } catch (_: Exception) {} }, 500L)
-
-        AppLog.i(TAG, "start: $url (RTP über ${if (useTcp) "TCP" else "UDP"})")
+        AppLog.i(TAG, "start: $url (TV.isAvailable=${textureView.isAvailable}) (RTP über ${if (useTcp) "TCP" else "UDP"})")
         onStatus("RTSP: Verbinde (${if (useTcp) "TCP" else "UDP"}) zu $url")
 
         // Capture-Thread für JPEG-Kompression starten
@@ -440,6 +431,32 @@ class RtspPipeline(
         exo.setVideoTextureView(textureView)
         exo.playWhenReady = true
 
+        // onSurfaceTextureUpdated feuert nach JEDEM updateTexImage() — exakt dann ist
+        // getBitmap() garantiert frisch. Ersetzt das Poll-Timing-Problem (33ms-Intervall
+        // kann vor updateTexImage landen → liest alte/leere Pixel).
+        // Falls der Callback nicht feuert (TV nicht gezeichnet), greift captureRunnable als
+        // Fallback (stuCount == 0 → Polling aktiv).
+        textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                AppLog.i(TAG, "STL.onAvailable: ${w}x${h}")
+                st.setDefaultBufferSize(INITIAL_WIDTH, INITIAL_HEIGHT)
+            }
+            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                AppLog.i(TAG, "STL.onDestroyed")
+                return false  // ST nicht freigeben — wir verwalten den Lifecycle
+            }
+            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                AppLog.i(TAG, "STL.onSizeChanged: ${w}x${h}")
+            }
+            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {
+                stuCount++
+                if (stuCount == 1L || stuCount % 150L == 0L) {
+                    AppLog.i(TAG, "STL.onUpdated #$stuCount (frame=$frameCount)")
+                }
+                captureFrame()
+            }
+        }
+
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 val name = when (state) {
@@ -491,6 +508,10 @@ class RtspPipeline(
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 AppLog.i(TAG, "Video-Size: ${videoSize.width}x${videoSize.height}")
+            }
+
+            override fun onRenderedFirstFrame() {
+                AppLog.i(TAG, "onRenderedFirstFrame — erste Frame in SurfaceTexture geschrieben")
             }
         })
 
@@ -544,12 +565,8 @@ class RtspPipeline(
         if (!running) return
         running = false
         AppLog.i(TAG, "stop")
-        // Polling stoppen (sowohl auf Main- als auch auf captureThread)
         mainHandler.removeCallbacks(captureRunnable)
-        // Explizit von TextureView detachen vor release() — verhindert ST-Invalidierung
-        // durch player.release() (Samsung-Quirk: release() macht SurfaceTexture für Folge-
-        // Decoder unbrauchbar wenn nicht vorher sauber getrennt).
-        try { player?.clearVideoTextureView(textureView) } catch (_: Exception) {}
+        textureView.surfaceTextureListener = null
         try { captureThread?.quitSafely() } catch (_: Exception) {}
         captureThread = null
         captureHandler = null
