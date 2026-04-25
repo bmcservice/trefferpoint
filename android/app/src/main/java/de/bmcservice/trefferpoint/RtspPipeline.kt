@@ -308,8 +308,13 @@ class RtspPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Software-First Decoder: c2.android.avc.decoder bevorzugen vor Hardware-Decoder.
-        val softwareFirstFactory = object : DefaultRenderersFactory(context) {
+        // Hardware-Decoder bevorzugen (Standard-ExoPlayer-Reihenfolge).
+        // c2.android.avc.decoder (Software) liefert UV=0 → grünes Bild.
+        // Exynos Hardware-Decoder liefert korrekte YUV-Werte.
+        // Mit SDP-Proxy + IDR-Injection sind jetzt echte IDR-Frames vorhanden
+        // → Hardware-Decoder kommt mit dem Stream zurecht.
+        // Logging: ersten gefundenen H264-Decoder protokollieren.
+        val rendererFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
                 extensionRendererMode: Int,
@@ -320,22 +325,23 @@ class RtspPipeline(
                 allowedVideoJoiningTimeMs: Long,
                 out: ArrayList<Renderer>
             ) {
-                val softFirst = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                val loggingSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
                     val decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunneledDecoder)
                     if (mimeType == MimeTypes.VIDEO_H264) {
-                        val sorted = decoders.sortedBy { info ->
-                            if (info.name.startsWith("c2.android") || info.name.startsWith("OMX.google")) 0 else 1
+                        AppLog.i(TAG, "H264-Decoder (Standard-Reihenfolge): ${decoders.firstOrNull()?.name ?: "(none)"} (von ${decoders.size})")
+                        decoders.also { list ->
+                            list.forEachIndexed { i, d ->
+                                AppLog.i(TAG, "  [$i] ${d.name} hw=${d.hardwareAccelerated}")
+                            }
                         }
-                        AppLog.i(TAG, "H264-Decoder: ${sorted.firstOrNull()?.name ?: "(none)"} (von ${decoders.size})")
-                        sorted
                     } else decoders
                 }
-                super.buildVideoRenderers(context, extensionRendererMode, softFirst,
+                super.buildVideoRenderers(context, extensionRendererMode, loggingSelector,
                     enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out)
             }
         }
 
-        val exo = ExoPlayer.Builder(context, softwareFirstFactory)
+        val exo = ExoPlayer.Builder(context, rendererFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .build()
