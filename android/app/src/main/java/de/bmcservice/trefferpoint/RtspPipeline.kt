@@ -108,9 +108,9 @@ class RtspPipeline(
                             outBmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
                             val jpeg = out.toByteArray()
                             frameCount++
-                            if (frameCount == 1L) {
-                                AppLog.i(TAG, "Erster RTSP-Frame (TextureView): ${jpeg.size}B JPEG @ ${INITIAL_WIDTH}x${INITIAL_HEIGHT} uvFix=${outBmp !== bmp}")
-                                decodeErrorRestarts = 0
+                            if (frameCount == 1L || frameCount % 30L == 0L) {
+                                AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG @ ${INITIAL_WIDTH}x${INITIAL_HEIGHT} uvFix=${outBmp !== bmp}")
+                                if (frameCount == 1L) decodeErrorRestarts = 0
                             }
                             onJpegFrame(jpeg)
                         } finally {

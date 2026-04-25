@@ -4,13 +4,13 @@
     android:layout_height="match_parent"
     android:background="@color/tp_bg">
 
-    <!-- RTSP TextureView: match_parent, hinter WebView (WebView liegt darüber).
-         Muss volle Größe haben damit der GPU-SurfaceTexture-Puffer ausreichend groß ist
-         und getBitmap(960,540) korrekte Pixel liefert. Für den Nutzer unsichtbar. -->
+    <!-- RTSP TextureView: 96×54dp (1/10 der Video-Auflösung), hinter WebView.
+         Muss attached + visible sein, damit SurfaceTexture lebt und getBitmap() klappt.
+         Nicht 1dp (zu klein für GPU-Puffer), nicht match_parent (überlagert WebView-Rendering). -->
     <TextureView
         android:id="@+id/rtspTextureView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_width="96dp"
+        android:layout_height="54dp" />
 
     <WebView
         android:id="@+id/webview"
