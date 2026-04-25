@@ -15,7 +15,6 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
 import kotlin.concurrent.thread
-import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -376,20 +375,26 @@ class RtspPipeline(
                     for (i in 0 until g.length) {
                         val fmt = g.getTrackFormat(i)
                         AppLog.i(TAG, "Track[$i]: mime=${fmt.sampleMimeType} codec=${fmt.codecs} ${fmt.width}x${fmt.height} selected=${g.isTrackSelected(i)}")
-                        // ImageReader muss exakt die Decoder-Ausgabegröße haben —
-                        // sonst kann MediaCodec keine Output-Buffer dequeuen (stille Frame-Drops).
-                        // onVideoSizeChanged feuert erst nach dem ersten Frame → Henne-Ei-Problem.
-                        // Hier kennen wir die Größe aus dem SDP, noch vor PLAY → sofort korrigieren.
+                        // WICHTIG: Für die SGK GK720X bleibt die Videogröße laut SDP konstant bei
+                        // 960x540. setVideoSurface() aus onTracksChanged/onVideoSizeChanged hat hier
+                        // keinen Nutzen, triggert aber bei Segment-Reconnects Codec-Reconfigure/
+                        // Flush-Pfade. Genau dabei sehen wir Video-Size 0x0 und danach den
+                        // IllegalStateException-Crash auf dequeueInputBuffer.
+                        //
+                        // Daher Surface bewusst NICHT mehr wechseln. Falls die Kamera künftig
+                        // wirklich andere Maße liefert, zuerst Slice/frame_num normalisieren und
+                        // dann gezielt einen kompletten Player-Neustart statt Surface-Swap machen.
                         if (fmt.sampleMimeType?.startsWith("video/") == true
                             && g.isTrackSelected(i)
                             && fmt.width > 0 && fmt.height > 0) {
                             val w = fmt.width; val h = fmt.height
-                            // Nicht direkt aus dem Listener-Callback aufrufen —
-                            // setVideoSurface() aus onTracksChanged heraus kann ExoPlayer
-                            // zu internem Reconnect zwingen. Post auf Main-Looper.
-                            mainHandler.post {
-                                AppLog.i(TAG, "→ ImageReader auf ${w}x${h} anpassen")
-                                recreateImageReader(w, h)
+                            val current = imageReader
+                            if (current != null && (current.width != w || current.height != h)) {
+                                AppLog.w(
+                                    TAG,
+                                    "Video-Track meldet ${w}x${h}, Surface bleibt absichtlich bei " +
+                                        "${current.width}x${current.height} (kein setVideoSurface während Stream)"
+                                )
                             }
                         }
                     }
@@ -398,9 +403,17 @@ class RtspPipeline(
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 AppLog.i(TAG, "Video-Size: ${videoSize.width}x${videoSize.height}")
-                // Bei Größenänderung neuen ImageReader anlegen damit Frames nicht verzerrt sind
-                if (videoSize.width > 0 && videoSize.height > 0) {
-                    recreateImageReader(videoSize.width, videoSize.height)
+                if (videoSize.width == 0 || videoSize.height == 0) {
+                    AppLog.w(TAG, "Video-Size 0x0 = Renderer/Codec hat Output-Format verworfen oder geflusht")
+                    return
+                }
+                val current = imageReader
+                if (current != null && (current.width != videoSize.width || current.height != videoSize.height)) {
+                    AppLog.w(
+                        TAG,
+                        "Video-Size-Wechsel auf ${videoSize.width}x${videoSize.height} erkannt, " +
+                            "Surface-Swap absichtlich unterdrückt"
+                    )
                 }
             }
         })
@@ -424,38 +437,6 @@ class RtspPipeline(
             triedUdpFallback = true
             startInternal(currentUrl, useTcp = false)
         }, 30000)
-    }
-
-    private fun recreateImageReader(w: Int, h: Int) {
-        try {
-            // Surface-Wechsel während BUFFERING resettet den MediaCodec-Decoder.
-            // Wenn die Größe bereits stimmt, Surface nicht neu erstellen.
-            val current = imageReader
-            if (current != null && current.width == w && current.height == h) {
-                AppLog.i(TAG, "ImageReader bereits ${w}x${h} — kein Neustart")
-                return
-            }
-            val oldReader = imageReader
-            val newReader = ImageReader.newInstance(w, h, ImageFormat.YUV_420_888, 2)
-            newReader.setOnImageAvailableListener({ r ->
-                try {
-                    val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val jpeg = imageToJpeg(img)
-                        frameCount++
-                        onJpegFrame(jpeg)
-                    } finally { img.close() }
-                } catch (e: Exception) {
-                    AppLog.e(TAG, "Image-Verarbeitung fehlgeschlagen", e)
-                }
-            }, imageHandler)
-            player?.setVideoSurface(newReader.surface)
-            imageReader = newReader
-            oldReader?.close()
-            AppLog.i(TAG, "ImageReader neu erstellt @ ${w}x${h}")
-        } catch (e: Exception) {
-            AppLog.e(TAG, "recreateImageReader fehlgeschlagen", e)
-        }
     }
 
     fun stop() {
