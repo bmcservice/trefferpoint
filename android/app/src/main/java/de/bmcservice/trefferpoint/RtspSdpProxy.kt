@@ -620,8 +620,13 @@ class RtspSdpProxy(
                 synchronized(cOutLock) { cOut.write(pktBuf, 0, 4 + len); cOut.flush() }
             }
         } catch (e: Exception) {
-            AppLog.w(TAG, "RTP-Relay Kamera→Client: ${e.javaClass.simpleName}: ${e.message?.take(60)}")
-            cameraClosedFirst = true
+            // "Broken pipe" / "EPIPE" → ExoPlayer hat die Verbindung getrennt (Client-seitig).
+            // cameraClosedFirst=false → session() beendet die Reconnect-Schleife sofort.
+            // Andere Exceptions (Connection reset, timeout) → kameraseitig → cameraClosedFirst=true.
+            val msg = e.message ?: ""
+            cameraClosedFirst = !msg.contains("Broken pipe", ignoreCase = true) &&
+                                !msg.contains("EPIPE",        ignoreCase = true)
+            AppLog.w(TAG, "RTP-Relay Kamera→Client: ${e.javaClass.simpleName}: ${msg.take(60)} → cameraFirst=$cameraClosedFirst")
         }
 
         AppLog.i(TAG, "RTP-Relay: ${totalBytes}B von Kamera | cameraFirst=$cameraClosedFirst" +
