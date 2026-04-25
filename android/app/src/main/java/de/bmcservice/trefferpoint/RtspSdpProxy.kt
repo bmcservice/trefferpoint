@@ -292,17 +292,10 @@ class RtspSdpProxy(
         val nalWithM = IntArray(32)
         val fuaEndBits = IntArray(32)  // FU-A Pakete mit E-Bit gesetzt, indexiert nach FU-Typ
 
-        // IDR-Hack: Wireshark-Capture der Viidure-App hat gezeigt: SGK-Cams senden NIE
-        // einen IDR-Keyframe (NAL=5), nur P-Frames (NAL=1) und SPS (NAL=7). Viidure
-        // dekodiert mit FFmpeg (toleriert das), unser ExoPlayer/MediaCodec verlangt
-        // strikt einen IDR und hängt sonst ewig in BUFFERING.
-        //
-        // Workaround: Wir labeln ALLE FU-A-Fragmente mit Original-Typ=1 (P) auf 5 (IDR)
-        // um. Der Decoder sieht dann jedes P-Frame als Sync-Sample und beginnt sofort
-        // zu dekodieren. Das erste Bild ist evtl. grünes Rauschen (P-Frame braucht
-        // einen Vorgänger den's nicht gibt), aber spätestens nach 1-2 Frames konvergiert
-        // das Bild auf den korrekten Inhalt — gleicher Mechanismus wie bei FFmpeg.
+        // IDR-Hack: Nur ERSTER P-Frame als IDR umlabeln (siehe Detail-Kommentar unten).
         var idrRelabeled = 0
+        var labelingFirstPFrame = false  // true während wir die FU-A-Fragmente des ersten P-Frames sehen
+        var idrSeen = false               // true sobald erster P-Frame komplett umgelabelt — danach kein Labeling mehr
 
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
@@ -395,27 +388,42 @@ class RtspSdpProxy(
                     }
                 }
 
-                // IDR-Hack: P-Frame (NAL=1) → IDR (NAL=5) umlabeln.
-                // FU-A Fragmente (Typ 28): unteren 5 Bits des FU-Headers[17] umsetzen.
-                // Single-NAL Pakete (Typ 1 direkt in pktBuf[16]): die unteren 5 Bits dort.
-                // Die NRI-Bits (Bits 5-6) lassen wir unverändert — die signalisieren
-                // nur Importance, nicht den Frame-Typ.
-                if (ch % 2 == 0 && len >= 13) {
+                // IDR-Hack: NUR DAS ERSTE P-Frame jedes relay()-Laufs als IDR umlabeln.
+                // Begründung: Wenn JEDES P-Frame als IDR markiert wird, resetet der Decoder
+                // bei jedem Frame seinen Reference-Buffer → Output bleibt schwarz, weil
+                // P-Slice-Daten ohne Referenz nichts Sichtbares ergeben. Wenn wir aber nur
+                // den ERSTEN als Sync-Sample markieren, hat der Decoder von da an einen
+                // (anfangs Müll-) Reference-Frame, und alle folgenden P-Frames bauen
+                // korrekt darauf auf → das Bild konvergiert über 1-2 Sekunden auf den
+                // echten Live-Inhalt.
+                //
+                // FU-A: alle Fragmente desselben P-Frames müssen konsistent gelabelt werden,
+                // da der Reassembler sonst inkonsistent ist. Wir tracken via
+                // labelingFrameInProgress ob wir gerade beim ersten P-Frame sind.
+                if (ch % 2 == 0 && len >= 13 && !idrSeen) {
                     val nt = pktBuf[16].toInt() and 0x1F
                     if (nt == 28 && len >= 14) {
                         val fuOrig = pktBuf[17].toInt() and 0x1F
+                        val fuStart = (pktBuf[17].toInt() and 0x80) != 0
+                        val fuEnd = (pktBuf[17].toInt() and 0x40) != 0
                         if (fuOrig == 1) {
-                            // FU-Header: S(1) | E(1) | R(1) | Type(5) — Typ-Bits auf 5
-                            pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
-                            // FU-Indicator (pktBuf[16]) NRI-Bits auf 11 (höchste Importance, wie IDR)
-                            pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
-                            idrRelabeled++
+                            if (fuStart) labelingFirstPFrame = true
+                            if (labelingFirstPFrame) {
+                                // Type-Bits → 5 (IDR), NRI → 11 (höchste Importance)
+                                pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
+                                pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
+                                idrRelabeled++
+                                if (fuEnd) {
+                                    labelingFirstPFrame = false
+                                    idrSeen = true  // erster P-Frame fertig — nicht mehr labeln
+                                }
+                            }
                         }
                     } else if (nt == 1) {
-                        // Single-NAL P-Frame → als IDR umlabeln
+                        // Single-NAL P-Frame → als IDR umlabeln (einmalig)
                         pktBuf[16] = ((pktBuf[16].toInt() and 0x80) or 0x65).toByte()
-                        // = F(0)|NRI(11)|Type(5) bei NRI 11
                         idrRelabeled++
+                        idrSeen = true
                     }
                 }
 
