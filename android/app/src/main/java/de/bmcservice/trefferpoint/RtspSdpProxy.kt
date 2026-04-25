@@ -322,6 +322,7 @@ class RtspSdpProxy(
         var totalBytes = 0L
         val cOutLock = Any()
         val mBitFixed = mutableSetOf<Int>()  // NAL-Typen, für die M-bit bereits geloggt wurde
+        var spsPpsDropped = 0                // Anzahl verworfener SPS/PPS-Pakete (nach erstem IDR)
 
         // Diagnose: NAL-Typ-Verteilung + M-bit-Statistik.
         // nalCounts[t] = (total, with M=1 vor Fix, with FU-A end-bit) für NAL-Typ t.
@@ -405,6 +406,29 @@ class RtspSdpProxy(
                 val isAudioPacket = ch == 0 && len >= 2 && (pktBuf[5].toInt() and 0x7F) != 96
                 if (isAudioPacket) {
                     pktBuf[1] = 2.toByte()  // Channel 0 → 2 für Audio
+                }
+
+                // SPS/PPS-Dedup (Firmware-Bug #8): Kamera resendet SPS+PPS vor jedem
+                // Segment. ExoPlayer's RtpH264Reader interpretiert das als Format-Change
+                // und versucht den Decoder neu zu konfigurieren → IllegalStateException
+                // beim native_dequeueInputBuffer → ERROR_CODE_DECODING_FAILED nach ~2s
+                // im 2. Segment. Fix: Sobald idrEverInjected=true (= Decoder hat einen
+                // sauberen Sync-Sample bekommen), alle weiteren SPS-/PPS-Pakete einfach
+                // verwerfen. Decoder behält seinen State, P-Frames fließen kontinuierlich.
+                if (!isAudioPacket && idrEverInjected && ch % 2 == 0 && len >= 13) {
+                    val nt = pktBuf[16].toInt() and 0x1F
+                    val isSpsOrPps = when (nt) {
+                        7, 8 -> true  // Single-NAL SPS oder PPS
+                        28   -> len >= 14 && ((pktBuf[17].toInt() and 0x1F).let { it == 7 || it == 8 })
+                        else -> false
+                    }
+                    if (isSpsOrPps) {
+                        if (spsPpsDropped == 0) {
+                            AppLog.i(TAG, "SPS/PPS-Dedup aktiv: verwerfe Parameter-Sets nach erstem IDR")
+                        }
+                        spsPpsDropped++
+                        continue
+                    }
                 }
 
                 // Video-spezifische Verarbeitung: Seq-Rewrite, NAL-Stats, IDR-Hack, M-Bit-Fix.
@@ -537,7 +561,8 @@ class RtspSdpProxy(
             cameraClosedFirst = true
         }
 
-        AppLog.i(TAG, "RTP-Relay: ${totalBytes}B von Kamera | cameraFirst=$cameraClosedFirst")
+        AppLog.i(TAG, "RTP-Relay: ${totalBytes}B von Kamera | cameraFirst=$cameraClosedFirst" +
+                if (spsPpsDropped > 0) " | SPS/PPS-Dedup=$spsPpsDropped" else "")
 
         // NAL-Statistik dumpen (nur Typen die tatsächlich auftraten)
         val stats = (0 until 32)
