@@ -133,12 +133,17 @@ class RtspPipeline(
 
     /**
      * Detektiert UV=0-Bug des c2.android.avc.decoder: Pixel haben G >> R und G >> B (grüner Tint).
-     * Falls erkannt: Y-Kanal aus G extrahieren und Graustufen-Bitmap zurückgeben.
+     * Falls erkannt: adaptive Min-Max-Normalisierung via G-Kanal → volles Graustufen-Bild.
+     *
+     * Warum Min-Max? Bei UV=0 gilt (BT.601 Limited Range): G ≈ 1.164*(Y-16) + 154
+     * → G-Werte liegen zwischen ~154 (schwarz) und 255 (bei Y≈88). Direkte G-Übernahme
+     * quetscht alles in die obere Grau-Hälfte → kein Kontrast. Min-Max streckt auf [0..255].
+     *
      * Bei normalen Farbbildern (korrekte UV): gibt die Original-Bitmap zurück.
-     * WICHTIG: Aufrufer muss BEIDE Bitmaps (original + return) recyceln wenn return !== original.
+     * WICHTIG: Aufrufer muss BEIDE Bitmaps recyceln wenn return !== original.
      */
     private fun fixGreenTintIfNeeded(bmp: Bitmap): Bitmap {
-        // Stichprobe: 4 Pixel in Bildmitte analysieren
+        // Stichprobe: 4 Pixel in Bildmitte — grüner Tint detektieren
         val cx = bmp.width / 2; val cy = bmp.height / 2
         var greenExcess = 0
         for (dx in 0..1) for (dy in 0..1) {
@@ -148,16 +153,34 @@ class RtspPipeline(
             val b = p and 0xFF
             if (g > r + 40 && g > b + 40) greenExcess++
         }
-        if (greenExcess < 3) return bmp  // Normales Bild → unverändert zurückgeben
+        if (greenExcess < 3) return bmp  // Normales Farbbild → unverändert
 
-        // UV=0 bestätigt: G-Kanal ≈ Y (Luma). Konvertiere zu Graustufe.
+        // UV=0 bestätigt. Alle Pixel: R≈0, G≈Y+Offset, B≈0
+        // → G-Kanal enthält Luma, aber mit konstantem Offset → kein Kontrast wenn direkt genutzt.
+        // Lösung: adaptiv Min-Max auf G normalisieren → volles Graustufen-Spektrum 0..255.
         val w = bmp.width; val h = bmp.height
         val pixels = IntArray(w * h)
         bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        // Pass 1: G-Minimum und Maximum finden
+        var gMin = 255; var gMax = 0
+        for (p in pixels) {
+            val g = (p shr 8) and 0xFF
+            if (g < gMin) gMin = g
+            if (g > gMax) gMax = g
+        }
+        val range = (gMax - gMin).coerceAtLeast(1)
+        if (frameCount <= 1L || frameCount % 30L == 0L) {
+            AppLog.i(TAG, "uvFix: gMin=$gMin gMax=$gMax range=$range")
+        }
+
+        // Pass 2: G-Kanal auf [0..255] strecken → Graustufen-Pixel
         for (i in pixels.indices) {
             val g = (pixels[i] shr 8) and 0xFF
-            pixels[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
+            val y = (g - gMin) * 255 / range
+            pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
         }
+
         val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         result.setPixels(pixels, 0, w, 0, 0, w, h)
         return result
