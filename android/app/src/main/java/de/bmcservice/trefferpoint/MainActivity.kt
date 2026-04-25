@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
+import android.graphics.PixelFormat
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.hardware.usb.UsbManager
@@ -99,8 +100,12 @@ class MainActivity : AppCompatActivity() {
         // match_parent-Layout stellt sicher, dass die Surface groß genug ist bevor setFixedSize.
         rtspSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
+                // RGBA_8888: hint an SurfaceFlinger, SW-Komposition zu verwenden.
+                // Auf Samsung/Qualcomm verhindert das den Hardware-Overlay-Modus,
+                // der PixelCopy blind macht (PixelCopy sieht sonst nur schwarzen Layer).
+                holder.setFormat(PixelFormat.RGBA_8888)
                 holder.setFixedSize(960, 540)
-                AppLog.i(TAG, "rtspSurfaceView.surfaceCreated → setFixedSize(960×540)")
+                AppLog.i(TAG, "rtspSurfaceView.surfaceCreated → RGBA_8888 + setFixedSize(960×540)")
             }
             override fun surfaceChanged(holder: SurfaceHolder, f: Int, w: Int, h: Int) {}
             override fun surfaceDestroyed(holder: SurfaceHolder) {

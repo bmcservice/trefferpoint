@@ -116,12 +116,24 @@ class RtspPipeline(
         bmp.getPixels(pixels, 0, w, 0, 0, w, h)
         var gMin = 255; var gMax = 0
         for (p in pixels) { val g = (p shr 8) and 0xFF; if (g < gMin) gMin = g; if (g > gMax) gMax = g }
-        val range = (gMax - gMin).coerceAtLeast(1)
+        val gSpan = gMax - gMin
         if (frameCount <= 1L || frameCount % 30L == 0L)
-            AppLog.i(TAG, "uvFix: gMin=$gMin gMax=$gMax range=$range")
-        for (i in pixels.indices) {
-            val y = ((pixels[i] shr 8) and 0xFF - gMin) * 255 / range
-            pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+            AppLog.i(TAG, "uvFix: gMin=$gMin gMax=$gMax span=$gSpan")
+        if (gSpan < 20) {
+            // Bild fast uniform (gSpan<20): G-Kanal direkt als Helligkeit ausgeben.
+            // Normalisierung würde range≈1 → alle Pixel auf 0 treiben (komplett schwarz).
+            // G ≈ Y + 135 bei UV=0 — absoluter Helligkeitswert ist besser als künstliches Schwarz.
+            for (i in pixels.indices) {
+                val g = (pixels[i] shr 8) and 0xFF
+                pixels[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
+            }
+        } else {
+            // Normales Bild mit Kontrast: auf 0–255 normalisieren für maximalen Dynamikumfang
+            val range = gSpan
+            for (i in pixels.indices) {
+                val y = ((pixels[i] shr 8) and 0xFF - gMin) * 255 / range
+                pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+            }
         }
         val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         result.setPixels(pixels, 0, w, 0, 0, w, h)
@@ -451,7 +463,17 @@ class RtspPipeline(
 
                 if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
                     && sdpProxy != null) {
-                    AppLog.i(TAG, "DECODING_FAILED mit Proxy → Segment-Boundary übernimmt Recycle")
+                    // SW-Decoder (c2.android.avc.decoder) crasht an Segment-Boundaries.
+                    // Proxy bleibt mit Kamera verbunden → recycleExoPlayer reconnectet nur zum Proxy,
+                    // nicht zur Kamera → kein Vicious Cycle. ExoPlayer-Neustart ~alle 3–5s nötig.
+                    decodeErrorRestarts++
+                    AppLog.i(TAG, "DECODING_FAILED (SW-Decoder) → RecycleExoPlayer #$decodeErrorRestarts über Proxy")
+                    if (running && currentUrl.isNotEmpty() && decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
+                        mainHandler.postDelayed({
+                            if (currentUrl.isEmpty()) return@postDelayed
+                            recycleExoPlayer("rtsp://127.0.0.1:15554/live/tcp/ch1")
+                        }, 300)
+                    }
                     return
                 }
 
