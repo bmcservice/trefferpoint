@@ -373,10 +373,18 @@ class RtspPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Hardware-Decoder (Standard-Factory: bevorzugt HW-Decoder).
-        // Mit SurfaceView + PixelCopy: HW-Decoder schreibt korrektes YUV → SurfaceFlinger
-        // → kein UV=0-Bug. Software-Decoder (c2.android.avc.decoder) schrieb Y=0+UV=0
-        // → uniform grünes Bild selbst via PixelCopy. fixGreenTintIfNeeded() als Fallback.
+        // SOFTWARE-Decoder erzwingen — NOTWENDIG für PixelCopy auf Samsung!
+        //
+        // Root Cause (v2.3.54-Analyse): Qualcomm Hardware-Decoder (OMX.qcom.video.decoder.avc)
+        // schreibt decoded Frames in einen dedizierten Hardware-Overlay-Layer von SurfaceFlinger.
+        // PixelCopy.request(SurfaceView) liest den normalen SurfaceView-SurfaceControl-Layer —
+        // der bei Hardware-Overlay-Nutzung LEER/SCHWARZ bleibt. onRenderedFirstFrame feuert
+        // trotzdem, weil der HW-Decoder seinen Overlay beschreibt.
+        //
+        // Software-Decoder (c2.android.avc.decoder) schreibt direkt in den SurfaceFlinger-Layer
+        // der SurfaceView → PixelCopy liest echten Inhalt.
+        // Nachteil: UV=0-Bug (Cb=Cr=0) → grüner Tint. fixGreenTintIfNeeded() korrigiert das
+        // zu einem nutzbaren Graustufen-Bild (Y-Kanal = Luminanz, ausreichend für Treffererkennung).
         val rendersFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
@@ -388,14 +396,19 @@ class RtspPipeline(
                 allowedVideoJoiningTimeMs: Long,
                 out: ArrayList<Renderer>
             ) {
-                val logSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                val swSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
                     val decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunneledDecoder)
                     if (mimeType == MimeTypes.VIDEO_H264) {
-                        AppLog.i(TAG, "H264-Decoder: ${decoders.firstOrNull()?.name ?: "(none)"} (${decoders.size} verfügbar)")
+                        val sw = decoders.filter { !it.hardwareAccelerated }
+                        AppLog.i(TAG, "H264-Decoder: ${sw.firstOrNull()?.name ?: "(kein SW)"} " +
+                            "(SW-erzwungen, ${decoders.size} gesamt, ${sw.size} SW)")
+                        if (sw.isNotEmpty()) return@MediaCodecSelector sw
+                        // Fallback auf HW falls kein SW verfügbar (unwahrscheinlich auf Android 8+)
+                        AppLog.w(TAG, "Kein Software-Decoder verfügbar — HW-Fallback (PixelCopy evtl. schwarz)")
                     }
-                    decoders  // Hardware-Decoder zuerst (ExoPlayer-Default-Reihenfolge)
+                    decoders
                 }
-                super.buildVideoRenderers(context, extensionRendererMode, logSelector,
+                super.buildVideoRenderers(context, extensionRendererMode, swSelector,
                     enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out)
             }
         }
