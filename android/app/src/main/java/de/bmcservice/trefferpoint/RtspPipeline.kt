@@ -382,9 +382,18 @@ class RtspPipeline(
                 lastError = "${error.errorCodeName}: ${error.message}"
                 onStatus("RTSP-Fehler: ${error.errorCodeName}")
 
-                // Fallback-Restart: Normalfall ist recycleExoPlayer() via onSegmentBoundary
-                // (proaktiv, vor dem Crash). Dieser Pfad fängt ungeplante Fehler ab die nicht
-                // durch Segment-Boundary ausgelöst wurden.
+                // DECODING_FAILED + aktiver Proxy → Segment-Boundary-Callback übernimmt das Recycle
+                // (feuert typ. 3-50ms nach dem Crash). Kein doppeltes Recycle durch zusätzlichen
+                // 200ms-Fallback! Ohne diesen Early-Return: jede Segment-Grenze → 2× Recycle →
+                // ~1.5s Lücke statt ~750ms.
+                if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+                    && sdpProxy != null) {
+                    AppLog.i(TAG, "DECODING_FAILED mit Proxy → Segment-Boundary übernimmt Recycle")
+                    return
+                }
+
+                // Fallback-Restart für alle anderen Fehler (Netzwerk-Timeout, Codec-Init,
+                // RTSP-Protokoll-Fehler) oder wenn kein Proxy aktiv ist.
                 if (running && currentUrl.isNotEmpty()
                     && decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
                     val proxyUrl = sdpProxy?.let { "rtsp://127.0.0.1:15554/live/tcp/ch1" }
