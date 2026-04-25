@@ -2,11 +2,11 @@ package de.bmcservice.trefferpoint
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.view.PixelCopy
+import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.media3.common.MediaItem
 import java.net.HttpURLConnection
@@ -69,6 +69,24 @@ class RtspPipeline(
         private const val POLL_INTERVAL_MS = 33L  // ~30fps
     }
 
+    init {
+        // SurfaceView-Buffer-Größe einmalig setzen — NICHT bei jedem startInternal()!
+        // setFixedSize() in startInternal() löste bei jedem Recycle eine Surface-Neuformatierung
+        // aus, die ExoPlayer kurz die Surface wegnahm → DECODING_FAILED → vicious cycle.
+        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                holder.setFixedSize(INITIAL_WIDTH, INITIAL_HEIGHT)
+                AppLog.i(TAG, "SurfaceHolder.Created → setFixedSize(${INITIAL_WIDTH}×${INITIAL_HEIGHT})")
+            }
+            override fun surfaceChanged(holder: SurfaceHolder, f: Int, w: Int, h: Int) {}
+            override fun surfaceDestroyed(holder: SurfaceHolder) {}
+        })
+        // Falls Surface bereits existiert (Activity already running)
+        if (surfaceView.holder.surface?.isValid == true) {
+            surfaceView.holder.setFixedSize(INITIAL_WIDTH, INITIAL_HEIGHT)
+        }
+    }
+
     private var player: ExoPlayer? = null
     private var captureThread: HandlerThread? = null
     private var captureHandler: Handler? = null
@@ -93,6 +111,39 @@ class RtspPipeline(
     @Volatile private var sdpProxy: RtspSdpProxy? = null
 
     /**
+     * UV=0-Detektion: Tritt auf wenn Software-Decoder Cb=Cr=0 in die Surface schreibt.
+     * SurfaceFlinger konvertiert dann YUV→RGB mit Cb=Cr=0 → grüner Tint (G≈Y+135, R≈0, B≈0).
+     * Fix: G-Kanal als Luma extrahieren + Min-Max-Normalisierung → Graustufen-Bild.
+     * Mit Hardware-Decoder (bevorzugt) tritt das nicht auf — diese Methode ist dann No-Op.
+     */
+    private fun fixGreenTintIfNeeded(bmp: Bitmap): Bitmap {
+        val cx = bmp.width / 2; val cy = bmp.height / 2
+        var greenExcess = 0
+        for (dx in 0..1) for (dy in 0..1) {
+            val p = bmp.getPixel(cx + dx, cy + dy)
+            val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+            if (g > r + 40 && g > b + 40) greenExcess++
+        }
+        if (greenExcess < 3) return bmp
+
+        val w = bmp.width; val h = bmp.height
+        val pixels = IntArray(w * h)
+        bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+        var gMin = 255; var gMax = 0
+        for (p in pixels) { val g = (p shr 8) and 0xFF; if (g < gMin) gMin = g; if (g > gMax) gMax = g }
+        val range = (gMax - gMin).coerceAtLeast(1)
+        if (frameCount <= 1L || frameCount % 30L == 0L)
+            AppLog.i(TAG, "uvFix: gMin=$gMin gMax=$gMax range=$range")
+        for (i in pixels.indices) {
+            val y = ((pixels[i] shr 8) and 0xFF - gMin) * 255 / range
+            pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+        }
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(pixels, 0, w, 0, 0, w, h)
+        return result
+    }
+
+    /**
      * Einen Frame per PixelCopy aus dem SurfaceView-Buffer lesen.
      * MUSS auf dem Main-Thread aufgerufen werden (PixelCopy.request braucht Main-Thread
      * für die SurfaceView-Koordination).
@@ -111,24 +162,27 @@ class RtspPipeline(
                 bmp,
                 { result ->
                     // Callback auf captureThread
+                    var outBmp: Bitmap? = null
                     try {
                         if (result == PixelCopy.SUCCESS) {
+                            outBmp = fixGreenTintIfNeeded(bmp)
                             val out = ByteArrayOutputStream((INITIAL_WIDTH * INITIAL_HEIGHT) / 4)
-                            bmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                            outBmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
                             val jpeg = out.toByteArray()
                             frameCount++
                             if (frameCount == 1L || frameCount % 30L == 0L) {
-                                AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG (PixelCopy)")
+                                AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG (PixelCopy, uvFix=${outBmp !== bmp})")
                                 if (frameCount == 1L) decodeErrorRestarts = 0
                             }
                             onJpegFrame(jpeg)
                         } else {
                             // ERROR_SOURCE_NO_DATA ist normal während Buffering → kein Log-Spam
                             if (result != PixelCopy.ERROR_SOURCE_NO_DATA) {
-                                AppLog.w(TAG, "PixelCopy result=$result (0=SUCCESS, 1=UNKNOWN, 2=TIMEOUT, 3=SOURCE_NO_DATA, 4=SOURCE_INVALID, 5=DEST_INVALID)")
+                                AppLog.w(TAG, "PixelCopy result=$result (0=OK,1=UNKNOWN,2=TIMEOUT,3=NO_DATA,4=SRC_INVALID,5=DST_INVALID)")
                             }
                         }
                     } finally {
+                        if (outBmp != null && outBmp !== bmp) outBmp.recycle()
                         bmp.recycle()
                         capturePending = false
                     }
@@ -164,11 +218,11 @@ class RtspPipeline(
                 sdpProxy?.stop()
                 val proxy = RtspSdpProxy(host)
                 rtspUrl = proxy.start()
-                val capturedProxyUrl = rtspUrl
-                proxy.onSegmentBoundary = {
-                    mainHandler.post { recycleExoPlayer(capturedProxyUrl) }
-                    true
-                }
+                // Segment-Boundaries transparent vom Proxy handeln lassen (return false).
+                // Proxy managed seqState + tsState + SPS/PPS-Dedup — ExoPlayer-Recycle nicht nötig.
+                // recycleExoPlayer() bei onSegmentBoundary→true verursachte vicious cycle:
+                // Kamera verwirrt durch abrupte Reconnects → Segmente nur ~0.7s → Loop.
+                proxy.onSegmentBoundary = null  // transparent reconnect
                 sdpProxy = proxy
                 openMailSocket(host, 6035)
             }
@@ -323,9 +377,6 @@ class RtspPipeline(
         captureThread = HandlerThread("RtspCapture").apply { start() }
         captureHandler = Handler(captureThread!!.looper)
 
-        // SurfaceView-Buffer-Größe fix setzen — PixelCopy liest genau diesen Buffer
-        surfaceView.holder.setFixedSize(INITIAL_WIDTH, INITIAL_HEIGHT)
-
         val trackSelector = DefaultTrackSelector(context)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -337,10 +388,11 @@ class RtspPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // Software-Decoder bevorzugen (Fallback falls HW-Decoder Problem macht).
-        // Mit SurfaceView + PixelCopy ist der UV=0/Hardware-Layer-Bug irrelevant —
-        // YUV→RGB wird korrekt vom SurfaceFlinger-Compositor konvertiert.
-        val softwareFirstFactory = object : DefaultRenderersFactory(context) {
+        // Hardware-Decoder (Standard-Factory: bevorzugt HW-Decoder).
+        // Mit SurfaceView + PixelCopy: HW-Decoder schreibt korrektes YUV → SurfaceFlinger
+        // → kein UV=0-Bug. Software-Decoder (c2.android.avc.decoder) schrieb Y=0+UV=0
+        // → uniform grünes Bild selbst via PixelCopy. fixGreenTintIfNeeded() als Fallback.
+        val rendersFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
                 extensionRendererMode: Int,
@@ -351,22 +403,19 @@ class RtspPipeline(
                 allowedVideoJoiningTimeMs: Long,
                 out: ArrayList<Renderer>
             ) {
-                val softFirst = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                val logSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
                     val decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunneledDecoder)
                     if (mimeType == MimeTypes.VIDEO_H264) {
-                        val sorted = decoders.sortedBy { info ->
-                            if (info.name.startsWith("c2.android") || info.name.startsWith("OMX.google")) 0 else 1
-                        }
-                        AppLog.i(TAG, "H264-Decoder: ${sorted.firstOrNull()?.name ?: "(none)"} (von ${decoders.size})")
-                        sorted
-                    } else decoders
+                        AppLog.i(TAG, "H264-Decoder: ${decoders.firstOrNull()?.name ?: "(none)"} (${decoders.size} verfügbar)")
+                    }
+                    decoders  // Hardware-Decoder zuerst (ExoPlayer-Default-Reihenfolge)
                 }
-                super.buildVideoRenderers(context, extensionRendererMode, softFirst,
+                super.buildVideoRenderers(context, extensionRendererMode, logSelector,
                     enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out)
             }
         }
 
-        val exo = ExoPlayer.Builder(context, softwareFirstFactory)
+        val exo = ExoPlayer.Builder(context, rendersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .build()
