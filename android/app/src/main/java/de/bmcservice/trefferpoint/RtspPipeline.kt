@@ -539,14 +539,19 @@ class RtspPipeline(
         val uvStride  = planes[1].rowStride
         val uvPxStride = planes[1].pixelStride
 
-        // Diagnose beim ersten Frame: UV-Werte loggen um grüne Frames zu erkennen
-        // (absolute get(index) ändert Buffer-Position nicht)
+        // Null-Chroma erkennen: Samsung c2.android.avc.decoder initialisiert I420-Planes
+        // mit 0 statt 128 (neutral) wenn keine valide IDR-Referenz vorhanden.
+        // Ergebnis: U=V=0 → reines Grün. Fix: Chroma auf 128 (neutral) setzen →
+        // Bild erscheint in Graustufen (Y-Plane ist korrekt, für Scheibenerkennung genug).
+        val uSample = if (uBuf.limit() > 0) uBuf.get(0).toInt() and 0xFF else 128
+        val zeroChroma = uSample < 4  // typisch: entweder ~0 oder ~128
+        val chromaFix  = if (zeroChroma) 128 else 0  // bei 0: neutralisieren
+
         if (frameCount == 0L) {
-            val uSample = if (uBuf.limit() > 0) uBuf.get(0).toInt() and 0xFF else -1
             val vSample = if (vBuf.limit() > 0) vBuf.get(0).toInt() and 0xFF else -1
             AppLog.i(TAG, "YUV-Planes: yStride=$yStride uvStride=$uvStride " +
                 "uvPxStride=$uvPxStride uLim=${uBuf.limit()} vLim=${vBuf.limit()} " +
-                "U[0]=$uSample V[0]=$vSample (neutral=128, 0=grün)")
+                "U[0]=$uSample V[0]=$vSample zeroChroma=$zeroChroma (neutral=128)")
         }
 
         val argb = IntArray(w * h)
@@ -555,8 +560,8 @@ class RtspPipeline(
                 val yIdx  = j * yStride + i
                 val uvIdx = (j / 2) * uvStride + (i / 2) * uvPxStride
                 val y = (yBuf.get(yIdx).toInt() and 0xFF)
-                val u = (uBuf.get(uvIdx).toInt() and 0xFF) - 128
-                val v = (vBuf.get(uvIdx).toInt() and 0xFF) - 128
+                val u = (uBuf.get(uvIdx).toInt() and 0xFF) - 128 + chromaFix
+                val v = (vBuf.get(uvIdx).toInt() and 0xFF) - 128 + chromaFix
                 val r = (y + 1.402 * v).toInt().coerceIn(0, 255)
                 val g = (y - 0.344 * u - 0.714 * v).toInt().coerceIn(0, 255)
                 val b = (y + 1.772 * u).toInt().coerceIn(0, 255)
