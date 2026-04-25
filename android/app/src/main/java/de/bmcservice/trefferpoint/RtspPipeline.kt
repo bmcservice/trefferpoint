@@ -94,6 +94,16 @@ class RtspPipeline(
                 sdpProxy?.stop()
                 val proxy = RtspSdpProxy(host)
                 rtspUrl = proxy.start()
+                // Segment-Boundary-Callback: wenn Kamera alle ~4-5s das Segment wechselt,
+                // ExoPlayer PROAKTIV neu starten — bevor die P-Frames mit frame_num=0 den
+                // Decoder erreichen. Proxy bleibt stehen (ServerSocket läuft weiter),
+                // nur ExoPlayer wird recycelt. session() setzt idrEverInjected=false,
+                // neue ExoPlayer-Verbindung bekommt frische SPS+PPS+IDR-Initialisierung.
+                val capturedProxyUrl = rtspUrl
+                proxy.onSegmentBoundary = {
+                    mainHandler.post { recycleExoPlayer(capturedProxyUrl) }
+                    true  // Session sofort abbrechen — kein nutzloser doCameraHandshake mehr
+                }
                 sdpProxy = proxy
                 openMailSocket(host, 6035)
             }
@@ -372,39 +382,18 @@ class RtspPipeline(
                 lastError = "${error.errorCodeName}: ${error.message}"
                 onStatus("RTSP-Fehler: ${error.errorCodeName}")
 
-                // Auto-Restart bei Decoder-Absturz.
-                // Ursache: SGK GK720X sendet alle ~4-5s ein neues H.264-Segment mit
-                // frame_num-Reset (0, 1, 2…). Decoder erwartet höhere frame_num → crash.
-                // Fix: Proxy + ExoPlayer komplett neu starten (frische SPS/PPS-Initialisierung
-                // + IDR-Injection für das neue Segment). Proxy.stop() beendet auch den
-                // Broken-Pipe-Reconnect-Kaskade sofort, danach sauberer Neuaufbau.
-                if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
-                    && running && currentUrl.isNotEmpty()) {
-                    decodeErrorRestarts++
-                    if (decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
-                        AppLog.i(TAG, "Decode-Fehler #$decodeErrorRestarts → Auto-Restart in 150ms")
-                        onStatus("RTSP: Decoder-Neustart #$decodeErrorRestarts…")
-                        val restartUrl = currentUrl
-                        mainHandler.postDelayed({
-                            if (!running || currentUrl != restartUrl) return@postDelayed
-                            AppLog.i(TAG, "Auto-Restart: stopInternal + Proxy-Reset + startInternal")
-                            stopInternal()
-                            sdpProxy?.stop()
-                            sdpProxy = null
-                            val hostMatch = Regex("rtsp://([^:/]+)").find(restartUrl)
-                            val host = hostMatch?.groupValues?.get(1)
-                            var proxyUrl = restartUrl
-                            if (host != null && host.startsWith("192.168.")) {
-                                val proxy = RtspSdpProxy(host)
-                                proxyUrl = proxy.start()
-                                sdpProxy = proxy
-                            }
-                            startInternal(proxyUrl, useTcp = true)
-                        }, 150)
-                    } else {
-                        AppLog.w(TAG, "Decode-Fehler #$decodeErrorRestarts — Limit erreicht, aufgegeben")
-                        onStatus("RTSP: Dauerhafter Decoder-Fehler (Kamera neu starten?)")
-                    }
+                // Fallback-Restart: Normalfall ist recycleExoPlayer() via onSegmentBoundary
+                // (proaktiv, vor dem Crash). Dieser Pfad fängt ungeplante Fehler ab die nicht
+                // durch Segment-Boundary ausgelöst wurden.
+                if (running && currentUrl.isNotEmpty()
+                    && decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
+                    val proxyUrl = sdpProxy?.let { "rtsp://127.0.0.1:15554/live/tcp/ch1" }
+                        ?: currentUrl
+                    AppLog.i(TAG, "Unerwarteter Fehler → Fallback-Recycle in 200ms")
+                    mainHandler.postDelayed({
+                        if (currentUrl.isEmpty()) return@postDelayed
+                        recycleExoPlayer(proxyUrl)
+                    }, 200)
                 }
             }
 
@@ -479,6 +468,28 @@ class RtspPipeline(
             triedUdpFallback = true
             startInternal(currentUrl, useTcp = false)
         }, 30000)
+    }
+
+    /**
+     * ExoPlayer recyceln ohne Proxy-Neustart.
+     * Wird aufgerufen wenn der Proxy eine Kamera-Segment-Boundary erkennt (~alle 4-5s).
+     * Proxy-ServerSocket und Mail-Socket bleiben offen. Nur ExoPlayer + ImageReader
+     * werden neu gestartet, sodass die neue session() in proxy saubere SPS+PPS+IDR
+     * Initialisierung bekommt (idrEverInjected=false wurde in session() gesetzt).
+     */
+    private fun recycleExoPlayer(proxyUrl: String) {
+        if (!running || currentUrl.isEmpty()) return
+        decodeErrorRestarts++
+        AppLog.i(TAG, "Segment-Boundary: ExoPlayer-Recycle #$decodeErrorRestarts → proxyUrl=$proxyUrl")
+        onStatus("RTSP: Segment-Wechsel, Decoder-Reset #$decodeErrorRestarts")
+        stopInternal()
+        // 150ms Pause: alte proxy-session() macht noch doCameraHandshake (~100ms),
+        // danach relay()-Broken-Pipe und Exit. Nach 150ms ist die Kamera-Verbindung
+        // frei und die neue session() kann sauber RTSP-Handshake machen.
+        mainHandler.postDelayed({
+            if (currentUrl.isEmpty()) return@postDelayed  // stop() wurde extern aufgerufen
+            startInternal(proxyUrl, useTcp = true)
+        }, 150)
     }
 
     fun stop() {

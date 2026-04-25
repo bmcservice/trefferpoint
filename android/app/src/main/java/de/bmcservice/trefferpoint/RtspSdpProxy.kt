@@ -40,6 +40,17 @@ class RtspSdpProxy(
     // direkt an Decoder, der mit der existing reference weiter dekodiert.
     @Volatile private var idrEverInjected = false
 
+    /**
+     * Wird am Anfang jedes Kamera-Reconnects (Segment-Boundary) aufgerufen —
+     * BEVOR der Proxy zur Kamera reconnectet und BEVOR der Decoder die neuen
+     * P-Frames mit frame_num=0 sieht. RtspPipeline nutzt das, um ExoPlayer
+     * proaktiv neu zu starten, statt auf den Decoder-Crash zu warten.
+     *
+     * Rückgabe true: Session sofort abbrechen (kein weiterer doCameraHandshake).
+     * Rückgabe false / null: Normal weiter reconnecten (transparenter Reconnect).
+     */
+    var onSegmentBoundary: (() -> Boolean)? = null
+
     fun start(): String {
         serverSock = ServerSocket(proxyPort)
         active = true
@@ -62,6 +73,11 @@ class RtspSdpProxy(
     }
 
     private fun session(clientSock: Socket) {
+        // Jede neue ExoPlayer-Session bekommt frische IDR-Initialisierung.
+        // Hintergrund: ExoPlayer-Restart (nach Segment-Boundary-Callback) öffnet
+        // eine neue TCP-Verbindung → neues session()-Call → idrEverInjected muss false
+        // sein, damit SPS/PPS weitergeleitet und IDR injiziert wird.
+        idrEverInjected = false
         var cameraSock: Socket? = null
         val defaultVideoTrackUrl = if (cameraPort == 554)
             "rtsp://$cameraHost/live/tcp/ch1/video/track0"
@@ -166,8 +182,19 @@ class RtspSdpProxy(
                 if (!cameraClosedFirst) break  // ExoPlayer hat Verbindung getrennt
 
                 reconnects++
-                AppLog.i(TAG, "Kamera-Segment-Ende → transparenter Reconnect #$reconnects")
+                AppLog.i(TAG, "Kamera-Segment-Ende → Reconnect #$reconnects (Callback + Kamera-Reconnect)")
                 try { cameraSock?.close() } catch (_: Exception) {}
+
+                // Segment-Boundary-Callback VOR Kamera-Reconnect:
+                // RtspPipeline kann ExoPlayer jetzt neu starten, bevor die P-Frames
+                // des neuen Segments mit frame_num=0 den Decoder erreichen.
+                // Gibt der Callback true zurück → Session sofort beenden, neuer ExoPlayer
+                // öffnet eine neue TCP-Verbindung → neues session() mit idrEverInjected=false.
+                val abortForRecycle = onSegmentBoundary?.invoke() ?: false
+                if (abortForRecycle) {
+                    AppLog.i(TAG, "Segment-Boundary: Session-Abort für ExoPlayer-Recycle")
+                    break
+                }
 
                 cameraSock = Socket(cameraHost, cameraPort)
                 // Reconnect mit Video-Track-URL (nicht Audio!) — Bug #7 Fix
