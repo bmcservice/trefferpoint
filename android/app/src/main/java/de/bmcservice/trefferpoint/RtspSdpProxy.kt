@@ -371,6 +371,7 @@ class RtspSdpProxy(
         val nalTotal = IntArray(32)
         val nalWithM = IntArray(32)
         val fuaEndBits = IntArray(32)  // FU-A Pakete mit E-Bit gesetzt, indexiert nach FU-Typ
+        var spsToIdrRelabeled = 0  // Firmware-Bug #9: FU-A(SPS→IDR) Zähler
 
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
@@ -442,13 +443,32 @@ class RtspSdpProxy(
                     pktBuf[1] = 2.toByte()  // Channel 0 → 2 für Audio
                 }
 
+                // Firmware-Bug #9: SGK GK720X sendet IDR-Frames als FU-A(type=7=SPS).
+                // Die echten SPS/PPS kommen ausschließlich über sprop-parameter-sets im SDP —
+                // im RTP-Stream gibt es keine echten SPS-Pakete (verifiziert: echte SPS sind
+                // ~20 Byte, die Kamera sendet FU-A(type=7) mit ~14 KB = IDR-Größe).
+                // Fix: FU-A(type=7) → FU-A(type=5=IDR) BEVOR SPS/PPS-Dedup läuft,
+                // sonst werden IDR-Frames als SPS verworfen und ExoPlayer bekommt kein IDR.
+                if (!isAudioPacket && ch % 2 == 0 && len >= 14) {
+                    val ntCheck = pktBuf[16].toInt() and 0x1F
+                    if (ntCheck == 28 && (pktBuf[17].toInt() and 0x1F) == 7) {
+                        // FU-A: type=7 (SPS) → type=5 (IDR), NRI → 11 (höchste Priorität)
+                        pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
+                        pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
+                        spsToIdrRelabeled++
+                        if (spsToIdrRelabeled == 1)
+                            AppLog.i(TAG, "Bug #9: FU-A(SPS→IDR) — SGK sendet IDR als SPS, korrigiere")
+                    }
+                }
+
                 // SPS/PPS-Dedup (Firmware-Bug #8): Kamera resendet SPS+PPS vor jedem
                 // Segment. ExoPlayer's RtpH264Reader interpretiert das als Format-Change
                 // und versucht den Decoder neu zu konfigurieren → IllegalStateException
                 // beim native_dequeueInputBuffer → ERROR_CODE_DECODING_FAILED nach ~2s
                 // im 2. Segment. Fix: Sobald idrEverInjected=true (= Decoder hat einen
-                // sauberen Sync-Sample bekommen), alle weiteren SPS-/PPS-Pakete einfach
-                // verwerfen. Decoder behält seinen State, P-Frames fließen kontinuierlich.
+                // sauberen IDR bekommen), alle weiteren SPS-/PPS-Pakete verwerfen.
+                // Nach Bug-#9-Fix gibt es keine echten SPS im RTP-Stream → Dedup ist No-Op,
+                // aber bleibt für Robustheit (echte SPS-Updates bei Auflösungswechsel).
                 if (!isAudioPacket && idrEverInjected && ch % 2 == 0 && len >= 13) {
                     val nt = pktBuf[16].toInt() and 0x1F
                     val isSpsOrPps = when (nt) {
@@ -615,6 +635,7 @@ class RtspSdpProxy(
                 "$desc=${nalTotal[t]}(M=${nalWithM[t]},E=${fuaEndBits[t]})"
             }
         if (stats.isNotEmpty()) AppLog.i(TAG, "NAL-Stats: $stats")
+        if (spsToIdrRelabeled > 0) AppLog.i(TAG, "Bug #9: $spsToIdrRelabeled FU-A(SPS→IDR) Pakete umgelabelt")
 
         t.join(500)
         return cameraClosedFirst
