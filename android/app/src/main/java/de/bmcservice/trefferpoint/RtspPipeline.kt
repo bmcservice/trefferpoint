@@ -1,9 +1,8 @@
 package de.bmcservice.trefferpoint
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.media.Image
 import android.media.ImageReader
 import android.os.Handler
@@ -525,70 +524,49 @@ class RtspPipeline(
         imageHandler = null
     }
 
-    // YUV_420_888 → NV21 → JPEG
+    // YUV_420_888 → JPEG via Bitmap (direkte Pixel-Konvertierung, kein NV21-Umweg)
+    // Liest Y/U/V mit korrekten rowStride/pixelStride direkt aus den Image-Planes.
+    // Robuster als der frühere NV21-Pfad der auf bestimmten Decodern UV=0 lieferte.
     private fun imageToJpeg(image: Image): ByteArray {
         val w = image.width
         val h = image.height
-        val nv21 = yuv420ToNv21(image)
-        val yuv = YuvImage(nv21, ImageFormat.NV21, w, h, null)
-        val out = ByteArrayOutputStream((w * h) / 2)
-        yuv.compressToJpeg(Rect(0, 0, w, h), JPEG_QUALITY, out)
-        return out.toByteArray()
-    }
-
-    private fun yuv420ToNv21(image: Image): ByteArray {
-        val w = image.width
-        val h = image.height
-        val ySize = w * h
-        val uvSize = w * h / 4
-        val nv21 = ByteArray(ySize + 2 * uvSize)
-
         val planes = image.planes
-        val yBuf: ByteBuffer = planes[0].buffer
-        val uBuf: ByteBuffer = planes[1].buffer
-        val vBuf: ByteBuffer = planes[2].buffer
 
-        // Y-Plane: ggf. mit rowStride kopieren
-        val yRowStride = planes[0].rowStride
-        if (yRowStride == w) {
-            yBuf.get(nv21, 0, ySize)
-        } else {
-            var pos = 0
-            val row = ByteArray(w)
-            for (r in 0 until h) {
-                yBuf.position(r * yRowStride)
-                yBuf.get(row, 0, w)
-                System.arraycopy(row, 0, nv21, pos, w)
-                pos += w
-            }
+        val yBuf = planes[0].buffer
+        val uBuf = planes[1].buffer
+        val vBuf = planes[2].buffer
+        val yStride   = planes[0].rowStride
+        val uvStride  = planes[1].rowStride
+        val uvPxStride = planes[1].pixelStride
+
+        // Diagnose beim ersten Frame: UV-Werte loggen um grüne Frames zu erkennen
+        // (absolute get(index) ändert Buffer-Position nicht)
+        if (frameCount == 0L) {
+            val uSample = if (uBuf.limit() > 0) uBuf.get(0).toInt() and 0xFF else -1
+            val vSample = if (vBuf.limit() > 0) vBuf.get(0).toInt() and 0xFF else -1
+            AppLog.i(TAG, "YUV-Planes: yStride=$yStride uvStride=$uvStride " +
+                "uvPxStride=$uvPxStride uLim=${uBuf.limit()} vLim=${vBuf.limit()} " +
+                "U[0]=$uSample V[0]=$vSample (neutral=128, 0=grün)")
         }
 
-        // V/U interleaved für NV21
-        val uvRowStride = planes[1].rowStride
-        val uvPixelStride = planes[1].pixelStride
-        val halfW = w / 2
-        val halfH = h / 2
-
-        if (uvPixelStride == 2 && uvRowStride == w) {
-            // Bereits fast-NV21-Format — V kommt direkt nach Y
-            val vuBytes = ByteArray(uvSize * 2)
-            // V-Plane auslesen (pixelStride=2 bedeutet U/V sind interleaved)
-            vBuf.position(0)
-            val vLen = minOf(vBuf.remaining(), vuBytes.size)
-            vBuf.get(vuBytes, 0, vLen)
-            System.arraycopy(vuBytes, 0, nv21, ySize, vLen)
-        } else {
-            // Generisch: Pixel für Pixel kopieren
-            var pos = ySize
-            for (r in 0 until halfH) {
-                for (c in 0 until halfW) {
-                    val vIdx = r * uvRowStride + c * uvPixelStride
-                    val uIdx = r * uvRowStride + c * uvPixelStride
-                    nv21[pos++] = vBuf.get(vIdx)
-                    nv21[pos++] = uBuf.get(uIdx)
-                }
+        val argb = IntArray(w * h)
+        for (j in 0 until h) {
+            for (i in 0 until w) {
+                val yIdx  = j * yStride + i
+                val uvIdx = (j / 2) * uvStride + (i / 2) * uvPxStride
+                val y = (yBuf.get(yIdx).toInt() and 0xFF)
+                val u = (uBuf.get(uvIdx).toInt() and 0xFF) - 128
+                val v = (vBuf.get(uvIdx).toInt() and 0xFF) - 128
+                val r = (y + 1.402 * v).toInt().coerceIn(0, 255)
+                val g = (y - 0.344 * u - 0.714 * v).toInt().coerceIn(0, 255)
+                val b = (y + 1.772 * u).toInt().coerceIn(0, 255)
+                argb[j * w + i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
-        return nv21
+        val bitmap = Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888)
+        val out = ByteArrayOutputStream((w * h) / 4)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+        bitmap.recycle()
+        return out.toByteArray()
     }
 }
