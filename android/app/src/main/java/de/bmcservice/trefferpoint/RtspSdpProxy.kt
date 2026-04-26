@@ -458,6 +458,16 @@ class RtspSdpProxy(
                         spsToIdrRelabeled++
                         if (spsToIdrRelabeled == 1)
                             AppLog.i(TAG, "Bug #9: FU-A(SPS→IDR) — SGK sendet IDR als SPS, korrigiere")
+
+                        // IDR-Segment-Grenze: proaktiver Disconnect (verhindert DECODING_FAILED)
+                        // Beim ersten IDR-Paket eines Folge-Segments (idrEverInjected=true):
+                        // Loop beenden ohne cameraClosedFirst=true → session() sieht Client-Disconnect
+                        // → ExoPlayer recycelt in 200ms statt auf DECODING_FAILED nach ~7s zu warten.
+                        // cameraClosedFirst bleibt false (initialer Wert) → session() bricht ab.
+                        if (spsToIdrRelabeled == 1 && idrEverInjected) {
+                            AppLog.i(TAG, "IDR-Segment-Grenze: proaktiver Proxy-Disconnect → ExoPlayer-Recycle")
+                            break
+                        }
                     }
                 }
 

@@ -474,12 +474,15 @@ class RtspPipeline(
                     // liefert frische SPS+PPS+IDR → Decoder initialisiert sauber.
                     // Verzögerung 1.5s: Kamera braucht einen Moment nach ihrem Segment-Ende.
                     decodeErrorRestarts++
-                    AppLog.i(TAG, "DECODING_FAILED → RecycleExoPlayer #$decodeErrorRestarts (1.5s Delay)")
+                    // Proaktiver IDR-Boundary-Disconnect (RtspSdpProxy) sollte DECODING_FAILED
+                    // normalerweise verhindern. Falls er doch auftritt: 500ms Delay statt 1.5s —
+                    // die Kamera braucht keinen langen Vorlauf, RTSP PLAY liefert sofort IDR.
+                    AppLog.i(TAG, "DECODING_FAILED → RecycleExoPlayer #$decodeErrorRestarts (500ms Delay)")
                     if (running && currentUrl.isNotEmpty() && decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
                         mainHandler.postDelayed({
                             if (currentUrl.isEmpty()) return@postDelayed
                             recycleExoPlayer("rtsp://127.0.0.1:15554/live/tcp/ch1")
-                        }, 1500)
+                        }, 500)
                     }
                     return
                 }
