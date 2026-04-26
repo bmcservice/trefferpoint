@@ -4,18 +4,11 @@
     android:layout_height="match_parent"
     android:background="@color/tp_bg">
 
-    <!-- Phase 2 (v2.3.71+): GLSurfaceView statt SurfaceView.
-         ExoPlayer rendert via SurfaceTexture in OES-Texture; RtspGlRenderer
-         zeichnet jeden Frame in Off-Screen-FBO 960×540 und liest mit glReadPixels
-         heraus → JPEG → onJpegFrame-Callback.
-         WebView (oben drüber, opak #0d0d0d) verdeckt die GLSurfaceView komplett —
-         User sieht das Video nur via JPEG-Roundtrip im WebView. Display-Render
-         ist somit irrelevant; FBO ist die Single Source of Truth. -->
-    <android.opengl.GLSurfaceView
-        android:id="@+id/rtspGlSurfaceView"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent" />
-
+    <!-- Phase 2 (v2.3.74+): ImageReader-Pfad statt SurfaceTexture/GL.
+         RTSP-Frames laufen via ImageReader.OnImageAvailableListener →
+         YUV_420_888 → NV21 → YuvImage.compressToJpeg → WebView.
+         Layout enthält daher nur noch die WebView; kein Display-Surface
+         für RTSP nötig (User sieht Video als JPEG im WebView). -->
     <WebView
         android:id="@+id/webview"
         android:layout_width="match_parent"

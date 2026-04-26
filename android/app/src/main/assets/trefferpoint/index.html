@@ -703,17 +703,6 @@
                 <button class="btn" id="btnScanCam" style="margin-top:5px">🔍 Kamera suchen (Auto)</button>
                 <button class="btn" id="btnScanSubnet" style="margin-top:3px;display:none">🌐 Vollscan (Subnetz 1–254)</button>
                 <button class="btn" id="btnRtspStop" style="display:none;margin-top:5px">■ Stream stoppen</button>
-                <!-- SGK-Kamera: Aufnahme + Snapshot (nur sichtbar wenn RTSP aktiv) -->
-                <div id="sgkControls" style="display:none;margin-top:8px;display:none">
-                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                        <button class="btn" id="btnSgkRec" style="min-width:130px">
-                            <span id="sgkRecDot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#555;margin-right:5px;transition:background .3s"></span>
-                            <span id="sgkRecLabel">Aufnahme</span>
-                        </button>
-                        <button class="btn" id="btnSgkSnapshot">📷 Snapshot</button>
-                    </div>
-                    <div id="sgkRecStatus" style="font-size:10px;color:var(--text-dim);margin-top:4px;font-family:'Share Tech Mono',monospace"></div>
-                </div>
                 <div id="scanResults" style="display:none;margin-top:8px;font-size:10px;font-family:'Share Tech Mono',monospace;color:var(--text-dim)"></div>
             </div>
 
@@ -860,7 +849,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.73';
+const APP_VERSION = '2.3.74';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1808,7 +1797,7 @@ function startLoop() {
 }
 
 function loop() {
-    if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
+    if (!mediaStream && inputMode !== 'stream') return;
 
     // FPS
     frameCount++;
@@ -1824,7 +1813,7 @@ function loop() {
     ctx.save();
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const src = ((inputMode === 'stream' || inputMode === 'rtsp') && imgEl) ? imgEl : videoEl;
+    const src = (inputMode === 'stream' && imgEl) ? imgEl : videoEl;
     if (camRotation === 0) {
         const sw = canvas.width * softwareZoom;
         const sh = canvas.height * softwareZoom;
@@ -2162,7 +2151,7 @@ canvas.addEventListener('click', e => {
 
 // --- Hit Detection ---
 function setRef() {
-    if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
+    if (!mediaStream && inputMode !== 'stream') return;
     try {
         ctx.getImageData(0, 0, 1, 1);
         refFrame = null;
@@ -2810,92 +2799,13 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
             setMsg('' + e);
         }
         document.getElementById('btnRtspStop').style.display = '';
-        document.getElementById('sgkControls').style.display = '';
     });
 
     // RTSP stoppen
     document.getElementById('btnRtspStop').addEventListener('click', () => {
         try { window.tpBridge.stopRtsp(); } catch(e) {}
         document.getElementById('btnRtspStop').style.display = 'none';
-        document.getElementById('sgkControls').style.display = 'none';
         setStatus('RTSP gestoppt', 'warn');
-    });
-
-    // ── SGK-Kamera: Aufnahme + Snapshot ────────────────────────────────────
-    let sgkRecording = false;
-
-    function sgkUpdateRecUi(isRec) {
-        sgkRecording = isRec;
-        const dot = document.getElementById('sgkRecDot');
-        const lbl = document.getElementById('sgkRecLabel');
-        if (dot) dot.style.background = isRec ? '#e53' : '#555';
-        if (lbl) lbl.textContent = isRec ? 'Aufnahme läuft' : 'Aufnahme starten';
-    }
-
-    // Mail-Socket-Nachrichten empfangen (REC-Status, Batterie etc.)
-    window.tpOnSgkMail = function(rawMsg) {
-        // Chunk kann mehrere JSON-Objekte enthalten — jedes einzeln parsen
-        const parts = rawMsg.split('}{').map((p, i, a) => {
-            if (a.length === 1) return p;
-            if (i === 0) return p + '}';
-            if (i === a.length - 1) return '{' + p;
-            return '{' + p + '}';
-        });
-        parts.forEach(part => {
-            try {
-                const obj = JSON.parse(part.trim());
-                if (obj.msgid === 'rec') {
-                    const isRec = obj.info && obj.info.value === 1;
-                    sgkUpdateRecUi(isRec);
-                    const st = document.getElementById('sgkRecStatus');
-                    if (st) st.textContent = 'Kamera: ' + (isRec ? '● REC' : '■ Gestoppt');
-                }
-                if (obj.msgid === 'battery') {
-                    const pct = obj.info && obj.info.capacity;
-                    const st = document.getElementById('sgkRecStatus');
-                    if (st && pct != null) {
-                        const cur = st.textContent;
-                        if (!cur.includes('REC') && !cur.includes('Gestoppt'))
-                            st.textContent = 'Akku: ' + pct + '%';
-                    }
-                }
-            } catch(_) {}
-        });
-    };
-
-    // HTTP-Callback (Antwort auf sgkHttp-Anfragen)
-    window.tpOnSgkHttp = function(callbackId, body) {
-        const st = document.getElementById('sgkRecStatus');
-        if (callbackId === 'rec_on') {
-            sgkUpdateRecUi(true);
-            if (st) st.textContent = 'Aufnahme gestartet';
-        } else if (callbackId === 'rec_off') {
-            sgkUpdateRecUi(false);
-            if (st) st.textContent = 'Aufnahme gestoppt';
-        } else if (callbackId === 'snapshot_ok') {
-            if (st) st.textContent = 'Snapshot: ' + body;
-        }
-    };
-
-    // REC-Toggle
-    document.getElementById('btnSgkRec').addEventListener('click', () => {
-        const path = sgkRecording ? 'app/setrec?rec=0' : 'app/setrec?rec=1';
-        const cbId = sgkRecording ? 'rec_off' : 'rec_on';
-        try { window.tpBridge.sgkHttp(path, cbId); } catch(e) {
-            const st = document.getElementById('sgkRecStatus');
-            if (st) st.textContent = 'Fehler: ' + e;
-        }
-    });
-
-    // Snapshot
-    document.getElementById('btnSgkSnapshot').addEventListener('click', () => {
-        const st = document.getElementById('sgkRecStatus');
-        try {
-            const result = window.tpBridge.sgkSaveFrame();
-            if (st) st.textContent = result.startsWith('Fehler') ? result : ('📷 ' + result);
-        } catch(e) {
-            if (st) st.textContent = 'Snapshot-Fehler: ' + e;
-        }
     });
 
     // Gespeicherte RTSP-URL wiederherstellen
@@ -2937,7 +2847,7 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         const hit = (window._tpScanHits || [])[idx];
         if (!hit) return;
         const proto = (hit.proto || '').toLowerCase();
-        // RTSP und MJPEG laufen beide über die Android-Bridge (MjpegHttpPipeline / RtspPipeline).
+        // RTSP und MJPEG laufen beide über die Android-Bridge (MjpegHttpPipeline / RtspImageReaderPipeline).
         // Nur "echte" Browser-MJPEGs (nicht-Android oder fremde Cams) nutzen den Stream-URL-Pfad
         // mit <img>/<video>-Element.
         const useBridge = (proto === 'rtsp' || proto === 'mjpeg') && window.tpBridge;

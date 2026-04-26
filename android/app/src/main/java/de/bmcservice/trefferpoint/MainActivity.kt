@@ -7,7 +7,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
-import android.opengl.GLSurfaceView
 import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -60,8 +59,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
-    private lateinit var rtspGlSurfaceView: GLSurfaceView
-    private var rtspGlRenderer: RtspGlRenderer? = null
 
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
@@ -73,7 +70,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var lastFrameSize: Int = 0
     @Volatile private var activeMode: String = "none"  // "usb" | "rtsp" | "mjpeg" | "none"
 
-    private var rtspPipeline: RtspPipeline? = null
+    private var rtspPipeline: RtspImageReaderPipeline? = null
     private var mjpegPipeline: MjpegHttpPipeline? = null
 
     private var tts: TextToSpeech? = null
@@ -92,28 +89,6 @@ class MainActivity : AppCompatActivity() {
         AppLog.i(TAG, "Launch intent: ${intent?.action}")
 
         webView = findViewById(R.id.webview)
-        rtspGlSurfaceView = findViewById(R.id.rtspGlSurfaceView)
-
-        // Phase 2 (v2.3.71+): GLSurfaceView mit RtspGlRenderer.
-        // ExoPlayer rendert in SurfaceTexture → Renderer zeichnet in FBO 960×540 →
-        // glReadPixels → JPEG → onJpeg-Callback → MainActivity → WebView.
-        // RENDERMODE_WHEN_DIRTY: Renderer rendert nur bei requestRender() vom
-        // SurfaceTexture-onFrameAvailable-Listener (kein dauerhaftes 60Hz-Polling).
-        rtspGlSurfaceView.setEGLContextClientVersion(2)
-        rtspGlSurfaceView.preserveEGLContextOnPause = true
-        val renderer = RtspGlRenderer(
-            onJpegFrame = { jpeg ->
-                // Direkt an aktuelle Pipeline weiterreichen (für lastFrameJpeg + frameCount)
-                rtspPipeline?.onRenderedFrame(jpeg)
-            },
-            onStatusLog = { msg -> AppLog.i(TAG, "GL: $msg") }
-        )
-        renderer.attachToView(rtspGlSurfaceView)
-        rtspGlSurfaceView.setRenderer(renderer)
-        rtspGlSurfaceView.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
-        rtspGlRenderer = renderer
-        AppLog.i(TAG, "GLSurfaceView + RtspGlRenderer initialisiert (Phase 2)")
-
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -179,13 +154,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        try { rtspGlSurfaceView.onResume() } catch (_: Exception) {}
         attachAlreadyConnectedCamera()
-    }
-
-    override fun onPause() {
-        try { rtspGlSurfaceView.onPause() } catch (_: Exception) {}
-        super.onPause()
     }
 
     // ── USB-Device-Verwaltung ────────────────────────────────────────────────
@@ -407,7 +376,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         try { rtspPipeline?.stop() } catch (_: Exception) {}
         try { mjpegPipeline?.stop() } catch (_: Exception) {}
-        try { rtspGlRenderer?.shutdown() } catch (_: Exception) {}
         try { dummySurface?.release() } catch (_: Exception) {}
         try { dummySurfaceTex?.release() } catch (_: Exception) {}
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
@@ -481,7 +449,7 @@ class MainActivity : AppCompatActivity() {
         /**
          * Stream starten. URL-Schema entscheidet die Pipeline:
          *   - http://...:8080/?action=stream  →  MjpegHttpPipeline (SGK GoPlus / Generalplus)
-         *   - rtsp://...                      →  RtspPipeline (Legacy)
+         *   - rtsp://...                      →  RtspImageReaderPipeline
          *   - leer                            →  Default für SGK: MJPEG auf Gateway:8080
          *
          * Hintergrund: Reverse-Engineering der Viidure-App v3.3.1 hat gezeigt dass
@@ -523,29 +491,7 @@ class MainActivity : AppCompatActivity() {
                         p.start(finalUrl)
                     } else {
                         AppLog.i(TAG, "startStream (RTSP): $finalUrl")
-                        // Phase 2: ExoPlayer schreibt in Surface(SurfaceTexture) vom GL-Renderer.
-                        // Surface kann verzögert verfügbar sein (GLSurfaceView.onSurfaceCreated muss erst feuern)
-                        // → als Lambda übergeben, Pipeline pollt darauf.
-                        val p = RtspPipeline(
-                            applicationContext,
-                            { rtspGlRenderer?.takeIf { it.isVideoSurfaceReady() }?.surface },
-                            onJpeg,
-                            onStatus
-                        )
-                        // Mail-Socket-Nachrichten der Kamera an JS weiterleiten (REC-Status etc.)
-                        p.onMailMessage = { msg ->
-                            val escaped = msg
-                                .replace("\\", "\\\\")
-                                .replace("'", "\\'")
-                                .replace("\n", "\\n")
-                                .replace("\r", "")
-                            runOnUiThread {
-                                webView.evaluateJavascript(
-                                    "window.tpOnSgkMail && window.tpOnSgkMail('$escaped')",
-                                    null
-                                )
-                            }
-                        }
+                        val p = RtspImageReaderPipeline(applicationContext, onJpeg, onStatus)
                         rtspPipeline = p
                         activeMode = "rtsp"
                         p.start(finalUrl)
@@ -772,96 +718,6 @@ class MainActivity : AppCompatActivity() {
         fun saveTestbericht(json: String): String {
             val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
             return saveToDownloads("trefferpoint_$ts.json", json)
-        }
-
-        /**
-         * Asynchroner HTTP-GET zur SGK/Viidure-Kamera.
-         * WebView (file://) darf keine Cross-Origin-Requests → Bridge übernimmt.
-         *
-         * Aufruf aus JS:  tpBridge.sgkHttp("app/setrec?rec=1", "rec_start")
-         * Antwort via:    window.tpOnSgkHttp(callbackId, responseBody)
-         *
-         * Bekannte Endpoints:
-         *   app/setrec?rec=1 / rec=0   → Aufnahme starten/stoppen
-         *   app/getfilelist             → Liste aufgenommener Segmente
-         *   app/getmediainfo            → RTSP-URL + Port
-         */
-        @JavascriptInterface
-        fun sgkHttp(path: String, callbackId: String) {
-            ioScope.launch {
-                val host = getWifiGateway().ifBlank { "192.168.0.1" }
-                val body = try {
-                    val conn = java.net.URL("http://$host/$path").openConnection()
-                            as java.net.HttpURLConnection
-                    conn.connectTimeout = 5000
-                    conn.readTimeout = 5000
-                    conn.setRequestProperty("User-Agent", "TrefferPoint/${BuildConfig.VERSION_NAME}")
-                    val code = conn.responseCode
-                    val text = conn.inputStream.bufferedReader().readText()
-                    AppLog.i(TAG, "sgkHttp $path → $code $text")
-                    text
-                } catch (e: Exception) {
-                    AppLog.w(TAG, "sgkHttp $path Fehler: ${e.message}")
-                    "{\"error\":\"${e.message}\"}"
-                }
-                val escaped = body
-                    .replace("\\", "\\\\")
-                    .replace("'", "\\'")
-                    .replace("\n", "\\n")
-                    .replace("\r", "")
-                val cbEscaped = callbackId.replace("'", "\\'")
-                runOnUiThread {
-                    webView.evaluateJavascript(
-                        "window.tpOnSgkHttp && window.tpOnSgkHttp('$cbEscaped','$escaped')",
-                        null
-                    )
-                }
-            }
-        }
-
-        /**
-         * Speichert den letzten RTSP-Frame als JPEG in Downloads/TrefferPoint/.
-         * Gibt Dateinamen (Erfolg) oder "Fehler: ..." zurück.
-         * Synchron — wird von WebView auf Hintergrund-Thread aufgerufen.
-         */
-        @JavascriptInterface
-        fun sgkSaveFrame(): String {
-            val jpeg = rtspPipeline?.lastFrameJpeg
-                ?: mjpegPipeline?.lastFrameJpeg
-                ?: return "Fehler: kein Frame verfügbar"
-            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS", java.util.Locale.getDefault())
-                .format(java.util.Date())
-            val filename = "snapshot_$ts.jpg"
-            return saveBytesToDownloads(filename, jpeg, "image/jpeg")
-        }
-    }
-
-    /** Speichert Binärdaten (z.B. JPEG) in Downloads/TrefferPoint/. */
-    private fun saveBytesToDownloads(filename: String, data: ByteArray, mimeType: String): String {
-        return try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                val values = ContentValues().apply {
-                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
-                    put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
-                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/TrefferPoint")
-                }
-                val uri = contentResolver.insert(
-                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
-                ) ?: return "Fehler: URI null"
-                contentResolver.openOutputStream(uri)?.use { it.write(data) }
-            } else {
-                @Suppress("DEPRECATION")
-                val dir = android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOWNLOADS
-                )
-                val sub = java.io.File(dir, "TrefferPoint").also { it.mkdirs() }
-                java.io.File(sub, filename).writeBytes(data)
-            }
-            AppLog.i(TAG, "Gespeichert: $filename (${data.size}B)")
-            filename
-        } catch (e: Exception) {
-            AppLog.e(TAG, "saveBytesToDownloads fehlgeschlagen: $filename", e)
-            "Fehler: ${e.message}"
         }
     }
 
