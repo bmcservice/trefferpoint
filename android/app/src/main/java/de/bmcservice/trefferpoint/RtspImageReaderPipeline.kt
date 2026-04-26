@@ -4,13 +4,12 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
-import android.hardware.HardwareBuffer
 import android.media.Image
 import android.media.ImageReader
-import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
@@ -36,7 +35,7 @@ import kotlin.concurrent.thread
 /**
  * RTSP-ImageReader-Pipeline für WLAN-Okularkameras.
  *
- *   RTSP -> ExoPlayer (HW MediaCodec) -> ImageReader Surface
+ *   RTSP -> ExoPlayer (SW MediaCodec) -> ImageReader Surface
  *        -> YUV_420_888 -> NV21 -> JPEG -> onJpegFrame -> WebView
  */
 class RtspImageReaderPipeline(
@@ -49,10 +48,10 @@ class RtspImageReaderPipeline(
         private const val IMAGE_WIDTH = 960
         private const val IMAGE_HEIGHT = 540
         private const val JPEG_QUALITY = 90
-        // API 29+: 4 reicht (USAGE_CPU_READ_OFTEN); API 26-28: 8 als Sicherheits-Puffer
-        private const val MAX_IMAGES_HW = 4
-        private const val MAX_IMAGES_LEGACY = 8
+        private const val MAX_IMAGES = 2
         private const val MAX_DECODE_RESTARTS = 30
+        private const val IDR_RESTART_THRESHOLD = 3
+        private const val IDR_STABLE_FRAME_COUNT = 10L
     }
 
     private var player: ExoPlayer? = null
@@ -72,6 +71,9 @@ class RtspImageReaderPipeline(
     @Volatile private var currentUrl: String = ""
     @Volatile private var triedUdpFallback = false
     @Volatile private var decodeErrorRestarts = 0
+    @Volatile private var consecutiveIdrBoundaries = 0
+    @Volatile private var lastFrameRealtimeMs = 0L
+    @Volatile private var lastBoundaryFrameCount = 0L
 
     @Volatile private var mailSocket: Socket? = null
     @Volatile private var sdpProxy: RtspSdpProxy? = null
@@ -90,8 +92,36 @@ class RtspImageReaderPipeline(
                 rtspUrl = proxy.start()
                 val capturedProxyUrl = rtspUrl
                 proxy.onSegmentBoundary = {
-                    mainHandler.post { recycleExoPlayer(capturedProxyUrl) }
-                    true
+                    val now = SystemClock.elapsedRealtime()
+                    val framesSinceBoundary = frameCount - lastBoundaryFrameCount
+                    val hadRecentFrame = now - lastFrameRealtimeMs <= 1500L
+                    val stableFrameStream = hadRecentFrame && framesSinceBoundary >= IDR_STABLE_FRAME_COUNT
+                    lastBoundaryFrameCount = frameCount
+                    if (stableFrameStream) {
+                        consecutiveIdrBoundaries = 0
+                        AppLog.i(
+                            TAG,
+                            "IDR-Boundary/Segment-Boundary stabil " +
+                                "(framesSinceBoundary=$framesSinceBoundary) -> transparenter Reconnect"
+                        )
+                        false
+                    } else {
+                        consecutiveIdrBoundaries++
+                        AppLog.w(
+                            TAG,
+                            "IDR-Boundary/Segment-Boundary instabil " +
+                                "($consecutiveIdrBoundaries/$IDR_RESTART_THRESHOLD, " +
+                                "framesSinceBoundary=$framesSinceBoundary, recent=$hadRecentFrame)"
+                        )
+                        if (consecutiveIdrBoundaries >= IDR_RESTART_THRESHOLD) {
+                            mainHandler.post {
+                                recycleExoPlayer(capturedProxyUrl, "idr-boundary-threshold")
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
                 }
                 sdpProxy = proxy
                 openMailSocket(host, 6035)
@@ -116,57 +146,40 @@ class RtspImageReaderPipeline(
         lastError = null
         frameCount = 0
         lastFrameJpeg = null
+        consecutiveIdrBoundaries = 0
+        lastBoundaryFrameCount = 0
+        lastFrameRealtimeMs = 0L
 
         AppLog.i(TAG, "start: $url (RTP über ${if (useTcp) "TCP" else "UDP"})")
         onStatus("RTSP: Verbinde (${if (useTcp) "TCP" else "UDP"}) zu $url")
 
         imageThread = HandlerThread("RtspImageReader").apply { start() }
         imageHandler = Handler(imageThread!!.looper)
-        // API 29+: USAGE_CPU_READ_OFTEN zwingt Adreno-Decoder in CPU-lesbaren Buffer.
-        // API 26-28: Fallback ohne Usage-Flag, dafür größere Image-Queue.
-        imageReader = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            AppLog.i(TAG, "ImageReader: USAGE_CPU_READ_OFTEN, maxImages=$MAX_IMAGES_HW (API ${Build.VERSION.SDK_INT})")
-            ImageReader.newInstance(
-                IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES_HW,
-                HardwareBuffer.USAGE_CPU_READ_OFTEN
-            )
-        } else {
-            AppLog.i(TAG, "ImageReader: kein Usage-Flag, maxImages=$MAX_IMAGES_LEGACY (API ${Build.VERSION.SDK_INT})")
-            ImageReader.newInstance(
-                IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES_LEGACY
-            )
-        }
-        imageReader!!.setOnImageAvailableListener({ reader ->
-            try {
-                // acquireNextImage statt acquireLatestImage: keine Frame-Drops auf
-                // Buffer-Ebene; wir verarbeiten in Order. Bei Backpressure muss der
-                // Decoder warten — aber das ist OK weil JPEG-Encoding < 33ms ist.
-                val image = reader.acquireNextImage() ?: return@setOnImageAvailableListener
+        imageReader = ImageReader.newInstance(
+            IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES
+        ).apply {
+            setOnImageAvailableListener({ reader ->
                 try {
-                    val jpeg = imageToJpeg(image)
-                    lastFrameJpeg = jpeg
-                    frameCount++
-                    if (frameCount == 1L) {
-                        decodeErrorRestarts = 0
-                        AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${image.width}x${image.height}")
-                    } else if (frameCount % 30L == 0L) {
-                        // Diversity-Log: erste 4 Y-Bytes + JPEG-Größe — wenn die Bytes
-                        // sich ändern, läuft echtes Video durch (statt Standbild).
-                        val yPlane = image.planes[0].buffer
-                        val first4 = ByteArray(4)
-                        yPlane.position(0)
-                        yPlane.get(first4, 0, minOf(4, yPlane.remaining()))
-                        val hex = first4.joinToString("") { "%02x".format(it) }
-                        AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG, Y[0..3]=$hex")
+                    val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+                    try {
+                        val jpeg = imageToJpeg(image)
+                        lastFrameJpeg = jpeg
+                        frameCount++
+                        lastFrameRealtimeMs = SystemClock.elapsedRealtime()
+                        if (frameCount == 1L) {
+                            decodeErrorRestarts = 0
+                            consecutiveIdrBoundaries = 0
+                            AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${image.width}x${image.height}")
+                        }
+                        onJpegFrame(jpeg)
+                    } finally {
+                        image.close()
                     }
-                    onJpegFrame(jpeg)
-                } finally {
-                    image.close()
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "ImageReader-Verarbeitung fehlgeschlagen", e)
                 }
-            } catch (e: Exception) {
-                AppLog.e(TAG, "ImageReader-Verarbeitung fehlgeschlagen", e)
-            }
-        }, imageHandler)
+            }, imageHandler)
+        }
 
         val trackSelector = DefaultTrackSelector(context)
         val loadControl = DefaultLoadControl.Builder()
@@ -174,7 +187,7 @@ class RtspImageReaderPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        val hardwareOnlyFactory = object : DefaultRenderersFactory(context) {
+        val softwareOnlyFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
                 extensionRendererMode: Int,
@@ -185,20 +198,20 @@ class RtspImageReaderPipeline(
                 allowedVideoJoiningTimeMs: Long,
                 out: ArrayList<Renderer>
             ) {
-                val hardwareOnly = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                val softwareOnly = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
                     val decoders = mediaCodecSelector.getDecoderInfos(
                         mimeType,
                         requiresSecureDecoder,
                         requiresTunneledDecoder
                     )
                     if (mimeType == MimeTypes.VIDEO_H264) {
-                        val filtered = decoders.filterNot { info ->
-                            info.name.startsWith("c2.android") || info.name.startsWith("OMX.google")
+                        val filtered = decoders.filter { decoder ->
+                            decoder.hardwareAccelerated == false
                         }
                         AppLog.i(
                             TAG,
-                            "H264-HW-Decoder: ${filtered.firstOrNull()?.name ?: "(none)"} " +
-                                "(HW=${filtered.size}, alle=${decoders.size})"
+                            "H264-SW-Decoder: ${filtered.firstOrNull()?.name ?: "(none)"} " +
+                                "(SW=${filtered.size}, alle=${decoders.size}, hardwareAccelerated == false)"
                         )
                         filtered
                     } else {
@@ -208,7 +221,7 @@ class RtspImageReaderPipeline(
                 super.buildVideoRenderers(
                     context,
                     extensionRendererMode,
-                    hardwareOnly,
+                    softwareOnly,
                     false,
                     eventHandler,
                     eventListener,
@@ -218,7 +231,7 @@ class RtspImageReaderPipeline(
             }
         }
 
-        val exo = ExoPlayer.Builder(context, hardwareOnlyFactory)
+        val exo = ExoPlayer.Builder(context, softwareOnlyFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .build()
@@ -260,7 +273,7 @@ class RtspImageReaderPipeline(
                     val proxyUrl = sdpProxy?.let { "rtsp://127.0.0.1:15554/live/tcp/ch1" } ?: currentUrl
                     mainHandler.postDelayed({
                         if (currentUrl.isEmpty()) return@postDelayed
-                        recycleExoPlayer(proxyUrl)
+                        recycleExoPlayer(proxyUrl, "player-error")
                     }, 200)
                 }
             }
@@ -303,11 +316,16 @@ class RtspImageReaderPipeline(
         }, 30000)
     }
 
-    private fun recycleExoPlayer(proxyUrl: String) {
+    private fun recycleExoPlayer(proxyUrl: String, reason: String) {
         if (!running || currentUrl.isEmpty()) return
         decodeErrorRestarts++
-        AppLog.i(TAG, "Segment-Boundary: ExoPlayer-Recycle #$decodeErrorRestarts -> $proxyUrl")
-        onStatus("RTSP: Segment-Wechsel, Decoder-Reset #$decodeErrorRestarts")
+        consecutiveIdrBoundaries = 0
+        AppLog.i(
+            TAG,
+            "ExoPlayer-Recycle #$decodeErrorRestarts (reason=$reason, " +
+                "IDR_RESTART_THRESHOLD=$IDR_RESTART_THRESHOLD) -> $proxyUrl"
+        )
+        onStatus("RTSP: Decoder-Reset #$decodeErrorRestarts ($reason)")
         stopInternal()
         mainHandler.postDelayed({
             if (currentUrl.isEmpty()) return@postDelayed
