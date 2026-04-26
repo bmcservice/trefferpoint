@@ -264,8 +264,16 @@ class RtspImageReaderPipeline(
                 lastError = "${error.errorCodeName}: ${error.message}"
                 onStatus("RTSP-Fehler: ${error.errorCodeName}")
 
-                if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED && sdpProxy != null) {
+                if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED) {
                     AppLog.i(TAG, "DECODING_FAILED mit Proxy — Segment-Boundary übernimmt Recycle")
+                    val proxyUrl = sdpProxy?.let { "rtsp://127.0.0.1:15554/live/tcp/ch1" } ?: currentUrl
+                    AppLog.i(TAG, "DECODING_FAILED -> Self-Recycle in 500ms (Boundary bleibt Backup)")
+                    if (running && currentUrl.isNotEmpty() && decodeErrorRestarts <= MAX_DECODE_RESTARTS) {
+                        mainHandler.postDelayed({
+                            if (currentUrl.isEmpty()) return@postDelayed
+                            recycleExoPlayer(proxyUrl, "decoding-failed")
+                        }, 500)
+                    }
                     return
                 }
 
