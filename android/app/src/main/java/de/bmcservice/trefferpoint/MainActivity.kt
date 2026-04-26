@@ -642,6 +642,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        /**
+         * Speichert das letzte JPEG-Frame der aktiven RTSP-Pipeline in Downloads/TrefferPoint/.
+         * Rückgabe: Pfad oder Fehler-String. Genutzt vom Snapshot-Button im UI.
+         */
+        @JavascriptInterface
+        fun sgkSaveFrame(): String {
+            val jpeg = rtspPipeline?.lastFrameJpeg ?: mjpegPipeline?.lastFrameJpeg
+                ?: return "Fehler: kein Frame verfügbar"
+            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault())
+                .format(java.util.Date())
+            return saveBytesToDownloads("snapshot_$ts.jpg", jpeg, "image/jpeg")
+        }
+
         /** Öffnet eine URL im System-Browser (für Update-Download etc.). */
         @JavascriptInterface
         fun openUrl(url: String) {
@@ -745,6 +758,35 @@ class MainActivity : AppCompatActivity() {
             filename
         } catch (e: Exception) {
             AppLog.e(TAG, "saveToDownloads fehlgeschlagen: $filename", e)
+            "Fehler: ${e.message}"
+        }
+    }
+
+    /** Binäre Variante von saveToDownloads — für Snapshots (JPEG). */
+    private fun saveBytesToDownloads(filename: String, bytes: ByteArray, mime: String): String {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, mime)
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/TrefferPoint")
+                }
+                val uri = contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                ) ?: return "Fehler: URI null"
+                contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS
+                )
+                val sub = java.io.File(dir, "TrefferPoint").also { it.mkdirs() }
+                java.io.File(sub, filename).writeBytes(bytes)
+            }
+            AppLog.i(TAG, "Gespeichert: $filename (${bytes.size}B)")
+            filename
+        } catch (e: Exception) {
+            AppLog.e(TAG, "saveBytesToDownloads fehlgeschlagen: $filename", e)
             "Fehler: ${e.message}"
         }
     }

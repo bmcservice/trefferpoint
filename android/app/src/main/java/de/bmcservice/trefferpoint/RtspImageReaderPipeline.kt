@@ -170,6 +170,15 @@ class RtspImageReaderPipeline(
                             decodeErrorRestarts = 0
                             consecutiveIdrBoundaries = 0
                             AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${image.width}x${image.height}")
+                        } else if (frameCount <= 5L || frameCount % 30L == 0L) {
+                            // Frame-Diversity-Log: erste 4 Y-Bytes + JPEG-Größe.
+                            // Wenn die Bytes sich ändern, läuft echtes Video durch (statt Standbild).
+                            val yBuf = image.planes[0].buffer
+                            val first4 = ByteArray(4)
+                            yBuf.position(0)
+                            yBuf.get(first4, 0, minOf(4, yBuf.remaining()))
+                            val hex = first4.joinToString("") { "%02x".format(it) }
+                            AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG, Y[0..3]=$hex")
                         }
                         onJpegFrame(jpeg)
                     } finally {
