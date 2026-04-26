@@ -240,7 +240,8 @@ class RtspImageReaderPipeline(
                     out
                 )
             }
-        }
+        }.forceEnableMediaCodecAsynchronousQueueing()
+        AppLog.i(TAG, "MediaCodec-Adapter: forceEnableMediaCodecAsynchronousQueueing() aktiv")
 
         val exo = ExoPlayer.Builder(context, softwareOnlyFactory)
             .setTrackSelector(trackSelector)
