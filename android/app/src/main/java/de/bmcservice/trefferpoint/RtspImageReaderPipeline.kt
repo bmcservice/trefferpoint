@@ -48,7 +48,9 @@ class RtspImageReaderPipeline(
         private const val IMAGE_WIDTH = 960
         private const val IMAGE_HEIGHT = 540
         private const val JPEG_QUALITY = 90
-        private const val MAX_IMAGES = 2
+        // SW-Decoder kann Bursts produzieren; YUV→JPEG braucht ~10-20ms.
+        // 6 Bilder Puffer geben dem Encoder Zeit ohne den Decoder zu blockieren.
+        private const val MAX_IMAGES = 6
         private const val MAX_DECODE_RESTARTS = 30
         private const val IDR_RESTART_THRESHOLD = 3
         private const val IDR_STABLE_FRAME_COUNT = 10L
