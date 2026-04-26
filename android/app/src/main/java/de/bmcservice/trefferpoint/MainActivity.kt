@@ -515,7 +515,10 @@ class MainActivity : AppCompatActivity() {
                         p.start(finalUrl)
                     } else {
                         AppLog.i(TAG, "startStream (RTSP): $finalUrl")
-                        val p = RtspPipeline(applicationContext, rtspSurfaceView, onJpeg, onStatus)
+                        // this@MainActivity (Activity-Context) statt applicationContext:
+                        // RtspPipeline.captureFrame() braucht activity.window für PixelCopy(Window).
+                        // applicationContext ist kein Activity → context as? Activity = null → kein Frame.
+                        val p = RtspPipeline(this@MainActivity, rtspSurfaceView, onJpeg, onStatus)
                         // Mail-Socket-Nachrichten der Kamera an JS weiterleiten (REC-Status etc.)
                         p.onMailMessage = { msg ->
                             val escaped = msg
