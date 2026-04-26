@@ -25,7 +25,9 @@ object CameraScanner {
     private val TCP_PORTS = intArrayOf(80, 81, 8080, 8081, 554, 8554, 8888)
 
     private val RTSP_PATHS = listOf(
-        "/live/tcp/ch1",  // Viidure
+        "/live/tcp/ch1",  // Viidure/SGK GK720X (unser Gerät)
+        "/ch01",          // Viidure-App: generischer Kamera-Server (Port 8554)
+        "/ch13",          // Viidure-App: alternativer Kanal (Port 8554)
         "/live",
         "/live/ch1",
         "/stream0",
@@ -245,10 +247,19 @@ object CameraScanner {
                         isSgkGoPlus = true
                     }
                 }
-                // getmediainfo: RTSP-URL aus {"info":{"rtsp":"rtsp://..."}} extrahieren (nur Fallback)
+                // getmediainfo: RTSP-URL extrahieren.
+                // SGK/Viidure Standard: {"info":{"rtsp":"rtsp://...","port":554}}
+                // eeasytech/CS09-Firmware (lr-m Research): {"rtsp":"rtsp://...","port":5000,"transport":"tcp"}
                 if (ep.endsWith("getmediainfo") && body.isNotBlank()) {
                     try {
-                        val rtsp = JSONObject(body).getJSONObject("info").optString("rtsp")
+                        val json = JSONObject(body)
+                        val rtsp = try {
+                            // Nested format (SGK Standard)
+                            json.getJSONObject("info").optString("rtsp", "")
+                        } catch (_: Exception) {
+                            // Flat format (eeasytech/CS09)
+                            json.optString("rtsp", "")
+                        }
                         if (rtsp.startsWith("rtsp://")) discoveredRtsp = rtsp
                     } catch (_: Exception) {}
                 }

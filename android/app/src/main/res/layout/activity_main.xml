@@ -4,14 +4,15 @@
     android:layout_height="match_parent"
     android:background="@color/tp_bg">
 
-    <!-- SurfaceView für RTSP-Stream (ExoPlayer-Ausgabe).
-         match_parent: Surface-Buffer deckt den gesamten Screen ab.
-         holder.setFixedSize(960,540) in MainActivity.surfaceCreated() setzt den
-         tatsächlichen Buffer auf 960×540 — PixelCopy.request(null) liest genau diese 960×540.
-         Der WebView liegt mit opakem #0d0d0d-Hintergrund darüber → User sieht kein Video.
-         SurfaceFlinger compositet SurfaceView (unten) + WebView-Fenster (oben) korrekt. -->
-    <SurfaceView
-        android:id="@+id/rtspSurfaceView"
+    <!-- Phase 2 (v2.3.71+): GLSurfaceView statt SurfaceView.
+         ExoPlayer rendert via SurfaceTexture in OES-Texture; RtspGlRenderer
+         zeichnet jeden Frame in Off-Screen-FBO 960×540 und liest mit glReadPixels
+         heraus → JPEG → onJpegFrame-Callback.
+         WebView (oben drüber, opak #0d0d0d) verdeckt die GLSurfaceView komplett —
+         User sieht das Video nur via JPEG-Roundtrip im WebView. Display-Render
+         ist somit irrelevant; FBO ist die Single Source of Truth. -->
+    <android.opengl.GLSurfaceView
+        android:id="@+id/rtspGlSurfaceView"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 

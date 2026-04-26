@@ -7,9 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
-import android.graphics.PixelFormat
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.opengl.GLSurfaceView
 import android.hardware.usb.UsbManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -62,7 +60,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
-    private lateinit var rtspSurfaceView: SurfaceView
+    private lateinit var rtspGlSurfaceView: GLSurfaceView
+    private var rtspGlRenderer: RtspGlRenderer? = null
 
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
@@ -93,25 +92,27 @@ class MainActivity : AppCompatActivity() {
         AppLog.i(TAG, "Launch intent: ${intent?.action}")
 
         webView = findViewById(R.id.webview)
-        rtspSurfaceView = findViewById(R.id.rtspSurfaceView)
+        rtspGlSurfaceView = findViewById(R.id.rtspGlSurfaceView)
 
-        // Surface-Buffer-Größe einmalig auf 960×540 fixieren, sobald der Surface existiert.
-        // Wird exakt EINMAL aufgerufen — vor dem ersten RtspPipeline-Start.
-        // match_parent-Layout stellt sicher, dass die Surface groß genug ist bevor setFixedSize.
-        rtspSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-                // RGBA_8888: hint an SurfaceFlinger, SW-Komposition zu verwenden.
-                // Auf Samsung/Qualcomm verhindert das den Hardware-Overlay-Modus,
-                // der PixelCopy blind macht (PixelCopy sieht sonst nur schwarzen Layer).
-                holder.setFormat(PixelFormat.RGBA_8888)
-                holder.setFixedSize(960, 540)
-                AppLog.i(TAG, "rtspSurfaceView.surfaceCreated → RGBA_8888 + setFixedSize(960×540)")
-            }
-            override fun surfaceChanged(holder: SurfaceHolder, f: Int, w: Int, h: Int) {}
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                AppLog.i(TAG, "rtspSurfaceView.surfaceDestroyed")
-            }
-        })
+        // Phase 2 (v2.3.71+): GLSurfaceView mit RtspGlRenderer.
+        // ExoPlayer rendert in SurfaceTexture → Renderer zeichnet in FBO 960×540 →
+        // glReadPixels → JPEG → onJpeg-Callback → MainActivity → WebView.
+        // RENDERMODE_WHEN_DIRTY: Renderer rendert nur bei requestRender() vom
+        // SurfaceTexture-onFrameAvailable-Listener (kein dauerhaftes 60Hz-Polling).
+        rtspGlSurfaceView.setEGLContextClientVersion(2)
+        rtspGlSurfaceView.preserveEGLContextOnPause = true
+        val renderer = RtspGlRenderer(
+            onJpegFrame = { jpeg ->
+                // Direkt an aktuelle Pipeline weiterreichen (für lastFrameJpeg + frameCount)
+                rtspPipeline?.onRenderedFrame(jpeg)
+            },
+            onStatusLog = { msg -> AppLog.i(TAG, "GL: $msg") }
+        )
+        renderer.attachToView(rtspGlSurfaceView)
+        rtspGlSurfaceView.setRenderer(renderer)
+        rtspGlSurfaceView.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+        rtspGlRenderer = renderer
+        AppLog.i(TAG, "GLSurfaceView + RtspGlRenderer initialisiert (Phase 2)")
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -178,7 +179,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        try { rtspGlSurfaceView.onResume() } catch (_: Exception) {}
         attachAlreadyConnectedCamera()
+    }
+
+    override fun onPause() {
+        try { rtspGlSurfaceView.onPause() } catch (_: Exception) {}
+        super.onPause()
     }
 
     // ── USB-Device-Verwaltung ────────────────────────────────────────────────
@@ -400,6 +407,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         try { rtspPipeline?.stop() } catch (_: Exception) {}
         try { mjpegPipeline?.stop() } catch (_: Exception) {}
+        try { rtspGlRenderer?.shutdown() } catch (_: Exception) {}
         try { dummySurface?.release() } catch (_: Exception) {}
         try { dummySurfaceTex?.release() } catch (_: Exception) {}
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
@@ -515,10 +523,15 @@ class MainActivity : AppCompatActivity() {
                         p.start(finalUrl)
                     } else {
                         AppLog.i(TAG, "startStream (RTSP): $finalUrl")
-                        // this@MainActivity (Activity-Context) statt applicationContext:
-                        // RtspPipeline.captureFrame() braucht activity.window für PixelCopy(Window).
-                        // applicationContext ist kein Activity → context as? Activity = null → kein Frame.
-                        val p = RtspPipeline(this@MainActivity, rtspSurfaceView, onJpeg, onStatus)
+                        // Phase 2: ExoPlayer schreibt in Surface(SurfaceTexture) vom GL-Renderer.
+                        // Surface kann verzögert verfügbar sein (GLSurfaceView.onSurfaceCreated muss erst feuern)
+                        // → als Lambda übergeben, Pipeline pollt darauf.
+                        val p = RtspPipeline(
+                            applicationContext,
+                            { rtspGlRenderer?.surface },
+                            onJpeg,
+                            onStatus
+                        )
                         // Mail-Socket-Nachrichten der Kamera an JS weiterleiten (REC-Status etc.)
                         p.onMailMessage = { msg ->
                             val escaped = msg
