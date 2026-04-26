@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.hardware.HardwareBuffer
 import android.media.Image
 import android.media.ImageReader
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -47,7 +49,9 @@ class RtspImageReaderPipeline(
         private const val IMAGE_WIDTH = 960
         private const val IMAGE_HEIGHT = 540
         private const val JPEG_QUALITY = 90
-        private const val MAX_IMAGES = 2
+        // API 29+: 4 reicht (USAGE_CPU_READ_OFTEN); API 26-28: 8 als Sicherheits-Puffer
+        private const val MAX_IMAGES_HW = 4
+        private const val MAX_IMAGES_LEGACY = 8
         private const val MAX_DECODE_RESTARTS = 30
     }
 
@@ -118,29 +122,51 @@ class RtspImageReaderPipeline(
 
         imageThread = HandlerThread("RtspImageReader").apply { start() }
         imageHandler = Handler(imageThread!!.looper)
-        imageReader = ImageReader.newInstance(
-            IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES
-        ).apply {
-            setOnImageAvailableListener({ reader ->
-                try {
-                    val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                    try {
-                        val jpeg = imageToJpeg(image)
-                        lastFrameJpeg = jpeg
-                        frameCount++
-                        if (frameCount == 1L) {
-                            decodeErrorRestarts = 0
-                            AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${image.width}x${image.height}")
-                        }
-                        onJpegFrame(jpeg)
-                    } finally {
-                        image.close()
-                    }
-                } catch (e: Exception) {
-                    AppLog.e(TAG, "ImageReader-Verarbeitung fehlgeschlagen", e)
-                }
-            }, imageHandler)
+        // API 29+: USAGE_CPU_READ_OFTEN zwingt Adreno-Decoder in CPU-lesbaren Buffer.
+        // API 26-28: Fallback ohne Usage-Flag, dafür größere Image-Queue.
+        imageReader = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            AppLog.i(TAG, "ImageReader: USAGE_CPU_READ_OFTEN, maxImages=$MAX_IMAGES_HW (API ${Build.VERSION.SDK_INT})")
+            ImageReader.newInstance(
+                IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES_HW,
+                HardwareBuffer.USAGE_CPU_READ_OFTEN
+            )
+        } else {
+            AppLog.i(TAG, "ImageReader: kein Usage-Flag, maxImages=$MAX_IMAGES_LEGACY (API ${Build.VERSION.SDK_INT})")
+            ImageReader.newInstance(
+                IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES_LEGACY
+            )
         }
+        imageReader!!.setOnImageAvailableListener({ reader ->
+            try {
+                // acquireNextImage statt acquireLatestImage: keine Frame-Drops auf
+                // Buffer-Ebene; wir verarbeiten in Order. Bei Backpressure muss der
+                // Decoder warten — aber das ist OK weil JPEG-Encoding < 33ms ist.
+                val image = reader.acquireNextImage() ?: return@setOnImageAvailableListener
+                try {
+                    val jpeg = imageToJpeg(image)
+                    lastFrameJpeg = jpeg
+                    frameCount++
+                    if (frameCount == 1L) {
+                        decodeErrorRestarts = 0
+                        AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${image.width}x${image.height}")
+                    } else if (frameCount % 30L == 0L) {
+                        // Diversity-Log: erste 4 Y-Bytes + JPEG-Größe — wenn die Bytes
+                        // sich ändern, läuft echtes Video durch (statt Standbild).
+                        val yPlane = image.planes[0].buffer
+                        val first4 = ByteArray(4)
+                        yPlane.position(0)
+                        yPlane.get(first4, 0, minOf(4, yPlane.remaining()))
+                        val hex = first4.joinToString("") { "%02x".format(it) }
+                        AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG, Y[0..3]=$hex")
+                    }
+                    onJpegFrame(jpeg)
+                } finally {
+                    image.close()
+                }
+            } catch (e: Exception) {
+                AppLog.e(TAG, "ImageReader-Verarbeitung fehlgeschlagen", e)
+            }
+        }, imageHandler)
 
         val trackSelector = DefaultTrackSelector(context)
         val loadControl = DefaultLoadControl.Builder()
