@@ -355,18 +355,41 @@ class RtspPipeline(
                 AppLog.i(TAG, "  $ep → $code ${if (body.isNotBlank()) "| $body" else ""}")
 
                 // getmediainfo: RTSP-Port dynamisch ermitteln.
-                // Unterstützt beide Firmware-Formate (SGK nested + eeasytech flat).
+                // SGK GK720X: {"rtsp":"rtsp://192.168.0.1/live/tcp/ch1","port":6035,"transport":"tcp"}
+                //   → port=6035 ist der Mail-Socket, NICHT RTSP! Aus RTSP-URL extrahieren (implizit 554).
+                // eeasytech CS09 (lr-m Research): {"rtsp":"rtsp://192.168.169.1","port":5000,...}
+                //   → RTSP-URL hat keinen Port, port=5000 ist der echte RTSP-Port.
+                // Strategie: Port aus rtsp-URL vorziehen; port-Feld nur wenn in bekannter RTSP-Range.
                 if (ep.endsWith("getmediainfo") && body.isNotBlank()) {
                     try {
                         val json = JSONObject(body)
-                        val port = try {
-                            json.getJSONObject("info").optInt("port", 0)  // SGK nested
+                        val rtspUrl = try {
+                            json.getJSONObject("info").optString("rtsp", "")  // SGK nested
                         } catch (_: Exception) {
-                            json.optInt("port", 0)                         // eeasytech flat
+                            json.optString("rtsp", "")                          // eeasytech flat
+                        }
+                        // 1. Port aus RTSP-URL lesen (rtsp://host:PORT/...)
+                        val urlPort = if (rtspUrl.isNotEmpty()) {
+                            Regex("rtsp://[^:/]+:(\\d+)").find(rtspUrl)
+                                ?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                        } else 0
+                        // 2. Fallback: port-Feld nur wenn typischer RTSP-Port (nicht Mail-Ports wie 6035)
+                        val jsonPort = try {
+                            json.getJSONObject("info").optInt("port", 0)
+                        } catch (_: Exception) {
+                            json.optInt("port", 0)
+                        }
+                        val knownRtspPorts = setOf(554, 5000, 5554, 8554)
+                        val port = when {
+                            urlPort > 0                      -> urlPort
+                            jsonPort in knownRtspPorts       -> jsonPort
+                            else                             -> 0
                         }
                         if (port > 0 && port != discoveredPort) {
                             discoveredPort = port
-                            AppLog.i(TAG, "getmediainfo: RTSP-Port $discoveredPort entdeckt")
+                            AppLog.i(TAG, "getmediainfo: RTSP-Port $discoveredPort entdeckt (rtspUrl=$rtspUrl)")
+                        } else {
+                            AppLog.i(TAG, "getmediainfo: Port-Feld $jsonPort ignoriert (kein RTSP-Port) → bleibe bei $discoveredPort")
                         }
                     } catch (_: Exception) {}
                 }
