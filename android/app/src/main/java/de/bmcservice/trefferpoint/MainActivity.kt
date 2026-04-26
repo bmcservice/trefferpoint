@@ -516,6 +516,20 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         AppLog.i(TAG, "startStream (RTSP): $finalUrl")
                         val p = RtspPipeline(applicationContext, rtspSurfaceView, onJpeg, onStatus)
+                        // Mail-Socket-Nachrichten der Kamera an JS weiterleiten (REC-Status etc.)
+                        p.onMailMessage = { msg ->
+                            val escaped = msg
+                                .replace("\\", "\\\\")
+                                .replace("'", "\\'")
+                                .replace("\n", "\\n")
+                                .replace("\r", "")
+                            runOnUiThread {
+                                webView.evaluateJavascript(
+                                    "window.tpOnSgkMail && window.tpOnSgkMail('$escaped')",
+                                    null
+                                )
+                            }
+                        }
                         rtspPipeline = p
                         activeMode = "rtsp"
                         p.start(finalUrl)
@@ -742,6 +756,96 @@ class MainActivity : AppCompatActivity() {
         fun saveTestbericht(json: String): String {
             val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
             return saveToDownloads("trefferpoint_$ts.json", json)
+        }
+
+        /**
+         * Asynchroner HTTP-GET zur SGK/Viidure-Kamera.
+         * WebView (file://) darf keine Cross-Origin-Requests → Bridge übernimmt.
+         *
+         * Aufruf aus JS:  tpBridge.sgkHttp("app/setrec?rec=1", "rec_start")
+         * Antwort via:    window.tpOnSgkHttp(callbackId, responseBody)
+         *
+         * Bekannte Endpoints:
+         *   app/setrec?rec=1 / rec=0   → Aufnahme starten/stoppen
+         *   app/getfilelist             → Liste aufgenommener Segmente
+         *   app/getmediainfo            → RTSP-URL + Port
+         */
+        @JavascriptInterface
+        fun sgkHttp(path: String, callbackId: String) {
+            ioScope.launch {
+                val host = getWifiGateway().ifBlank { "192.168.0.1" }
+                val body = try {
+                    val conn = java.net.URL("http://$host/$path").openConnection()
+                            as java.net.HttpURLConnection
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 5000
+                    conn.setRequestProperty("User-Agent", "TrefferPoint/${BuildConfig.VERSION_NAME}")
+                    val code = conn.responseCode
+                    val text = conn.inputStream.bufferedReader().readText()
+                    AppLog.i(TAG, "sgkHttp $path → $code $text")
+                    text
+                } catch (e: Exception) {
+                    AppLog.w(TAG, "sgkHttp $path Fehler: ${e.message}")
+                    "{\"error\":\"${e.message}\"}"
+                }
+                val escaped = body
+                    .replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace("\n", "\\n")
+                    .replace("\r", "")
+                val cbEscaped = callbackId.replace("'", "\\'")
+                runOnUiThread {
+                    webView.evaluateJavascript(
+                        "window.tpOnSgkHttp && window.tpOnSgkHttp('$cbEscaped','$escaped')",
+                        null
+                    )
+                }
+            }
+        }
+
+        /**
+         * Speichert den letzten RTSP-Frame als JPEG in Downloads/TrefferPoint/.
+         * Gibt Dateinamen (Erfolg) oder "Fehler: ..." zurück.
+         * Synchron — wird von WebView auf Hintergrund-Thread aufgerufen.
+         */
+        @JavascriptInterface
+        fun sgkSaveFrame(): String {
+            val jpeg = rtspPipeline?.lastFrameJpeg
+                ?: mjpegPipeline?.lastFrameJpeg
+                ?: return "Fehler: kein Frame verfügbar"
+            val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS", java.util.Locale.getDefault())
+                .format(java.util.Date())
+            val filename = "snapshot_$ts.jpg"
+            return saveBytesToDownloads(filename, jpeg, "image/jpeg")
+        }
+    }
+
+    /** Speichert Binärdaten (z.B. JPEG) in Downloads/TrefferPoint/. */
+    private fun saveBytesToDownloads(filename: String, data: ByteArray, mimeType: String): String {
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, filename)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/TrefferPoint")
+                }
+                val uri = contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+                ) ?: return "Fehler: URI null"
+                contentResolver.openOutputStream(uri)?.use { it.write(data) }
+            } else {
+                @Suppress("DEPRECATION")
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS
+                )
+                val sub = java.io.File(dir, "TrefferPoint").also { it.mkdirs() }
+                java.io.File(sub, filename).writeBytes(data)
+            }
+            AppLog.i(TAG, "Gespeichert: $filename (${data.size}B)")
+            filename
+        } catch (e: Exception) {
+            AppLog.e(TAG, "saveBytesToDownloads fehlgeschlagen: $filename", e)
+            "Fehler: ${e.message}"
         }
     }
 

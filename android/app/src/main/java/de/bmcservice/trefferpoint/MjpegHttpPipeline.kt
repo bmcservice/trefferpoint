@@ -50,6 +50,7 @@ class MjpegHttpPipeline(
     @Volatile var frameCount: Long = 0; private set
     @Volatile var lastError: String? = null; private set
     @Volatile var lastFrameBytes: Int = 0; private set
+    @Volatile var lastFrameJpeg: ByteArray? = null; private set
 
     private var streamThread: Thread? = null
     private var heartbeatThread: Thread? = null
@@ -277,6 +278,7 @@ class MjpegHttpPipeline(
             } else {
                 frameCount++
                 lastFrameBytes = jpeg.size
+                lastFrameJpeg = jpeg  // für Snapshot (Bridge.sgkSaveFrame)
                 if (frameCount == 1L) {
                     AppLog.i(TAG, "Erster MJPEG-Frame: ${jpeg.size}B")
                 }

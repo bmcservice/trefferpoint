@@ -1,6 +1,6 @@
 ﻿// TrefferPoint Service Worker
 // CACHE_VER mit APP_VERSION in index.html zusammen bumpen
-const CACHE_VER = 'tp-2.3.68';
+const CACHE_VER = 'tp-2.3.69';
 const PRECACHE = ['./index.html', './manifest.json', './version.json'];
 
 self.addEventListener('install', e => {

@@ -92,6 +92,15 @@ class RtspPipeline(
     // capturePending: verhindert gleichzeitige PixelCopy-Requests
     @Volatile private var capturePending = false
 
+    // Letzter JPEG-Frame (für Snapshot-Funktion via Bridge)
+    @Volatile var lastFrameJpeg: ByteArray? = null; private set
+
+    /**
+     * Wird für jede empfangene Mail-Socket-Nachricht aufgerufen (REC-Status, Batterie, SD, …).
+     * Callback kommt aus mail-socket-rx Thread → Aufrufer muss ggf. auf UI-Thread wechseln.
+     */
+    var onMailMessage: ((String) -> Unit)? = null
+
     // Viidure/SGK-spezifisch: TCP-Socket auf Port 6035 ("mail_tcp_socket")
     @Volatile private var mailSocket: Socket? = null
 
@@ -188,6 +197,7 @@ class RtspPipeline(
                             val out = ByteArrayOutputStream((INITIAL_WIDTH * INITIAL_HEIGHT) / 4)
                             outBmp.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
                             val jpeg = out.toByteArray()
+                            lastFrameJpeg = jpeg  // für Snapshot (Bridge.sgkSaveFrame)
                             frameCount++
                             if (frameCount == 1L || frameCount % 30L == 0L) {
                                 AppLog.i(TAG, "RTSP-Frame #$frameCount: ${jpeg.size}B JPEG (PixelCopy, uvFix=${outBmp !== bmp})")
@@ -310,8 +320,9 @@ class RtspPipeline(
                     while (s.isConnected && !s.isClosed) {
                         val n = try { s.getInputStream().read(buf) } catch (_: Exception) { -1 }
                         if (n <= 0) break
-                        val msg = String(buf, 0, n, Charsets.UTF_8).trim().take(180)
+                        val msg = String(buf, 0, n, Charsets.UTF_8).trim().take(512)
                         AppLog.i(TAG, "Mail-RX: $msg")
+                        onMailMessage?.invoke(msg)
                     }
                 } catch (_: Exception) {}
                 AppLog.i(TAG, "Mail-Socket Reader beendet")
