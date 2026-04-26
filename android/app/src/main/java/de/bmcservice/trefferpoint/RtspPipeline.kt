@@ -241,7 +241,7 @@ class RtspPipeline(
                                     decodeErrorRestarts = 0
                                     startInternal(pUrl, useTcp = true)
                                 }
-                            }, 150)
+                            }, 50)  // 50ms statt 150: stopInternal() ist synchron, weniger Puffer nötig
                         }
                     }
                 }

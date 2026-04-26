@@ -28,7 +28,13 @@ class RtspSdpProxy(
     private val cameraPort: Int = 554,
     private val proxyPort: Int = 15554
 ) {
-    companion object { private const val TAG = "RtspSdpProxy" }
+    companion object {
+        private const val TAG = "RtspSdpProxy"
+        // SW-Decoder (c2.android.avc.decoder) crasht beim N-ten IDR (frame_num-Reset, SPS/PPS-Dedup).
+        // Empirisch (v2.3.61-Log): crash nach ~5s bei ~1.2s GOP → IDR #5 triggert DECODING_FAILED.
+        // Threshold=5: Restart VOR IDR#5 → IDR #1–4 spielen durch (4×1.2s = 4.8s Nutzzeit).
+        private const val IDR_RESTART_THRESHOLD = 5
+    }
 
     @Volatile private var active = false
     private var serverSock: ServerSocket? = null
@@ -380,7 +386,11 @@ class RtspSdpProxy(
         val nalTotal = IntArray(32)
         val nalWithM = IntArray(32)
         val fuaEndBits = IntArray(32)  // FU-A Pakete mit E-Bit gesetzt, indexiert nach FU-Typ
-        var spsToIdrRelabeled = 0  // Firmware-Bug #9: FU-A(SPS→IDR) Zähler
+        var spsToIdrRelabeled = 0  // Firmware-Bug #9: FU-A(SPS→IDR) Zähler (alle Fragmente)
+        // IDR-Start-Fragment-Zähler: zählt S-Bit=1 Pakete pro relay()-Aufruf.
+        // Kamera trennt TCP nicht zwischen GOPs → ein relay()-Aufruf sieht alle IDRs.
+        // Restart wird ausgelöst wenn idrSBitCount >= IDR_RESTART_THRESHOLD.
+        var idrSBitCount = 0
 
         // Gepufferter Lese-Stream (einzelne Byte-Leseanfragen ohne OS-Overhead)
         val cam = BufferedInputStream(camIn, 65536)
@@ -470,19 +480,16 @@ class RtspSdpProxy(
                         if (spsToIdrRelabeled == 1)
                             AppLog.i(TAG, "Bug #9: FU-A(SPS→IDR) — SGK sendet IDR als SPS, korrigiere")
 
-                        // IDR-Segment-Grenze: proaktiver Disconnect (verhindert DECODING_FAILED)
-                        // Kamera trennt TCP NICHT zwischen Segmenten — sendet kontinuierlich
-                        // IDR#1 + P…P + IDR#2 + P… in einer Verbindung.
-                        // Sobald ein neues IDR-Start-Fragment (S-Bit gesetzt) nach dem ersten IDR
-                        // eintrifft (idrEverInjected=true): Loop beenden VOR dem cOut.write.
-                        // cameraClosedFirst bleibt false → session() schließt Client-Socket →
-                        // ExoPlayer bekommt TCP-EOF → IO-Fehler → 200ms Recycle statt
-                        // DECODING_FAILED nach ~7s.
-                        if (fuStartBit && idrEverInjected) {
-                            AppLog.i(TAG, "IDR-Segment-Grenze (S-Bit): onIdrBoundary → stoppe ExoPlayer vor Socket-Close")
-                            // Callback VOR dem break: mainHandler.post{stopInternal} landet in
-                            // der Main-Thread-Queue BEVOR ExoPlayer's IO-Error-Handler feuern kann.
-                            // Dadurch ist ExoPlayer gestoppt, bevor er intern reconnecten kann.
+                        // IDR-Threshold-Restart: SW-Decoder crasht beim IDR_RESTART_THRESHOLD-ten IDR.
+                        // IDR#1 (idrEverInjected=false): normal initialisieren, kein Restart.
+                        // IDR#2..N-1: durchlassen — Decoder verarbeitet sie problemlos.
+                        // IDR#N: onIdrBoundary VOR Socket-Close aufrufen → stopInternal landet
+                        // auf Main-Thread BEVOR ExoPlayers IO-Error-Handler feuern kann →
+                        // ExoPlayer ist gestoppt wenn er intern reconnecten will → sauberer Neustart.
+                        if (fuStartBit) idrSBitCount++
+                        if (fuStartBit && idrEverInjected && idrSBitCount >= IDR_RESTART_THRESHOLD) {
+                            AppLog.i(TAG, "IDR #$idrSBitCount S-Bit (Schwelle $IDR_RESTART_THRESHOLD): " +
+                                "onIdrBoundary vor Socket-Close")
                             onIdrBoundary?.invoke()
                             break
                         }
