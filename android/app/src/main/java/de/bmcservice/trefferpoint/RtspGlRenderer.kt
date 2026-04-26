@@ -54,6 +54,7 @@ class RtspGlRenderer(
     @Volatile var lastFrameJpeg: ByteArray? = null; private set
     @Volatile var frameCount: Long = 0; private set
     @Volatile var ready: Boolean = false; private set
+    @Volatile var debugColorMode: Boolean = true
     @Volatile private var frameAvailable: Boolean = false
 
     private var glView: GLSurfaceView? = null
@@ -80,6 +81,7 @@ class RtspGlRenderer(
     private var encoderThread: HandlerThread? = null
     private var encoderHandler: Handler? = null
     @Volatile private var encodePending = false
+    private var debugColorLogged = false
 
     // -1..1 Quad — beim Render in OpenGL ist Y nach oben positiv,
     // bei JPEG/Bitmap ist Y nach unten. SurfaceTexture transform-matrix
@@ -112,13 +114,21 @@ class RtspGlRenderer(
         }
     """.trimIndent()
 
-    private val fsSrc = """
+    private val fragShaderNormalSrc = """
         #extension GL_OES_EGL_image_external : require
         precision mediump float;
         varying vec2 vTexCoord;
         uniform samplerExternalOES uTexture;
         void main() {
             gl_FragColor = texture2D(uTexture, vTexCoord);
+        }
+    """.trimIndent()
+
+    private val fragShaderDebugSrc = """
+        precision mediump float;
+        varying vec2 vTexCoord;
+        void main() {
+            gl_FragColor = vec4(vTexCoord.x, vTexCoord.y, 0.5, 1.0);
         }
     """.trimIndent()
 
@@ -152,7 +162,7 @@ class RtspGlRenderer(
             }
 
         val extensions = GLES20.glGetString(GLES20.GL_EXTENSIONS).orEmpty()
-        if (!extensions.contains("GL_OES_EGL_image_external")) {
+        if (!debugColorMode && !extensions.contains("GL_OES_EGL_image_external")) {
             AppLog.e(TAG, "GL_OES_EGL_image_external fehlt im GL-Context")
             onStatusLog("GL-Setup fehlgeschlagen: OES-Extension fehlt")
             ready = false
@@ -161,7 +171,8 @@ class RtspGlRenderer(
 
         // Shader-Programm
         val vs = compileShader(GLES20.GL_VERTEX_SHADER, vsSrc)
-        val fs = compileShader(GLES20.GL_FRAGMENT_SHADER, fsSrc)
+        val fragmentShaderSrc = if (debugColorMode) fragShaderDebugSrc else fragShaderNormalSrc
+        val fs = compileShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderSrc)
         program = GLES20.glCreateProgram()
         GLES20.glAttachShader(program, vs)
         GLES20.glAttachShader(program, fs)
@@ -226,6 +237,7 @@ class RtspGlRenderer(
         encoderHandler = Handler(encoderThread!!.looper)
 
         ready = true
+        debugColorLogged = false
         onStatusLog("GL-Setup OK: oesTex=$oesTexId fbo=$fboId surface=${surface != null}")
         AppLog.i(TAG, "GL-Setup OK: oesTex=$oesTexId fbo=$fboId fboTex=$fboTexId surface=${surface != null} ${captureWidth}x${captureHeight}")
     }
@@ -251,6 +263,10 @@ class RtspGlRenderer(
             return
         }
         frameAvailable = false
+        if (debugColorMode && !debugColorLogged) {
+            debugColorLogged = true
+            AppLog.i(TAG, "DEBUG-COLOR aktiv — Test-Pattern wird gerendert (kein OES-Sampler)")
+        }
 
         // Neuen Frame in OES-Texture laden
         try {
