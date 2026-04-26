@@ -27,6 +27,7 @@ import androidx.media3.exoplayer.rtsp.RtspMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import java.io.ByteArrayOutputStream
+import org.json.JSONObject
 
 /**
  * RTSP-Stream Pipeline für WLAN-Okularkameras (Viidure etc.).
@@ -216,10 +217,10 @@ class RtspPipeline(
             val host = hostMatch?.groupValues?.get(1)
             var rtspUrl = url
             if (host != null && host.startsWith("192.168.")) {
-                wakeupCameraHttp(host)
+                val camPort = wakeupCameraHttp(host)
                 // SDP-Proxy starten: kamera-seitiger Bug a=recvonly → wird zu sendrecv gepatcht
                 sdpProxy?.stop()
-                val proxy = RtspSdpProxy(host)
+                val proxy = RtspSdpProxy(host, camPort)
                 rtspUrl = proxy.start()
                 // Segment-Boundaries transparent vom Proxy handeln lassen (return false).
                 // Proxy managed seqState + tsState + SPS/PPS-Dedup — ExoPlayer-Recycle nicht nötig.
@@ -236,12 +237,12 @@ class RtspPipeline(
                         if (running && currentUrl.isNotEmpty()) {
                             AppLog.i(TAG, "IDR-Boundary: stopInternal() + Neustart in 150ms")
                             stopInternal()
-                            mainHandler.postDelayed({
+                            mainHandler.post {
                                 if (currentUrl.isNotEmpty()) {
                                     decodeErrorRestarts = 0
                                     startInternal(pUrl, useTcp = true)
                                 }
-                            }, 50)  // 50ms statt 150: stopInternal() ist synchron, weniger Puffer nötig
+                            }  // kein postDelayed nötig: stopInternal() ist synchron, ExoPlayer IDLE in <5ms
                         }
                     }
                 }
@@ -307,9 +308,15 @@ class RtspPipeline(
 
     /**
      * Viidure/SGK-HTTP-Setup-Sequenz.
+     *
+     * Gibt den entdeckten RTSP-Port zurück (Standard: 554).
+     * Parst /app/getmediainfo für dynamische Port-Discovery:
+     *   SGK-Format:      {"info":{"rtsp":"rtsp://...", "port":554}}
+     *   eeasytech-Format: {"rtsp":"rtsp://...", "port":5000}   (lr-m/Action-Cam-Hacking Research)
      */
-    private fun wakeupCameraHttp(host: String) {
+    private fun wakeupCameraHttp(host: String): Int {
         AppLog.i(TAG, "HTTP Wake-Up auf $host…")
+        var discoveredPort = 554
         val endpoints = listOf(
             "http://$host:80/app/getdeviceattr",
             "http://$host:80/app/capability",
@@ -346,12 +353,30 @@ class RtspPipeline(
                 } else ""
                 conn.disconnect()
                 AppLog.i(TAG, "  $ep → $code ${if (body.isNotBlank()) "| $body" else ""}")
+
+                // getmediainfo: RTSP-Port dynamisch ermitteln.
+                // Unterstützt beide Firmware-Formate (SGK nested + eeasytech flat).
+                if (ep.endsWith("getmediainfo") && body.isNotBlank()) {
+                    try {
+                        val json = JSONObject(body)
+                        val port = try {
+                            json.getJSONObject("info").optInt("port", 0)  // SGK nested
+                        } catch (_: Exception) {
+                            json.optInt("port", 0)                         // eeasytech flat
+                        }
+                        if (port > 0 && port != discoveredPort) {
+                            discoveredPort = port
+                            AppLog.i(TAG, "getmediainfo: RTSP-Port $discoveredPort entdeckt")
+                        }
+                    } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
                 AppLog.i(TAG, "  $ep → ${e.javaClass.simpleName}: ${e.message?.take(40) ?: ""}")
             }
         }
-        AppLog.i(TAG, "HTTP Wake-Up abgeschlossen")
-        describeRtsp(host, "rtsp://$host/live/tcp/ch1")
+        AppLog.i(TAG, "HTTP Wake-Up abgeschlossen (RTSP-Port: $discoveredPort)")
+        describeRtsp(host, "rtsp://$host${if (discoveredPort != 554) ":$discoveredPort" else ""}/live/tcp/ch1")
+        return discoveredPort
     }
 
     /**
