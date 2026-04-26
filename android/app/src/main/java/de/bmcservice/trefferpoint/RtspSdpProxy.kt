@@ -49,6 +49,15 @@ class RtspSdpProxy(
      */
     var onSegmentBoundary: (() -> Boolean)? = null
 
+    /**
+     * Wird aufgerufen wenn relay() ein IDR-Start-Fragment (FU-A S-Bit) nach dem
+     * ersten IDR erkennt — BEVOR der Client-Socket geschlossen wird.
+     * RtspPipeline nutzt das, um ExoPlayer via mainHandler.post sofort zu stoppen,
+     * so dass ExoPlayer nicht reconnectet und den neuen IDR (frame_num=0) in den
+     * laufenden Decoder-Zustand einmischt → verhindert DECODING_FAILED.
+     */
+    var onIdrBoundary: (() -> Unit)? = null
+
     fun start(): String {
         serverSock = ServerSocket(proxyPort)
         active = true
@@ -470,7 +479,11 @@ class RtspSdpProxy(
                         // ExoPlayer bekommt TCP-EOF → IO-Fehler → 200ms Recycle statt
                         // DECODING_FAILED nach ~7s.
                         if (fuStartBit && idrEverInjected) {
-                            AppLog.i(TAG, "IDR-Segment-Grenze (S-Bit): proaktiver Proxy-Disconnect → ExoPlayer-Recycle")
+                            AppLog.i(TAG, "IDR-Segment-Grenze (S-Bit): onIdrBoundary → stoppe ExoPlayer vor Socket-Close")
+                            // Callback VOR dem break: mainHandler.post{stopInternal} landet in
+                            // der Main-Thread-Queue BEVOR ExoPlayer's IO-Error-Handler feuern kann.
+                            // Dadurch ist ExoPlayer gestoppt, bevor er intern reconnecten kann.
+                            onIdrBoundary?.invoke()
                             break
                         }
                     }

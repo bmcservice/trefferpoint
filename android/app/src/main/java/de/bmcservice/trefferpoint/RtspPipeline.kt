@@ -225,7 +225,26 @@ class RtspPipeline(
                 // Proxy managed seqState + tsState + SPS/PPS-Dedup — ExoPlayer-Recycle nicht nötig.
                 // recycleExoPlayer() bei onSegmentBoundary→true verursachte vicious cycle:
                 // Kamera verwirrt durch abrupte Reconnects → Segmente nur ~0.7s → Loop.
-                proxy.onSegmentBoundary = null  // transparent reconnect
+                proxy.onSegmentBoundary = null  // transparent reconnect (Kamera trennt TCP nicht)
+                // IDR-Boundary: ExoPlayer stoppen BEVOR er intern reconnecten kann.
+                // mainHandler.post landet VOR ExoPlayers IO-Error-Handler in der Queue
+                // → ExoPlayer wird via stopInternal() released → kein Auto-Reconnect
+                // → kein frame_num=0-Crash → sauberer Neustart 150ms später.
+                proxy.onIdrBoundary = {
+                    val pUrl = "rtsp://127.0.0.1:15554/live/tcp/ch1"
+                    mainHandler.post {
+                        if (running && currentUrl.isNotEmpty()) {
+                            AppLog.i(TAG, "IDR-Boundary: stopInternal() + Neustart in 150ms")
+                            stopInternal()
+                            mainHandler.postDelayed({
+                                if (currentUrl.isNotEmpty()) {
+                                    decodeErrorRestarts = 0
+                                    startInternal(pUrl, useTcp = true)
+                                }
+                            }, 150)
+                        }
+                    }
+                }
                 sdpProxy = proxy
                 openMailSocket(host, 6035)
             }
@@ -463,6 +482,12 @@ class RtspPipeline(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // Guard: stopInternal() via onIdrBoundary setzt running=false und released den Player.
+                // Listener-Callbacks können trotzdem noch feuern — dann ignorieren.
+                if (!running) {
+                    AppLog.i(TAG, "onPlayerError nach stopInternal() — ignoriert (${error.errorCodeName})")
+                    return
+                }
                 AppLog.e(TAG, "ExoPlayer Fehler: ${error.errorCodeName} — ${error.message}", error)
                 lastError = "${error.errorCodeName}: ${error.message}"
                 onStatus("RTSP-Fehler: ${error.errorCodeName}")
