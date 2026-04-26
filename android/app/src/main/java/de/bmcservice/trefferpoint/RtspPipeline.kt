@@ -1,7 +1,9 @@
 package de.bmcservice.trefferpoint
 
+import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -148,21 +150,34 @@ class RtspPipeline(
     }
 
     /**
-     * Einen Frame per PixelCopy aus dem SurfaceView-Buffer lesen.
-     * MUSS auf dem Main-Thread aufgerufen werden (PixelCopy.request braucht Main-Thread
-     * für die SurfaceView-Koordination).
+     * Einen Frame per PixelCopy aus dem Video-Output lesen.
+     * MUSS auf dem Main-Thread aufgerufen werden (PixelCopy.request braucht Main-Thread).
+     *
+     * Strategie (Phase 1, v2.3.68):
+     *   PixelCopy.request(Window, bounds) statt PixelCopy.request(SurfaceView).
+     *   Ziel: Window-Level-PixelCopy liest die vollständig komposierte Ausgabe inkl.
+     *   Hardware-Overlay-Layer des HW-Decoders — was SurfaceView-PixelCopy nicht sieht.
+     *   Gleichzeitig: HW-Decoder zugelassen (kein SW-Zwang mehr) → kein IDR-Crash mehr.
+     *
+     *   Wenn Window-PixelCopy auch schwarz liefert (Fallback nicht möglich) → Phase 2:
+     *   SurfaceTexture + GLSurfaceView + glReadPixels() als saubere Lösung.
      *
      * Callback wird auf captureThread ausgeführt (JPEG-Kompression off Main-Thread).
      */
     private fun captureFrame() {
         if (!running || capturePending) return
         val handler = captureHandler ?: return
+        val activity = context as? Activity ?: return
         capturePending = true
         val bmp = Bitmap.createBitmap(INITIAL_WIDTH, INITIAL_HEIGHT, Bitmap.Config.ARGB_8888)
+        // Window-Koordinaten der SurfaceView ermitteln
+        val loc = IntArray(2)
+        surfaceView.getLocationInWindow(loc)
+        val srcRect = Rect(loc[0], loc[1], loc[0] + surfaceView.width, loc[1] + surfaceView.height)
         try {
             PixelCopy.request(
-                surfaceView,
-                null,  // null = gesamter Surface-Buffer (INITIAL_WIDTH × INITIAL_HEIGHT)
+                activity.window,
+                srcRect,
                 bmp,
                 { result ->
                     // Callback auf captureThread
@@ -458,18 +473,17 @@ class RtspPipeline(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // SOFTWARE-Decoder erzwingen — NOTWENDIG für PixelCopy auf Samsung!
+        // v2.3.68: HW-Decoder zugelassen (Phase 1 — Test ob Window-PixelCopy mit HW-Overlay klappt).
         //
-        // Root Cause (v2.3.54-Analyse): Qualcomm Hardware-Decoder (OMX.qcom.video.decoder.avc)
-        // schreibt decoded Frames in einen dedizierten Hardware-Overlay-Layer von SurfaceFlinger.
-        // PixelCopy.request(SurfaceView) liest den normalen SurfaceView-SurfaceControl-Layer —
-        // der bei Hardware-Overlay-Nutzung LEER/SCHWARZ bleibt. onRenderedFirstFrame feuert
-        // trotzdem, weil der HW-Decoder seinen Overlay beschreibt.
+        // Bisherige Situation: SW-Decoder erzwungen weil HW-Decoder → Hardware-Overlay →
+        // PixelCopy.request(SurfaceView) liest leeren SurfaceFlinger-Layer → schwarze Frames.
+        // SW-Decoder crasht aber an IDR-Grenzen (frame_num-Reset) → IDR-Threshold-Restart nötig.
         //
-        // Software-Decoder (c2.android.avc.decoder) schreibt direkt in den SurfaceFlinger-Layer
-        // der SurfaceView → PixelCopy liest echten Inhalt.
-        // Nachteil: UV=0-Bug (Cb=Cr=0) → grüner Tint. fixGreenTintIfNeeded() korrigiert das
-        // zu einem nutzbaren Graustufen-Bild (Y-Kanal = Luminanz, ausreichend für Treffererkennung).
+        // Phase 1: PixelCopy auf Window-Ebene (captureFrame) + HW-Decoder.
+        //   Window-PixelCopy liest komposierte Ausgabe → sollte HW-Overlay-Inhalt enthalten.
+        //   HW-Decoder → kein IDR-Crash mehr → kein Threshold-Restart-Zyklus.
+        //
+        // Wenn Window-PixelCopy ebenfalls schwarz: → Phase 2 (SurfaceTexture + glReadPixels).
         val rendersFactory = object : DefaultRenderersFactory(context) {
             override fun buildVideoRenderers(
                 context: Context,
@@ -481,19 +495,18 @@ class RtspPipeline(
                 allowedVideoJoiningTimeMs: Long,
                 out: ArrayList<Renderer>
             ) {
-                val swSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
+                // Decoder-Liste loggen damit wir sehen was ExoPlayer wählt
+                val loggingSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunneledDecoder ->
                     val decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunneledDecoder)
                     if (mimeType == MimeTypes.VIDEO_H264) {
+                        val hw = decoders.filter { it.hardwareAccelerated }
                         val sw = decoders.filter { !it.hardwareAccelerated }
-                        AppLog.i(TAG, "H264-Decoder: ${sw.firstOrNull()?.name ?: "(kein SW)"} " +
-                            "(SW-erzwungen, ${decoders.size} gesamt, ${sw.size} SW)")
-                        if (sw.isNotEmpty()) return@MediaCodecSelector sw
-                        // Fallback auf HW falls kein SW verfügbar (unwahrscheinlich auf Android 8+)
-                        AppLog.w(TAG, "Kein Software-Decoder verfügbar — HW-Fallback (PixelCopy evtl. schwarz)")
+                        AppLog.i(TAG, "H264-Decoder: HW=${hw.firstOrNull()?.name ?: "keiner"}, " +
+                            "SW=${sw.firstOrNull()?.name ?: "keiner"} → HW bevorzugt (Phase 1)")
                     }
-                    decoders
+                    decoders  // unverändert → ExoPlayer wählt HW-bevorzugt
                 }
-                super.buildVideoRenderers(context, extensionRendererMode, swSelector,
+                super.buildVideoRenderers(context, extensionRendererMode, loggingSelector,
                     enableDecoderFallback, eventHandler, eventListener, allowedVideoJoiningTimeMs, out)
             }
         }
