@@ -11,3 +11,8 @@ apk_download/
 # Viidure-APK-Dump (nur lokale Analyse, nicht ins Repo)
 Viidure/
 com.vidure.app/
+viidure-apk/*.apk
+
+%TEMP%/
+Viidure_install/
+viidure-apk/

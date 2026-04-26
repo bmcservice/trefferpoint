@@ -455,17 +455,22 @@ class RtspSdpProxy(
                         // FU-A: type=7 (SPS) → type=5 (IDR), NRI → 11 (höchste Priorität)
                         pktBuf[17] = ((pktBuf[17].toInt() and 0xE0) or 5).toByte()
                         pktBuf[16] = ((pktBuf[16].toInt() and 0x9F) or 0x60).toByte()
+                        // S-Bit VOR Relabeling lesen (Bit 7 bleibt durch Relabeling unverändert)
+                        val fuStartBit = (pktBuf[17].toInt() and 0x80) != 0
                         spsToIdrRelabeled++
                         if (spsToIdrRelabeled == 1)
                             AppLog.i(TAG, "Bug #9: FU-A(SPS→IDR) — SGK sendet IDR als SPS, korrigiere")
 
                         // IDR-Segment-Grenze: proaktiver Disconnect (verhindert DECODING_FAILED)
-                        // Beim ersten IDR-Paket eines Folge-Segments (idrEverInjected=true):
-                        // Loop beenden ohne cameraClosedFirst=true → session() sieht Client-Disconnect
-                        // → ExoPlayer recycelt in 200ms statt auf DECODING_FAILED nach ~7s zu warten.
-                        // cameraClosedFirst bleibt false (initialer Wert) → session() bricht ab.
-                        if (spsToIdrRelabeled == 1 && idrEverInjected) {
-                            AppLog.i(TAG, "IDR-Segment-Grenze: proaktiver Proxy-Disconnect → ExoPlayer-Recycle")
+                        // Kamera trennt TCP NICHT zwischen Segmenten — sendet kontinuierlich
+                        // IDR#1 + P…P + IDR#2 + P… in einer Verbindung.
+                        // Sobald ein neues IDR-Start-Fragment (S-Bit gesetzt) nach dem ersten IDR
+                        // eintrifft (idrEverInjected=true): Loop beenden VOR dem cOut.write.
+                        // cameraClosedFirst bleibt false → session() schließt Client-Socket →
+                        // ExoPlayer bekommt TCP-EOF → IO-Fehler → 200ms Recycle statt
+                        // DECODING_FAILED nach ~7s.
+                        if (fuStartBit && idrEverInjected) {
+                            AppLog.i(TAG, "IDR-Segment-Grenze (S-Bit): proaktiver Proxy-Disconnect → ExoPlayer-Recycle")
                             break
                         }
                     }
