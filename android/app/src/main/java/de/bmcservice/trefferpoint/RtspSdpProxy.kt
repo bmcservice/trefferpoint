@@ -31,10 +31,11 @@ class RtspSdpProxy(
     companion object {
         private const val TAG = "RtspSdpProxy"
         // SW-Decoder (c2.android.avc.decoder) crasht beim N-ten IDR (frame_num-Reset, SPS/PPS-Dedup).
-        // Empirisch (v2.3.63-Log): crash exakt bei IDR#4 (~4.88s nach Frame#1, 4×1.2s GOP).
-        // Threshold=4: Restart VOR IDR#4 → IDR #1–3 spielen durch (3×1.2s ≈ 3.6s Nutzzeit).
-        // v2.3.65: postDelayed(50ms) entfernt → Restart startet sofort nach stopInternal().
-        private const val IDR_RESTART_THRESHOLD = 4
+        // Empirisch (v2.3.66-Log): crash bei ~4.8s, IDR#4 S-Bit bei ~4.2–4.7s → Race Condition.
+        // Manchmal feuert der Callback zuerst (IDR #4 S-Bit), manchmal crasht der Decoder zuerst.
+        // Threshold=3: Restart VOR IDR#3 → IDR #1–2 spielen durch (2×1.2s ≈ 2.4s Nutzzeit).
+        // Kein Race: IDR#3 S-Bit (~2.4s) liegt deutlich vor dem Crash-Fenster (~4.8s).
+        private const val IDR_RESTART_THRESHOLD = 3
     }
 
     @Volatile private var active = false
