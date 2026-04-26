@@ -528,7 +528,7 @@ class MainActivity : AppCompatActivity() {
                         // → als Lambda übergeben, Pipeline pollt darauf.
                         val p = RtspPipeline(
                             applicationContext,
-                            { rtspGlRenderer?.surface },
+                            { rtspGlRenderer?.takeIf { it.isVideoSurfaceReady() }?.surface },
                             onJpeg,
                             onStatus
                         )

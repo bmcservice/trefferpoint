@@ -8,6 +8,7 @@ import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.view.Surface
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
@@ -53,6 +54,7 @@ class RtspGlRenderer(
     @Volatile var lastFrameJpeg: ByteArray? = null; private set
     @Volatile var frameCount: Long = 0; private set
     @Volatile var ready: Boolean = false; private set
+    @Volatile private var frameAvailable: Boolean = false
 
     private var glView: GLSurfaceView? = null
 
@@ -124,6 +126,9 @@ class RtspGlRenderer(
         glView = view
     }
 
+    fun isVideoSurfaceReady(): Boolean =
+        ready && surfaceTexture != null && (surface?.isValid == true)
+
     fun shutdown() {
         try { encoderThread?.quitSafely() } catch (_: Exception) {}
         encoderThread = null
@@ -145,6 +150,14 @@ class RtspGlRenderer(
             .order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
                 put(texCoords); position(0)
             }
+
+        val extensions = GLES20.glGetString(GLES20.GL_EXTENSIONS).orEmpty()
+        if (!extensions.contains("GL_OES_EGL_image_external")) {
+            AppLog.e(TAG, "GL_OES_EGL_image_external fehlt im GL-Context")
+            onStatusLog("GL-Setup fehlgeschlagen: OES-Extension fehlt")
+            ready = false
+            return
+        }
 
         // Shader-Programm
         val vs = compileShader(GLES20.GL_VERTEX_SHADER, vsSrc)
@@ -197,9 +210,10 @@ class RtspGlRenderer(
         // SurfaceTexture + Surface für ExoPlayer
         val st = SurfaceTexture(oesTexId)
         st.setDefaultBufferSize(captureWidth, captureHeight)
-        st.setOnFrameAvailableListener(this)
+        st.setOnFrameAvailableListener(this, Handler(Looper.getMainLooper()))
         surfaceTexture = st
         surface = Surface(st)
+        frameAvailable = false
 
         Matrix.setIdentityM(mvpMatrix, 0)
         Matrix.setIdentityM(stMatrix, 0)
@@ -223,12 +237,20 @@ class RtspGlRenderer(
     }
 
     override fun onFrameAvailable(st: SurfaceTexture?) {
+        frameAvailable = true
         glView?.requestRender()
     }
 
     override fun onDrawFrame(gl: GL10?) {
         val st = surfaceTexture ?: return
         if (!ready) return
+        if (!frameAvailable) {
+            GLES20.glViewport(0, 0, displayWidth, displayHeight)
+            GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            return
+        }
+        frameAvailable = false
 
         // Neuen Frame in OES-Texture laden
         try {
@@ -251,9 +273,15 @@ class RtspGlRenderer(
             return
         }
         pb.position(0)
+        GLES20.glPixelStorei(GLES20.GL_PACK_ALIGNMENT, 1)
         GLES20.glReadPixels(0, 0, captureWidth, captureHeight,
             GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pb)
+        val readError = GLES20.glGetError()
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        if (readError != GLES20.GL_NO_ERROR) {
+            AppLog.w(TAG, "glReadPixels Fehler: 0x${readError.toString(16)}")
+            return
+        }
 
         // ─── 2. JPEG-Encoding off-Thread (drop frame falls Encoder noch beschäftigt) ─
         if (!encodePending) {
