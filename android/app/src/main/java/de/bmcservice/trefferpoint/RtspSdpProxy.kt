@@ -31,9 +31,9 @@ class RtspSdpProxy(
     companion object {
         private const val TAG = "RtspSdpProxy"
         // SW-Decoder (c2.android.avc.decoder) crasht beim N-ten IDR (frame_num-Reset, SPS/PPS-Dedup).
-        // Empirisch (v2.3.61-Log): crash nach ~5s bei ~1.2s GOP → IDR #5 triggert DECODING_FAILED.
-        // Threshold=5: Restart VOR IDR#5 → IDR #1–4 spielen durch (4×1.2s = 4.8s Nutzzeit).
-        private const val IDR_RESTART_THRESHOLD = 5
+        // Empirisch (v2.3.63-Log): crash exakt bei IDR#4 (~4.88s nach Frame#1, 4×1.2s GOP).
+        // Threshold=4: Restart VOR IDR#4 → IDR #1–3 spielen durch (3×1.2s = 3.6s Nutzzeit).
+        private const val IDR_RESTART_THRESHOLD = 4
     }
 
     @Volatile private var active = false
