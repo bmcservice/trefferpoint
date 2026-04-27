@@ -192,7 +192,17 @@ class RtspImageReaderPipeline(
             }, imageHandler)
         }
 
-        val trackSelector = DefaultTrackSelector(context)
+        // Audio-Track komplett abschalten — wir brauchen nur Video.
+        // Verdacht: g711-alaw Audio-Decoder destabilisiert die ExoPlayer-Pipeline und
+        // reißt den Video-Decoder mit (CodecException 0x80000000 nach Frame 1).
+        val trackSelector = DefaultTrackSelector(context).apply {
+            setParameters(
+                buildUponParameters()
+                    .setRendererDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true)
+                    .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true)
+            )
+        }
+        AppLog.i(TAG, "TrackSelector: Audio-Track deaktiviert (nur Video)")
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(1000, 10000, 100, 200)
             .setPrioritizeTimeOverSizeThresholds(true)
