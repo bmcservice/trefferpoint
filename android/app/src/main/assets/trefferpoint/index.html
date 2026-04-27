@@ -903,7 +903,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.105';
+const APP_VERSION = '2.3.106';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2581,20 +2581,23 @@ function resetSession() {
 }
 
 // --- Bridge Frame-Receiver (für USB-UVC UND RTSP — beide pushen JPEGs via tpReceiveFrame) ---
+// IDEMPOTENT: Funktion kann mehrfach gerufen werden (Stream Stop+Start);
+// imgEl + Handler werden jedes Mal frisch initialisiert.
 let bridgeReceiverReady = false;
 function setupBridgeFrameReceiver() {
-    if (bridgeReceiverReady) return;
     bridgeReceiverReady = true;
 
     imgEl = new Image();
     let firstFrameDone = false;
     imgEl.onload = () => {
-        if (firstFrameDone) return;
-        firstFrameDone = true;
-        if (imgEl.naturalWidth > 0) {
+        // Canvas-Größe bei jedem Frame syncen (z.B. bei Auflösungswechsel HD/SD)
+        if (imgEl.naturalWidth > 0 &&
+            (canvas.width !== imgEl.naturalWidth || canvas.height !== imgEl.naturalHeight)) {
             canvas.width = imgEl.naturalWidth;
             canvas.height = imgEl.naturalHeight;
         }
+        if (firstFrameDone) return;
+        firstFrameDone = true;
         appState = 'READY';
         document.getElementById('btnRotateCam').style.display = '';
         document.getElementById('btnCalib').disabled = false;
