@@ -280,8 +280,11 @@ class RtspMediaCodecPipeline(
         val info = MediaCodec.BufferInfo()
         while (running) {
             val codec = decoder ?: break
-            val idx = try { codec.dequeueOutputBuffer(info, 100_000L) } catch (e: Exception) {
+            // 5ms Timeout statt 100ms: niedrige Latenz, Loop reagiert schnell auf neue Frames.
+            // Bei "INFO_TRY_AGAIN_LATER" minimaler 1ms-Sleep um CPU nicht voll auszulasten.
+            val idx = try { codec.dequeueOutputBuffer(info, 5_000L) } catch (e: Exception) {
                 AppLog.w(TAG, "dequeueOutputBuffer Exception: ${e.message}")
+                Thread.sleep(10)
                 continue
             }
             when {
@@ -293,7 +296,8 @@ class RtspMediaCodecPipeline(
                     AppLog.i(TAG, "Decoder Output-Format-Wechsel: ${codec.outputFormat}")
                 }
                 idx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    // normal — kein Output bereit
+                    // Kein Output bereit — minimal warten damit CPU nicht 100% läuft.
+                    Thread.sleep(1)
                 }
             }
         }
@@ -388,20 +392,10 @@ class RtspMediaCodecPipeline(
         // SPS/PPS aus dem Stream ignorieren (kommt nur am Anfang, wir haben sie aus SDP)
         if (type == 7 || type == 8) return
 
-        // IDR-Boundary erkennen → MediaCodec.flush() VOR dem nächsten IDR queueen.
-        // Kamera macht frame_num-Reset bei IDR — Decoder erträgt das nur wenn er
-        // explicitly geflusht wird, sonst CodecException 0x80000000 nach mehreren IDRs.
+        // Kein präventives flush() bei IDR mehr (war Auslöser des "Pulsierens" alle 3s).
+        // Der direkte MediaCodec sollte IDRs spec-konform handhaben (wir füttern komplette
+        // NAL-Units mit korrekter PTS). Bei Crash → reaktiv im OutputLoop flushen (TODO).
         val isIdr = (type == 5)
-        if (isIdr && frameCount > 0L) {
-            try {
-                AppLog.i(TAG, "IDR-Boundary: MediaCodec.flush() (Frames bisher=$frameCount)")
-                decoder?.flush()
-                // Nach flush() müssen wir CSD nicht erneut konfigurieren — flush
-                // behält Konfiguration, nur Buffer-State wird gecleart.
-            } catch (e: Exception) {
-                AppLog.w(TAG, "MediaCodec.flush() fehlgeschlagen: ${e.message}")
-            }
-        }
 
         // PTS-Berechnung (RTP-TS in 90kHz → µs, monoton via Offset)
         if (firstRtpTs < 0) {
@@ -420,7 +414,10 @@ class RtspMediaCodecPipeline(
     private fun queueNalToDecoder(nal: ByteArray, ptsUs: Long, isKeyframe: Boolean) {
         val codec = decoder ?: return
         try {
-            val idx = codec.dequeueInputBuffer(50_000L)
+            // Großzügiger Timeout (100ms) damit der Reader nicht NALs verwirft
+            // wenn der Decoder kurzzeitig keinen freien Input-Buffer hat. Bei 30 fps
+            // = 33ms Frame-Spacing — 100ms gibt 3-Frame-Puffer für Decoder-Stalls.
+            val idx = codec.dequeueInputBuffer(100_000L)
             if (idx < 0) {
                 if (frameCount < 10L) AppLog.w(TAG, "dequeueInputBuffer timeout (Frames=$frameCount)")
                 return
