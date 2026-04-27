@@ -86,6 +86,12 @@ class RtspMediaCodecPipeline(
     private var imageReader: ImageReader? = null
     private var imageThread: HandlerThread? = null
     private var imageHandler: Handler? = null
+    // Separater Encoder-Thread: YUV→JPEG läuft hier, damit der ImageReader-Listener
+    // schnell freigegeben wird und der Decoder-Output-Loop nicht blockiert.
+    private var encoderThread: HandlerThread? = null
+    private var encoderHandler: Handler? = null
+    @Volatile private var encodePending: Boolean = false
+    @Volatile private var encodeDropped: Long = 0L
     private var decoderInputThread: Thread? = null
     private var decoderOutputThread: Thread? = null
 
@@ -134,6 +140,9 @@ class RtspMediaCodecPipeline(
         try { imageThread?.quitSafely() } catch (_: Exception) {}
         imageThread = null
         imageHandler = null
+        try { encoderThread?.quitSafely() } catch (_: Exception) {}
+        encoderThread = null
+        encoderHandler = null
         try { sdpProxy?.stop() } catch (_: Exception) {}
         sdpProxy = null
         AppLog.i(TAG, "stop")
@@ -220,6 +229,11 @@ class RtspMediaCodecPipeline(
     private fun setupImageReader() {
         imageThread = HandlerThread("RtspMediaCodecImg").apply { start() }
         imageHandler = Handler(imageThread!!.looper)
+        encoderThread = HandlerThread("RtspMediaCodecEnc").apply { start() }
+        encoderHandler = Handler(encoderThread!!.looper)
+        encodePending = false
+        encodeDropped = 0L
+
         imageReader = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ImageReader.newInstance(
                 IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES,
@@ -232,16 +246,41 @@ class RtspMediaCodecPipeline(
             try {
                 val image = reader.acquireNextImage() ?: return@setOnImageAvailableListener
                 try {
-                    val jpeg = imageToJpeg(image)
-                    lastFrameJpeg = jpeg
-                    frameCount++
-                    if (frameCount == 1L) {
-                        AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${image.width}x${image.height}")
-                        onStatus("RTSP-Stream aktiv")
-                    } else if (frameCount <= 5L || frameCount % 30L == 0L) {
-                        AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG")
+                    // YUV-Plane-Daten kopieren während Image noch lebt.
+                    // YuvImage.compressToJpeg ist die teure Op (~30ms) — wird auf encoderThread
+                    // ausgelagert, damit dieser Listener schnell zurückkehrt und der
+                    // Decoder-Output-Pool nicht blockiert.
+                    val nv21 = yuv420ToNv21(image)
+                    val w = image.width
+                    val h = image.height
+
+                    // Drop-Frame wenn Encoder noch beschäftigt — bevor Backlog entsteht.
+                    if (encodePending) {
+                        encodeDropped++
+                        if (encodeDropped == 1L || encodeDropped % 30L == 0L) {
+                            AppLog.i(TAG, "Encoder-Backlog: $encodeDropped Frames gedroppt")
+                        }
+                        return@setOnImageAvailableListener
                     }
-                    onJpegFrame(jpeg)
+                    encodePending = true
+                    encoderHandler?.post {
+                        try {
+                            val jpeg = nv21ToJpeg(nv21, w, h)
+                            lastFrameJpeg = jpeg
+                            frameCount++
+                            if (frameCount == 1L) {
+                                AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${w}x${h}")
+                                onStatus("RTSP-Stream aktiv")
+                            } else if (frameCount <= 5L || frameCount % 30L == 0L) {
+                                AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG (drops=$encodeDropped)")
+                            }
+                            onJpegFrame(jpeg)
+                        } catch (e: Exception) {
+                            AppLog.w(TAG, "JPEG-Encode Fehler: ${e.message}")
+                        } finally {
+                            encodePending = false
+                        }
+                    }
                 } finally {
                     image.close()
                 }
@@ -454,11 +493,8 @@ class RtspMediaCodecPipeline(
         return out
     }
 
-    /** YUV_420_888 Image → NV21 → JPEG via YuvImage.compressToJpeg. */
-    private fun imageToJpeg(image: Image): ByteArray {
-        val width = image.width
-        val height = image.height
-        val nv21 = yuv420ToNv21(image)
+    /** NV21-Bytes → JPEG via YuvImage.compressToJpeg. Auslagernbar auf encoderThread. */
+    private fun nv21ToJpeg(nv21: ByteArray, width: Int, height: Int): ByteArray {
         val yuv = YuvImage(nv21, ImageFormat.NV21, width, height, null)
         val out = ByteArrayOutputStream(width * height / 2)
         yuv.compressToJpeg(Rect(0, 0, width, height), JPEG_QUALITY, out)
