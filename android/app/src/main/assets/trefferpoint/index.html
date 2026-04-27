@@ -813,6 +813,13 @@
                 <button class="btn" id="btnCompareReset" disabled style="font-size:10px">↺ Reset</button>
                 <div id="compareStatus" style="font-size:9px;color:var(--text-dim);margin-top:3px">Keine Referenz</div>
             </div>
+            <!-- Frame-Snapshot zum Speichern (Downloads/TrefferPoint/snapshot_*.jpg).
+                 Nützlich für Trainingsdaten-Sammlung und ex-post-Analyse. -->
+            <div style="margin-top:6px;padding:5px;border:1px dashed var(--border);background:var(--surface)">
+                <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">SNAPSHOT (Trainingsdaten)</div>
+                <button class="btn" id="btnSnapshot" style="font-size:10px;margin-bottom:3px">📸 Frame speichern</button>
+                <div id="snapshotStatus" style="font-size:9px;color:var(--text-dim)"></div>
+            </div>
             <div style="display:flex;gap:6px;margin-bottom:7px">
                 <button class="btn btn-active" id="btnSpeech" style="flex:1;padding:5px;font-size:11px">🔊 Ansage</button>
                 <button class="btn" id="btnDebug" style="flex:1;padding:5px;font-size:11px">⬛ Debug</button>
@@ -867,7 +874,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.100';
+const APP_VERSION = '2.3.101';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3206,6 +3213,37 @@ document.getElementById('btnCompareReset').addEventListener('click', () => {
     resetCompareReference();
     hits = [];
     if (typeof updateScore === 'function') updateScore();
+});
+
+// Snapshot: speichert aktuelles Frame als JPEG in Downloads/TrefferPoint/.
+// Im Android-APK via tpBridge.sgkSaveFrame (= lastFrameJpeg der Pipeline).
+// Im Web/PWA: Canvas → Blob → Download.
+document.getElementById('btnSnapshot').addEventListener('click', () => {
+    const status = document.getElementById('snapshotStatus');
+    if (typeof window.tpBridge !== 'undefined' && typeof window.tpBridge.sgkSaveFrame === 'function') {
+        try {
+            const result = window.tpBridge.sgkSaveFrame();
+            status.textContent = '✓ ' + result;
+            setStatus('Snapshot gespeichert: ' + result, 'ok');
+        } catch(e) {
+            status.textContent = '✗ ' + e.message;
+            setStatus('Snapshot-Fehler: ' + e.message, 'warn');
+        }
+    } else if (canvas) {
+        // Web-Fallback: Canvas zu Blob, Download-Link
+        canvas.toBlob(blob => {
+            if (!blob) { status.textContent = '✗ Canvas leer'; return; }
+            const a = document.createElement('a');
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0,19);
+            a.download = `snapshot_${ts}.jpg`;
+            a.href = URL.createObjectURL(blob);
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            status.textContent = '✓ ' + a.download + ' heruntergeladen';
+        }, 'image/jpeg', 0.92);
+    } else {
+        status.textContent = '✗ Keine Bildquelle';
+    }
 });
 
 // Vergleichs-Buttons aktivieren sobald Stream + Kalibrierung bereit
