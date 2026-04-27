@@ -30,12 +30,10 @@ class RtspSdpProxy(
 ) {
     companion object {
         private const val TAG = "RtspSdpProxy"
-        // SW-Decoder (c2.android.avc.decoder) crasht beim N-ten IDR (frame_num-Reset, SPS/PPS-Dedup).
-        // Empirisch (v2.3.66-Log): crash bei ~4.8s, IDR#4 S-Bit bei ~4.2–4.7s → Race Condition.
-        // Manchmal feuert der Callback zuerst (IDR #4 S-Bit), manchmal crasht der Decoder zuerst.
-        // Threshold=3: Restart VOR IDR#3 → IDR #1–2 spielen durch (2×1.2s ≈ 2.4s Nutzzeit).
-        // Kein Race: IDR#3 S-Bit (~2.4s) liegt deutlich vor dem Crash-Fenster (~4.8s).
-        private const val IDR_RESTART_THRESHOLD = 3
+        // Ab v2.3.86: H264FrameNumSmoother fängt den frame_num-Reset im Stream ab.
+        // Decoder sieht keinen Reset mehr → kein Crash → kein proaktiver Recycle nötig.
+        // Threshold sehr hoch lassen; falls Smoother fehlschlägt, schützt es als Backup.
+        private const val IDR_RESTART_THRESHOLD = 9999
     }
 
     @Volatile private var active = false
@@ -45,6 +43,11 @@ class RtspSdpProxy(
     // weitergeleitet wurde. Aktiviert ab diesem Punkt SPS/PPS-Dedup (verwerfe
     // wiederholte SPS+PPS an Segment-Grenzen, damit ExoPlayer keinen Decoder-Reset versucht).
     @Volatile private var idrEverInjected = false
+
+    // H.264 frame_num Smoother — fängt den frame_num-Reset-Bug der Kamera ab,
+    // der den SW-Decoder nach mehreren IDR-Boundaries zum Crash bringt.
+    // SPS wird beim DESCRIBE-Response aus sprop-parameter-sets extrahiert.
+    private val frameNumSmoother = H264FrameNumSmoother()
 
     /**
      * Wird am Anfang jedes Kamera-Reconnects (Segment-Boundary) aufgerufen —
@@ -70,6 +73,7 @@ class RtspSdpProxy(
         serverSock = ServerSocket(proxyPort)
         active = true
         idrEverInjected = false  // neue Session — IDR-Relabel wieder erlauben
+        frameNumSmoother.fullReset()  // SPS muss erneut geparsed werden
         thread(name = "rtsp-proxy-accept") {
             try {
                 while (active) {
@@ -334,6 +338,22 @@ class RtspSdpProxy(
         val cut = response.indexOf("\r\n\r\n").takeIf { it >= 0 } ?: return response
         val headers = response.substring(0, cut + 4)
         var sdp = response.substring(cut + 4)
+
+        // sprop-parameter-sets aus SDP extrahieren — enthält SPS+PPS als Base64.
+        // Format: a=fmtp:96 ... sprop-parameter-sets=<SPS-base64>,<PPS-base64>
+        // SPS muss vor dem ersten RTP-Paket geparsed sein damit der frame_num-
+        // Smoother log2_max_frame_num_minus4 kennt.
+        val spropMatch = Regex("sprop-parameter-sets=([A-Za-z0-9+/=]+)(,[A-Za-z0-9+/=]+)?")
+            .find(sdp)
+        if (spropMatch != null) {
+            val spsBase64 = spropMatch.groupValues[1]
+            val ok = frameNumSmoother.parseSpsFromBase64(spsBase64)
+            AppLog.i(TAG, "SDP sprop-parameter-sets geparsed: SPS-Base64='${spsBase64.take(40)}...' " +
+                "→ Smoother-Init ${if (ok) "OK" else "FEHLER"}")
+        } else {
+            AppLog.w(TAG, "SDP enthält kein sprop-parameter-sets — Smoother bleibt inaktiv")
+        }
+
         sdp = sdp.replace("\r\na=recvonly", "")
         sdp = sdp.replace("\na=recvonly", "")
         if (sdp.startsWith("a=recvonly")) sdp = sdp.replaceFirst(Regex("^a=recvonly\r?\n"), "")
@@ -494,6 +514,44 @@ class RtspSdpProxy(
                                 "onIdrBoundary vor Socket-Close")
                             onIdrBoundary?.invoke()
                             break
+                        }
+                    }
+                }
+
+                // ─── H.264 frame_num Smoothing (Wurzelfix für SW-Decoder-Crash alle ~11s) ───
+                // SGK macht frame_num-Reset bei jeder IDR-Boundary. SW-Decoder erträgt das nicht.
+                // Wir patchen das frame_num-Feld direkt im Slice-Header sodass der Decoder
+                // einen kontinuierlich wachsenden Wert sieht.
+                //
+                // Slice-Header steht:
+                //   - Single-NAL (Type 1=P, 5=IDR): pktBuf[17..]   (NAL-Header bei [16])
+                //   - FU-A mit S-Bit, original Type 1 oder 5: pktBuf[18..]  (FU-Indicator bei [16],
+                //     FU-Header bei [17], Slice-Body ab [18])
+                if (!isAudioPacket && ch % 2 == 0 && len >= 14) {
+                    val nt = pktBuf[16].toInt() and 0x1F
+                    val rtpHdrLen = 12  // Standard RTP-Header
+                    when (nt) {
+                        1, 5 -> {
+                            // Single NAL Unit packet, Slice-Body bei pktBuf[16 + 1] = [17]
+                            val sliceOff = 4 + rtpHdrLen + 1  // 4 (TCP) + 12 (RTP) + 1 (NAL-Header)
+                            val sliceLen = len - rtpHdrLen - 1
+                            if (sliceLen > 0) {
+                                frameNumSmoother.patchSliceFrameNum(pktBuf, sliceOff, sliceLen, isIdr = (nt == 5))
+                            }
+                        }
+                        28 -> {
+                            // FU-A: Original-NAL-Type aus FU-Header (pktBuf[17] bits 0-4).
+                            // Patch nur beim S-Bit-Fragment (= erstes Fragment einer Slice-NAL).
+                            val fuHdr = pktBuf[17].toInt()
+                            val origType = fuHdr and 0x1F
+                            val sBit = (fuHdr and 0x80) != 0
+                            if (sBit && (origType == 1 || origType == 5)) {
+                                val sliceOff = 4 + rtpHdrLen + 2  // FU-Indicator + FU-Header
+                                val sliceLen = len - rtpHdrLen - 2
+                                if (sliceLen > 0) {
+                                    frameNumSmoother.patchSliceFrameNum(pktBuf, sliceOff, sliceLen, isIdr = (origType == 5))
+                                }
+                            }
                         }
                     }
                 }
