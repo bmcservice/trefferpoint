@@ -755,6 +755,10 @@
             </canvas>
             <button class="btn btn-primary" id="btnAutoCalib" disabled>⊕ Auto-Erkennung</button>
             <button class="btn" id="btnCalib" disabled style="font-size:11px">✎ Manuell (2 Klicks)</button>
+            <div style="display:flex;gap:5px;margin-top:5px">
+                <button class="btn" id="btnToggleOverlay" style="flex:1;font-size:10px" title="Ring-Overlay ein/ausblenden">👁 Ringe</button>
+                <button class="btn" id="btnClearCalib" style="flex:1;font-size:10px" title="Kalibrierung verwerfen">✗ Reset</button>
+            </div>
             <div class="calib-status" id="calibStatus">Nicht kalibriert</div>
         </div>
 
@@ -854,7 +858,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.98';
+const APP_VERSION = '2.3.99';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -993,6 +997,10 @@ const DISCS = {
 
 // --- State ---
 let appState = 'IDLE'; // IDLE | READY | CALIB_CTR | CALIB_EDGE | CALIBRATED | DETECTING
+// Overlay-Sichtbarkeit (Ringe + Treffer-Marker). Persistiert in localStorage.
+// Nutzer kann bei aktiver Kalibrierung das Overlay temporär ausblenden um das
+// reine Kamerabild zu sehen — Kalibrierung bleibt intakt.
+let overlayVisible = (localStorage.getItem('tp_overlay_visible') !== 'false');
 let refWarmup = 0;
 let pendingHit = null;
 let speechEnabled = true;
@@ -1834,7 +1842,7 @@ function loop() {
     }
     ctx.restore();
 
-    if (calib) {
+    if (calib && overlayVisible) {
         drawOverlay();
         hits.forEach((h, i) => drawHit(h, i + 1, i === hits.length - 1));
     }
@@ -3047,6 +3055,46 @@ document.getElementById('btnDetect').addEventListener('click', () => {
 });
 
 document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
+
+// Overlay-Toggle: Ringe + Treffer-Marker temporär ausblenden ohne Kalibrierung zu verlieren.
+document.getElementById('btnToggleOverlay').addEventListener('click', () => {
+    overlayVisible = !overlayVisible;
+    localStorage.setItem('tp_overlay_visible', overlayVisible ? 'true' : 'false');
+    const btn = document.getElementById('btnToggleOverlay');
+    btn.textContent = overlayVisible ? '👁 Ringe' : '👁‍🗨 Ringe aus';
+    btn.style.opacity = overlayVisible ? '1' : '0.6';
+});
+// Initial-Label korrekt setzen
+(function() {
+    const btn = document.getElementById('btnToggleOverlay');
+    if (btn) {
+        btn.textContent = overlayVisible ? '👁 Ringe' : '👁‍🗨 Ringe aus';
+        btn.style.opacity = overlayVisible ? '1' : '0.6';
+    }
+})();
+
+// Reset: Kalibrierung komplett verwerfen (auch aus localStorage entfernen).
+// Nützlich nach falsch erkanntem Spiegel oder Disziplinwechsel ohne Restart.
+document.getElementById('btnClearCalib').addEventListener('click', () => {
+    calib = null;
+    refFrame = null;
+    refWarmup = 0;
+    hits = [];
+    pendingHit = null;
+    detecting = false;
+    appState = 'READY';
+    try {
+        const disc = DISCS[document.getElementById('discSel').value];
+        if (disc) localStorage.removeItem('tp_calib_' + disc.id);
+    } catch(e) {}
+    document.getElementById('btnDetect').disabled = true;
+    document.getElementById('btnDetect').textContent = '⚡ Erkennung starten';
+    document.getElementById('btnDetect').className = 'btn';
+    document.getElementById('btnNewSpiegel').disabled = true;
+    document.getElementById('calibStatus').textContent = 'Nicht kalibriert';
+    setStatus('Kalibrierung verworfen', 'warn');
+    setMsg('Auto-Erkennung oder Manuell zum neu Kalibrieren');
+});
 
 // Shutter-Time-Presets nur in Android-APK einblenden + Event-Handler anbinden
 (function() {
