@@ -29,32 +29,63 @@ Gemeinsame TrefferPoint-Logik (Erkennung, Kalibrierung, Trefferauswertung) in `i
 - **Primärgerät:** Samsung Android-Tablet mit **TrefferPoint-APK** (Zero-Config Plug-and-Play)
 - **Alternative:** Windows-Laptop mit USB-Kamera direkt an Chrome
 
-## Aktueller Stand (v2.3.78 in Arbeit, RTSP-Pipeline noch nicht stabil)
+## Aktueller Stand (v2.3.84 — RTSP-Pipeline läuft stabil mit Live-Bild)
 
 **Aktiver Entwicklungsfokus: KK25 (.22) und GK25 (9mm) — 25 Meter**
 
-### RTSP-Pipeline-Verlauf (Samsung Galaxy Tab S6 Lite, Snapdragon/Adreno):
+### RTSP-Pipeline (Samsung Galaxy Tab S6 Lite, Snapdragon/Adreno) — finale Architektur:
 
-- **v2.3.65–67**: SW-Decoder + SurfaceView + PixelCopy → funktional, aber IDR-Boundary-Crashes; Workaround `IDR_RESTART_THRESHOLD=3` ergab ~2.4s Nutzzeit/Zyklus
-- **v2.3.68–70**: HW-Decoder + Window-PixelCopy (Phase 1) → laut Release-Notes "stabil 80KB/30fps", **aber im realen Test (v2.3.70) erzeugt Window-PixelCopy auf Samsung nur eine rekursive UI-Spiegelung** statt Video — HW-Decoder-Output liegt auf Hardware-Overlay-Ebene, die Window-PixelCopy nicht mit liest. v2.3.70-Befund war eine Fehleinschätzung.
-- **v2.3.71–73**: Phase 2 GLSurfaceView + SurfaceTexture + samplerExternalOES → uniform-grünes JPEG. Test-Pattern-Diagnose (v2.3.73 Debug-Shader) bewies: GL-Pipeline OK, **HW-Decoder schreibt NICHT in unsere SurfaceTexture**.
-- **v2.3.74–76**: ImageReader + HW-Decoder, auch mit `HardwareBuffer.USAGE_CPU_READ_OFTEN` → genau 1 Frame pro Session-Start. **Adreno HW-Decoder verweigert konsequent das Schreiben in CPU-lesbare Surfaces.**
-- **v2.3.77–78** (aktuell): SW-Decoder zwingen + ImageReader + Self-Recycle bei DECODING_FAILED → **echter Bildinhalt erreicht (83KB JPEG @ 960×540)**, aber Display bleibt schwarz; Decoder läuft nicht stabil.
+```
+SGK GK720X WiFi-Cam
+  ├─ HTTP-Wakeup (Port 80)
+  ├─ Mail-Socket (Port 6035) → Battery/REC/SD-Status → JS via tpOnSgkMail
+  └─ RTSP (Port 554)
+       ↓
+    RtspSdpProxy (Localhost 15554) — patcht "a=recvonly", korrigiert FU-A SPS→IDR
+       ↓
+    ExoPlayer (TrackSelector: Audio deaktiviert)
+       ├─ MediaCodec-Adapter: forceEnableMediaCodecAsynchronousQueueing()
+       ├─ MediaCodecSelector: nur SW (c2.android.avc.decoder)
+       └─ setVideoSurface(imageReader.surface)
+       ↓
+    ImageReader 960×540 YUV_420_888 (maxImages=6)
+       ↓
+    yuv420ToNv21 → YuvImage.compressToJpeg(quality=90)
+       ↓
+    onJpegFrame → MainActivity.pushFrameToWebView
+       ↓
+    Base64 → webView.evaluateJavascript("window.tpReceiveFrame(...)")
+       ↓
+    JS: atob → Blob → URL.createObjectURL → imgEl.src
+       ↓
+    loop() → canvas.drawImage(imgEl) → 30fps Display
+```
 
-### Erkenntnis (Adreno + Samsung Tab S6 Lite, Snapdragon)
-HW-Decoder `OMX.qcom.video.decoder.avc` rendert ausschließlich in Hardware-Overlay (für direkte SurfaceView-Anzeige), nicht in CPU-lesbare Buffers (SurfaceTexture, ImageReader, auch nicht mit USAGE_CPU_READ_OFTEN). SW-Decoder `c2.android.avc.decoder` schreibt korrekt in ImageReader, ist aber an IDR-Boundaries fragil → braucht Self-Recycle-Logik.
+### Schlüssel-Erkenntnisse aus v2.3.65–84 Versuchsreihe
 
-### Aktive Pipeline (v2.3.78)
-- `RtspImageReaderPipeline.kt` (ersetzt `RtspPipeline.kt` + `RtspGlRenderer.kt` — beide gelöscht)
-- Forces `decoder.hardwareAccelerated == false` im MediaCodecSelector
-- ImageReader 960×540 YUV_420_888, maxImages=2, NV21 → YuvImage.compressToJpeg(quality=90)
-- DECODING_FAILED → Self-Recycle in 500ms (nicht auf Boundary warten)
-- IDR-Boundary-Threshold=3 als Backup
-- Layout: nur noch WebView (keine SurfaceView/GLSurfaceView mehr nötig)
+1. **Adreno HW-Decoder verweigert CPU-lesbare Surfaces**: `OMX.qcom.video.decoder.avc` rendert ausschließlich in Hardware-Overlay. Bewiesen durch Test-Pattern in v2.3.73 (GL-Pipeline OK, OES-Texture leer) und ImageReader v2.3.74-76 (auch mit `USAGE_CPU_READ_OFTEN` nur 1 Frame).
+2. **SW-Decoder + Synchronous-Adapter blockiert**: `IllegalStateException` bei `dequeueInputBuffer` bei jedem Init nach Frame 1. Lösung: `forceEnableMediaCodecAsynchronousQueueing()`.
+3. **Audio-Track destabilisiert Video-Decoder**: g711-alaw Audio-Track muss explizit per `setRendererDisabled(C.TRACK_TYPE_AUDIO, true)` deaktiviert werden, sonst `CodecException 0x80000000` nach Frame 1.
+4. **JS-Loop akzeptierte `inputMode='rtsp'` nicht**: Letzter Display-Bug — Loop returned weil Bedingung nur `'stream'` zuließ. Fix: `inputMode === 'rtsp'` auch zulassen.
+
+### Verworfene Pfade (nicht mehr nutzen)
+- TextureView.getBitmap() — Samsung HW-Layer-Bug (schwarz)
+- PixelCopy(SurfaceView) + HW-Decoder — HW-Overlay-Bypass (schwarz)
+- PixelCopy(window, srcRect) + HW-Decoder — liest WebView-UI rekursiv (UI-Spiegelung)
+- GLSurfaceView + SurfaceTexture + samplerExternalOES — Decoder schreibt nicht in OES-Texture (uniform grün)
+- ImageReader + HW-Decoder + `USAGE_CPU_READ_OFTEN` — 1 Frame/Session (Hardware-Overlay-Bypass)
+- ImageReader + SW-Decoder mit Audio-Track aktiv — 1 Frame/Session (Audio-Decoder destabilisiert)
+- ImageReader + SW-Decoder mit Sync-Adapter — IllegalStateException bei dequeueInputBuffer
+
+### Aktive Files
+- `RtspImageReaderPipeline.kt` (ersetzt RtspPipeline.kt + RtspGlRenderer.kt)
+- `RtspSdpProxy.kt` (unverändert seit v2.3.65)
+- `MainActivity.kt` (sgkSaveFrame Bridge wieder integriert in v2.3.79)
+- `activity_main.xml` — nur WebView, kein SurfaceView/GLSurfaceView mehr
 
 ### Offen
-- Display zeigt schwarz trotz JPEG-Empfang → Frames kommen vermutlich nicht im 30fps-Strom durch (nur 1 Frame im Log dann lange Pause + Recycle)
-- Snapshot-Bridge `sgkSaveFrame` schreibt keine neuen Files
+- Treffererkennung-Algorithmus: noch nicht aktiviert (RTSP-Pipeline jetzt stabil als Voraussetzung erfüllt)
+- Bild-Rotation der Spektiv-Kamera (Hochformat) per "BILD DREHEN"-Button
 
 **Architektur — Native APK (Android):**
 - `android/app/src/main/java/de/bmcservice/trefferpoint/MainActivity.kt` — UVC-Kamera via `com.herohan:UVCAndroid`
