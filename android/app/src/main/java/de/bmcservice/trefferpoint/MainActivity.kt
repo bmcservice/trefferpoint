@@ -377,16 +377,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Drop-Frame-Strategie für WebView-Push:
+    // Pipeline läuft mit ~30 fps; WebView-Roundtrip (Base64→atob→Blob→Canvas) schafft das
+    // nicht sauber → Flackern. Wir pushen nur dann ein neues Frame wenn das vorherige
+    // im WebView fertig ist (= evaluateJavascript-Callback gefeuert hat).
+    @Volatile private var webViewPushPending = false
+    @Volatile private var webViewDropped = 0L
+    private var lastWebViewPushNs = 0L
+
     private fun pushFrameToWebView(jpeg: ByteArray) {
+        if (webViewPushPending) {
+            webViewDropped++
+            if (webViewDropped == 1L || webViewDropped % 60L == 0L) {
+                AppLog.i(TAG, "WebView-Drop: $webViewDropped Frames übersprungen (Roundtrip-Backlog)")
+            }
+            return
+        }
+        webViewPushPending = true
         val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
         runOnUiThread {
-            // Stringkonkatenation via ' + ' vermeidet String-Escaping-Probleme.
-            // Base64 ist safe in JS-String (keine Quotes/Backslashes).
-            webView.evaluateJavascript(
-                "window.tpReceiveFrame && window.tpReceiveFrame('$b64')",
-                null
-            )
+            try {
+                webView.evaluateJavascript(
+                    "window.tpReceiveFrame && window.tpReceiveFrame('$b64')"
+                ) { _ ->
+                    // Callback feuert wenn JS-Evaluation komplett ist (img.src=blob fertig).
+                    webViewPushPending = false
+                }
+            } catch (e: Exception) {
+                webViewPushPending = false
+            }
         }
+        lastWebViewPushNs = System.nanoTime()
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
