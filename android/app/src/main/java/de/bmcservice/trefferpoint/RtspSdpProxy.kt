@@ -30,10 +30,14 @@ class RtspSdpProxy(
 ) {
     companion object {
         private const val TAG = "RtspSdpProxy"
-        // Ab v2.3.86: H264FrameNumSmoother fängt den frame_num-Reset im Stream ab.
-        // Decoder sieht keinen Reset mehr → kein Crash → kein proaktiver Recycle nötig.
-        // Threshold sehr hoch lassen; falls Smoother fehlschlägt, schützt es als Backup.
-        private const val IDR_RESTART_THRESHOLD = 9999
+        // SW-Decoder (c2.android.avc.decoder) crasht beim N-ten IDR (frame_num-Reset).
+        // Threshold=3: Restart VOR IDR#3 → IDR #1–2 spielen durch (~2.4s Nutzzeit).
+        // v2.3.86 Versuch (Smoother) verhinderte Crash, brach aber Reference-Picture-Management
+        // → Bild grün-korrumpiert. Smoother deaktiviert in v2.3.87, Threshold zurück.
+        // v2.3.88+ wird MediaCodec direkt ansteuern um den Recycle durch flush() zu ersetzen.
+        private const val IDR_RESTART_THRESHOLD = 3
+        // Smoother komplett aus: H.264-konform Stream durchlassen, kein frame_num-Patch.
+        private const val ENABLE_FRAMENUM_SMOOTHER = false
     }
 
     @Volatile private var active = false
@@ -518,16 +522,12 @@ class RtspSdpProxy(
                     }
                 }
 
-                // ─── H.264 frame_num Smoothing (Wurzelfix für SW-Decoder-Crash alle ~11s) ───
-                // SGK macht frame_num-Reset bei jeder IDR-Boundary. SW-Decoder erträgt das nicht.
-                // Wir patchen das frame_num-Feld direkt im Slice-Header sodass der Decoder
-                // einen kontinuierlich wachsenden Wert sieht.
-                //
-                // Slice-Header steht:
-                //   - Single-NAL (Type 1=P, 5=IDR): pktBuf[17..]   (NAL-Header bei [16])
-                //   - FU-A mit S-Bit, original Type 1 oder 5: pktBuf[18..]  (FU-Indicator bei [16],
-                //     FU-Header bei [17], Slice-Body ab [18])
-                if (!isAudioPacket && ch % 2 == 0 && len >= 14) {
+                // ─── H.264 frame_num Smoothing (deaktiviert seit v2.3.87) ───
+                // v2.3.86 hat bewiesen: Smoothing verhindert Crash, bricht aber
+                // Reference-Picture-Management → grün-korrumpierte Bilder.
+                // Decoder erwartet IDR mit frame_num=0; modifizierte IDRs verwirren den DPB.
+                // Roadmap: v2.3.88+ → MediaCodec direkt + flush() bei IDR.
+                if (ENABLE_FRAMENUM_SMOOTHER && !isAudioPacket && ch % 2 == 0 && len >= 14) {
                     val nt = pktBuf[16].toInt() and 0x1F
                     val rtpHdrLen = 12  // Standard RTP-Header
                     when (nt) {
