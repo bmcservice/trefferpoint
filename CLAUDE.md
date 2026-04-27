@@ -29,6 +29,44 @@ Gemeinsame TrefferPoint-Logik (Erkennung, Kalibrierung, Trefferauswertung) in `i
 - **Primärgerät:** Samsung Android-Tablet mit **TrefferPoint-APK** (Zero-Config Plug-and-Play)
 - **Alternative:** Windows-Laptop mit USB-Kamera direkt an Chrome
 
+## Feature-Trennung — Developer vs. Public
+
+Das Build-System unterstützt zwei Profile. Per default ist DEBUG=true (Developer-Build);
+für Public-Releases später per `BuildConfig.DEBUG=false` deaktivierbar (oder Feature-Flag).
+
+### Public-Features (in jedem Release sichtbar)
+- USB-C UVC-Kamera (per `com.herohan:UVCAndroid`)
+- Eingebaute Tablet-Kamera (`getUserMedia`)
+- WLAN/RTSP-Kamera (SGK GK720X-Familie, eigener MediaCodec-Pfad)
+- MJPEG-URL-Eingabe als externer Stream
+- Auto-Kalibrierung (PCA-Spiegel-Erkennung + elliptische Ringzählung)
+- Manuelle Kalibrierung (2-Klick)
+- Treffer-Detection (Frame-Differenz + 2-Frame-Bestätigung + Warmup)
+- Sprachausgabe ("X auf Y Uhr")
+- Bild-Rotation (0/90/180/270°)
+- Disziplin-Auswahl (LG10, LP10, KK25, GK25, KK50)
+- Snapshot-Speichern (`Downloads/TrefferPoint/`)
+- Mail-Socket-Empfang (REC, Battery, SD-Status der SGK)
+- Update-Check via GitHub Releases
+- View-Toggle (Kamera | Anzeige | Treffer)
+
+### Developer-Features (nur in DEBUG-Builds aktiv)
+- **MJPEG-HTTP-Server auf Port 8090** (`DevHttpServer.kt`)
+  - `GET /` → HTML-Embed der Live-Sicht
+  - `GET /stream` → multipart/x-mixed-replace MJPEG
+  - `GET /snapshot` → einzelnes JPEG
+  - `GET /status` → JSON mit Pipeline-Status
+  - **Nutzung vom PC:** `adb forward tcp:8090 tcp:8090` → `http://localhost:8090/` im Browser
+- **Auto-Diagnose-Snapshot** bei Frame #5 (`diag-frame5_<timestamp>.jpg` in Downloads)
+- **Verbose Frame-Logging** (Frame #1-5 + alle 30) im AppLog
+- **Test-Pattern-Modus** im GL-Renderer (war v2.3.73 — entfernt nach Diagnose)
+
+### Geplant für Developer (noch nicht gebaut)
+- Eventlog-CSV bei Treffererkennung (`eventlog_YYYYMMDD.csv`)
+- Debug-Snapshots bei Treffer (pre/post/diff JPEGs)
+- Performance-Counter (Frame-Rate, JPEG-Encoding-Zeit, Decoder-Drops)
+- Frame-Replay-Modus (statt Live-Stream eine MP4 abspielen — für reproduzierbare Tests)
+
 ## Aktueller Stand (v2.3.92 — MediaCodec direkt, kein Crash, kein Pulsieren)
 
 **Aktiver Entwicklungsfokus: KK25 (.22) und GK25 (9mm) — 25 Meter**

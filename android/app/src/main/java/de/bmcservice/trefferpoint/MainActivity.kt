@@ -79,6 +79,10 @@ class MainActivity : AppCompatActivity() {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var scanJob: Job? = null
 
+    // Developer-only HTTP-Server (Live-Sibling über USB-adb-forward für PC-Browser).
+    // Wird nur in DEBUG-Builds gestartet — siehe Feature-Trennung in CLAUDE.md.
+    private var devHttpServer: DevHttpServer? = null
+
     @SuppressLint("SetJavaScriptEnabled", "AddJavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,6 +130,33 @@ class MainActivity : AppCompatActivity() {
         UVCUtils.init(this)
         initCamera()
         handleUsbIntent(intent)
+
+        // ── Developer-only: MJPEG-Server auf Port 8090 starten ──
+        // PC-Browser-Zugriff via USB:  adb forward tcp:8090 tcp:8090
+        // → http://localhost:8090/ zeigt Live-Sicht der gerade aktiven Pipeline.
+        if (BuildConfig.DEBUG) {
+            val server = DevHttpServer(
+                getCurrentJpeg = {
+                    // Priorität: aktiver Modus → entsprechende Pipeline.
+                    when (activeMode) {
+                        "rtsp" -> rtspPipeline?.lastFrameJpeg
+                        "mjpeg" -> mjpegPipeline?.lastFrameJpeg
+                        // USB hat keinen lastFrameJpeg-Speicher; fallback frei.
+                        else -> rtspPipeline?.lastFrameJpeg ?: mjpegPipeline?.lastFrameJpeg
+                    }
+                },
+                getStatusJson = {
+                    val rtspFC = rtspPipeline?.frameCount ?: 0
+                    val mjpegFC = mjpegPipeline?.frameCount ?: 0
+                    val rtspErr = rtspPipeline?.lastError?.let { ",\"rtspError\":\"${it.replace("\"","'")}\"" } ?: ""
+                    """{"mode":"$activeMode","rtspFrames":$rtspFC,"mjpegFrames":$mjpegFC,""" +
+                            """"frameCount":$frameCount,"lastFrameBytes":$lastFrameSize,""" +
+                            """"version":"${BuildConfig.VERSION_NAME}"$rtspErr}"""
+                }
+            )
+            server.start(8090)
+            devHttpServer = server
+        }
         initTts()
     }
 
@@ -374,6 +405,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try { devHttpServer?.stop() } catch (_: Exception) {}
         try { rtspPipeline?.stop() } catch (_: Exception) {}
         try { mjpegPipeline?.stop() } catch (_: Exception) {}
         try { dummySurface?.release() } catch (_: Exception) {}
