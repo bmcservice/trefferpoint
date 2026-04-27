@@ -903,7 +903,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.107';
+const APP_VERSION = '2.3.108';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1051,17 +1051,41 @@ let overlayVisible = (localStorage.getItem('tp_overlay_visible') !== 'false');
 // Default: kleines Rechteck mittig unten (nur Uhrzeit-Bereich; Datum ändert sich nicht
 // während einer Schießserie und ist daher unkritisch).
 let timestampMaskVisible = (localStorage.getItem('tp_ts_mask') !== 'false');
-// Maske-Position relativ zum Bild (0..1). Werte aus Snapshot-Analyse v2.3.106:
-// SGK schreibt "2K YYYY-MM-DD HH:MM:SS" links-unten. cx=0.40 mittiger Mittelpunkt
-// des Stempels (eher links), cy=0.975 ganz unten, w=0.55 deckt 13-keys-Block ab,
-// h=0.05 schmal weil Schrift nur ~25px hoch.
-const TS_MASK = { cx: 0.40, cy: 0.975, w: 0.55, h: 0.055 };
+// Edit-Modus: User kann Mask via Drag verschieben (Pointer-Events auf Canvas)
+let tsMaskEditMode = false;
+let tsMaskDrag = null;  // { startX, startY, startCx, startCy } während Drag
+// Maske-Position relativ zum BILD (0..1) — folgt Software-Zoom + Rotation des Bildes.
+// Aus Snapshot-Analyse v2.3.106: SGK schreibt "2K YYYY-MM-DD HH:MM:SS" links-unten.
+// Per UI verschiebbar (Drag im Canvas wenn Maske-Edit-Modus aktiv).
+const TS_MASK = JSON.parse(localStorage.getItem('tp_ts_mask_pos') ||
+    '{"cx":0.40,"cy":0.975,"w":0.55,"h":0.055}');
+function saveTsMask() {
+    try { localStorage.setItem('tp_ts_mask_pos', JSON.stringify(TS_MASK)); } catch(e) {}
+}
+
+/**
+ * Berechnet das Mask-Rechteck in CANVAS-Koordinaten basierend auf der
+ * aktuellen Bild-Transformation (Software-Zoom + Rotation).
+ * Liefert {x0, y0, x1, y1} oder null wenn keine Mask aktiv.
+ */
+function tsMaskCanvasRect(W, H) {
+    if (!timestampMaskVisible) return null;
+    if (camRotation !== 0) {
+        // Bei Rotation: vereinfacht, in Canvas-Mittelpunkt-Koordinaten rechnen
+        // — wird im Render-Loop direkt mit der Rotation gezeichnet.
+        return null;
+    }
+    const sw = W * softwareZoom, sh = H * softwareZoom;
+    const ox = (W - sw) / 2, oy = (H - sh) / 2;
+    const mw = TS_MASK.w * sw, mh = TS_MASK.h * sh;
+    const x0 = ox + TS_MASK.cx * sw - mw/2;
+    const y0 = oy + TS_MASK.cy * sh - mh/2;
+    return { x0, y0, x1: x0 + mw, y1: y0 + mh };
+}
+
 function isInTsMask(x, y, W, H) {
-    if (!timestampMaskVisible) return false;
-    const mw = TS_MASK.w * W, mh = TS_MASK.h * H;
-    const mx0 = TS_MASK.cx * W - mw/2, mx1 = mx0 + mw;
-    const my0 = TS_MASK.cy * H - mh/2, my1 = my0 + mh;
-    return x >= mx0 && x <= mx1 && y >= my0 && y <= my1;
+    const r = tsMaskCanvasRect(W, H);
+    return r != null && x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
 }
 let refWarmup = 0;
 let pendingHit = null;
@@ -1904,28 +1928,24 @@ function loop() {
     }
     ctx.restore();
 
-    // Visuelle Timestamp-Maske: subtiler durchsichtiger Hint, KEIN schwarzer Balken.
-    // Bild bleibt komplett sichtbar; nur der markierte Bereich wird in der Erkennung
-    // ignoriert (siehe isInTsMask). Default: mittig-unten ~50%×7%.
-    if (timestampMaskVisible && canvas.height > 0 && canvas.width > 0) {
-        const W = canvas.width, H = canvas.height;
-        const mw = TS_MASK.w * W, mh = TS_MASK.h * H;
-        const mx0 = TS_MASK.cx * W - mw/2;
-        const my0 = TS_MASK.cy * H - mh/2;
+    // Visuelle Timestamp-Maske: folgt dem Bild (Software-Zoom skaliert mit).
+    // Position wird über tsMaskCanvasRect berechnet (Bild-Koordinaten → Canvas).
+    const tsRect = tsMaskCanvasRect(canvas.width, canvas.height);
+    if (tsRect) {
+        const mw = tsRect.x1 - tsRect.x0;
+        const mh = tsRect.y1 - tsRect.y0;
         ctx.save();
-        // Sehr leichter dunkler Schleier — Bildinhalt erkennbar, aber visuell als "ignoriert" markiert
+        // Bildinhalt erkennbar, leichter dunkler Schleier
         ctx.fillStyle = 'rgba(0,0,0,0.30)';
-        ctx.fillRect(mx0, my0, mw, mh);
-        // Dünner Rand
-        ctx.strokeStyle = 'rgba(200,168,75,0.55)';
-        ctx.lineWidth = 1;
+        ctx.fillRect(tsRect.x0, tsRect.y0, mw, mh);
+        ctx.strokeStyle = tsMaskEditMode ? 'rgba(232,64,64,0.85)' : 'rgba(200,168,75,0.55)';
+        ctx.lineWidth = tsMaskEditMode ? 2 : 1;
         ctx.setLineDash([5, 4]);
-        ctx.strokeRect(mx0 + 0.5, my0 + 0.5, mw - 1, mh - 1);
+        ctx.strokeRect(tsRect.x0 + 0.5, tsRect.y0 + 0.5, mw - 1, mh - 1);
         ctx.setLineDash([]);
-        // Mini-Label oben links im Mask-Rechteck
         ctx.fillStyle = 'rgba(200,168,75,0.85)';
         ctx.font = '10px "Share Tech Mono", monospace';
-        ctx.fillText('🕓 ts-mask', mx0 + 4, my0 + 11);
+        ctx.fillText(tsMaskEditMode ? '✎ drag/pinch zum Editieren' : '🕓 ts-mask', tsRect.x0 + 4, tsRect.y0 + 11);
         ctx.restore();
     }
 
@@ -3364,17 +3384,74 @@ document.getElementById('btnToggleOverlay').addEventListener('click', () => {
     }
 })();
 
-// Timestamp-Maske Toggle
-document.getElementById('btnTsMask').addEventListener('click', () => {
+// Timestamp-Maske Toggle (Click = an/aus, Long-Press = Edit-Mode)
+const tsMaskBtn = document.getElementById('btnTsMask');
+let tsMaskBtnPressTimer = null;
+tsMaskBtn.addEventListener('click', (e) => {
+    if (tsMaskEditMode) {
+        // Im Edit-Mode: Click beendet ihn
+        tsMaskEditMode = false;
+        saveTsMask();
+        setStatus('Maske-Position gespeichert', 'ok');
+        tsMaskBtn.style.background = '';
+        tsMaskBtn.title = 'Timestamp-Maske ein/aus · Long-Press: Edit';
+        return;
+    }
     timestampMaskVisible = !timestampMaskVisible;
     localStorage.setItem('tp_ts_mask', timestampMaskVisible ? 'true' : 'false');
-    const b = document.getElementById('btnTsMask');
-    b.style.opacity = timestampMaskVisible ? '1' : '0.6';
+    tsMaskBtn.style.opacity = timestampMaskVisible ? '1' : '0.6';
 });
-(function() {
-    const b = document.getElementById('btnTsMask');
-    if (b) b.style.opacity = timestampMaskVisible ? '1' : '0.6';
-})();
+// Long-Press auf Mask-Button = Edit-Modus aktivieren (Drag im Canvas)
+const startTsEdit = () => {
+    if (!timestampMaskVisible) return;
+    tsMaskBtnPressTimer = setTimeout(() => {
+        tsMaskEditMode = true;
+        tsMaskBtn.style.background = 'rgba(232,64,64,0.3)';
+        setStatus('Maske-Edit aktiv: Drag auf Bild zum Verschieben, Click auf Maske-Button zum Speichern', 'warn');
+    }, 600);
+};
+const cancelTsEdit = () => { clearTimeout(tsMaskBtnPressTimer); tsMaskBtnPressTimer = null; };
+tsMaskBtn.addEventListener('mousedown', startTsEdit);
+tsMaskBtn.addEventListener('touchstart', startTsEdit, { passive: true });
+tsMaskBtn.addEventListener('mouseup', cancelTsEdit);
+tsMaskBtn.addEventListener('mouseleave', cancelTsEdit);
+tsMaskBtn.addEventListener('touchend', cancelTsEdit);
+tsMaskBtn.title = 'Timestamp-Maske ein/aus · Long-Press: Edit-Modus';
+tsMaskBtn.style.opacity = timestampMaskVisible ? '1' : '0.6';
+
+// Drag auf Canvas verschiebt Mask wenn Edit-Mode aktiv
+function getCanvasPointer(e) {
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return {
+        x: (t.clientX - rect.left) * (canvas.width / rect.width),
+        y: (t.clientY - rect.top) * (canvas.height / rect.height)
+    };
+}
+canvas.addEventListener('pointerdown', (e) => {
+    if (!tsMaskEditMode) return;
+    e.preventDefault();
+    const p = getCanvasPointer(e);
+    tsMaskDrag = { startX: p.x, startY: p.y, startCx: TS_MASK.cx, startCy: TS_MASK.cy };
+    canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+    if (!tsMaskDrag) return;
+    e.preventDefault();
+    const p = getCanvasPointer(e);
+    // dx in canvas-px → in image-relative units (= softwareZoom-bereinigt)
+    const sw = canvas.width * softwareZoom, sh = canvas.height * softwareZoom;
+    const dxRel = (p.x - tsMaskDrag.startX) / sw;
+    const dyRel = (p.y - tsMaskDrag.startY) / sh;
+    TS_MASK.cx = Math.min(1 - TS_MASK.w/2, Math.max(TS_MASK.w/2, tsMaskDrag.startCx + dxRel));
+    TS_MASK.cy = Math.min(1 - TS_MASK.h/2, Math.max(TS_MASK.h/2, tsMaskDrag.startCy + dyRel));
+});
+canvas.addEventListener('pointerup', (e) => {
+    if (tsMaskDrag) {
+        canvas.releasePointerCapture(e.pointerId);
+        tsMaskDrag = null;
+    }
+});
 
 // Reset: Kalibrierung komplett verwerfen (auch aus localStorage entfernen).
 // Nützlich nach falsch erkanntem Spiegel oder Disziplinwechsel ohne Restart.
