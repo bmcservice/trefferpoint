@@ -699,6 +699,11 @@
                 <div style="font-size:10px;color:var(--text-dim);margin-bottom:7px;font-family:'Share Tech Mono',monospace">
                     Leer = Auto (Gateway-IP des verbundenen WLANs probieren)
                 </div>
+                <!-- HD/SD-Toggle für SGK-Kameras: ch0 = HD (~2K), ch1 = SD (540p) -->
+                <div style="display:flex;gap:5px;margin-bottom:7px">
+                    <button class="btn" id="btnRtspSd" style="flex:1;font-size:11px" title="540p, weniger CPU/Daten">📺 SD (ch1)</button>
+                    <button class="btn" id="btnRtspHd" style="flex:1;font-size:11px" title="HD/2K, schärfer aber mehr Last">🎬 HD (ch0)</button>
+                </div>
                 <button class="btn btn-primary" id="btnRtsp">▶ RTSP-Stream starten</button>
                 <button class="btn" id="btnScanCam" style="margin-top:5px">🔍 Kamera suchen (Auto)</button>
                 <button class="btn" id="btnScanSubnet" style="margin-top:3px;display:none">🌐 Vollscan (Subnetz 1–254)</button>
@@ -849,7 +854,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.96';
+const APP_VERSION = '2.3.97';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2784,6 +2789,31 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
             }
         } catch(e) {}
     });
+
+    // HD/SD-Toggle (SGK-Kameras): ch0 = HD/2K, ch1 = SD/540p.
+    // Ändert nur die rtspUrl im Eingabefeld; eigentlicher Wechsel geschieht beim
+    // Klick auf "RTSP-Stream starten".
+    function setRtspChannel(channel) {
+        const rtspInput = document.getElementById('rtspUrl');
+        let url = rtspInput.value.trim();
+        if (!url) {
+            try {
+                const gw = window.tpBridge.getWifiGateway() || '192.168.0.1';
+                url = 'rtsp://' + gw + ':554/live/tcp/' + channel;
+            } catch(e) { url = 'rtsp://192.168.0.1:554/live/tcp/' + channel; }
+        } else {
+            url = url.replace(/\/live\/tcp\/ch[01]/, '/live/tcp/' + channel);
+            if (!/\/live\/tcp\/ch[01]/.test(url)) {
+                url = url.replace(/\/?$/, '/live/tcp/' + channel);
+            }
+        }
+        rtspInput.value = url;
+        localStorage.setItem('tp_rtsp_url', url);
+        setStatus('Stream-URL: ' + url, 'warn');
+        setMsg('Klicke "RTSP-Stream starten" um zu wechseln');
+    }
+    document.getElementById('btnRtspHd').addEventListener('click', () => setRtspChannel('ch0'));
+    document.getElementById('btnRtspSd').addEventListener('click', () => setRtspChannel('ch1'));
 
     // RTSP starten
     document.getElementById('btnRtsp').addEventListener('click', () => {

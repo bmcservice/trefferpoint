@@ -60,8 +60,9 @@ class RtspMediaCodecPipeline(
 ) {
     companion object {
         private const val TAG = "RtspMediaCodec"
-        private const val IMAGE_WIDTH = 960
-        private const val IMAGE_HEIGHT = 540
+        // Fallback-Auflösung wenn SPS-Parse fehlschlägt (= ch1-Default)
+        private const val FALLBACK_WIDTH = 960
+        private const val FALLBACK_HEIGHT = 540
         // JPEG_QUALITY: 80 statt 90 → ~25% schneller, Bildqualität für Treffererkennung
         // völlig ausreichend (Treffer-Detection braucht keine fotografische Schärfe).
         private const val JPEG_QUALITY = 80
@@ -70,6 +71,11 @@ class RtspMediaCodecPipeline(
         // PTS-Konversion: RTP-Timestamp ist in 90kHz, MediaCodec PTS in µs
         private const val RTP_TICKS_PER_SECOND = 90000L
     }
+
+    // Tatsächliche Auflösung des aktuellen Streams (aus SPS extrahiert).
+    // Wird in startInternal() vor configureDecoder() gesetzt.
+    @Volatile private var imageWidth = FALLBACK_WIDTH
+    @Volatile private var imageHeight = FALLBACK_HEIGHT
 
     @Volatile var frameCount: Long = 0; private set
     @Volatile var lastError: String? = null; private set
@@ -194,6 +200,19 @@ class RtspMediaCodecPipeline(
         if (spsBytes == null || ppsBytes == null) {
             error("Konnte SPS/PPS nicht aus SDP extrahieren")
         }
+        // Auflösung aus SPS extrahieren — wir konfigurieren ImageReader und MediaCodec
+        // mit den echten Stream-Maßen. Bei ch1 typisch 960×540, bei ch0 evtl. 1920×1080
+        // oder 2560×1440 (HD-Stream).
+        val res = H264SpsParser.parseFromNal(spsBytes!!)
+        if (res != null) {
+            imageWidth = res.width
+            imageHeight = res.height
+            AppLog.i(TAG, "Stream-Auflösung aus SPS: $res")
+        } else {
+            imageWidth = FALLBACK_WIDTH
+            imageHeight = FALLBACK_HEIGHT
+            AppLog.w(TAG, "SPS-Parse fehlgeschlagen — Fallback ${imageWidth}x${imageHeight}")
+        }
 
         // SETUP nur Video (Track 0), Audio ignorieren um Decoder-Stabilität zu sichern
         // ExoPlayer's Audio-Decoder destabilisierte den Video-Decoder → wir füttern hier
@@ -234,11 +253,11 @@ class RtspMediaCodecPipeline(
 
         imageReader = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ImageReader.newInstance(
-                IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES,
+                imageWidth, imageHeight, ImageFormat.YUV_420_888, MAX_IMAGES,
                 HardwareBuffer.USAGE_CPU_READ_OFTEN
             )
         } else {
-            ImageReader.newInstance(IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES)
+            ImageReader.newInstance(imageWidth, imageHeight, ImageFormat.YUV_420_888, MAX_IMAGES)
         }
         // Synchroner Encoder-Pfad: war in v2.3.89 stabil. Async-Variante destabilisierte
         // den Decoder (dequeueOutputBuffer-Exception nach Frame 5). YUV→JPEG ist ~30ms,
@@ -270,7 +289,7 @@ class RtspMediaCodecPipeline(
     }
 
     private fun configureDecoder() {
-        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, IMAGE_WIDTH, IMAGE_HEIGHT)
+        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, imageWidth, imageHeight)
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
             android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
         // CSD: SPS und PPS in Annex-B-Format (mit Start-Code 0x00000001)
@@ -282,7 +301,7 @@ class RtspMediaCodecPipeline(
         decoder = MediaCodec.createByCodecName("c2.android.avc.decoder")
         decoder!!.configure(format, imageReader!!.surface, null, 0)
         decoder!!.start()
-        AppLog.i(TAG, "MediaCodec gestartet: c2.android.avc.decoder, ${IMAGE_WIDTH}x${IMAGE_HEIGHT}")
+        AppLog.i(TAG, "MediaCodec gestartet: c2.android.avc.decoder, ${imageWidth}x${imageHeight}")
 
         // Output-Buffer-Loop in eigenem Thread (releases zu ImageReader)
         decoderOutputThread = thread(name = "rtsp-mc-output", start = true) {
