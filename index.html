@@ -804,6 +804,15 @@
             <button class="btn" id="btnRef" disabled>📷 Referenzframe setzen</button>
             <button class="btn" id="btnNewSpiegel" disabled>↺ Neuer Spiegel</button>
             <button class="btn" id="btnDetect" disabled>⚡ Erkennung starten</button>
+            <!-- Vergleichs-Modus für Test/Auswertung beschossener Scheiben.
+                 Eigene Logik: kein Cluster-Limit, Connected-Component findet alle Treffer. -->
+            <div style="margin-top:6px;padding:5px;border:1px dashed var(--border);background:var(--surface)">
+                <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">VERGLEICHS-MODUS (Test)</div>
+                <button class="btn" id="btnCompareRef" disabled style="font-size:10px;margin-bottom:3px">📷 Leere Scheibe</button>
+                <button class="btn" id="btnCompareNow" disabled style="font-size:10px;margin-bottom:3px">🔍 Vergleiche jetzt</button>
+                <button class="btn" id="btnCompareReset" disabled style="font-size:10px">↺ Reset</button>
+                <div id="compareStatus" style="font-size:9px;color:var(--text-dim);margin-top:3px">Keine Referenz</div>
+            </div>
             <div style="display:flex;gap:6px;margin-bottom:7px">
                 <button class="btn btn-active" id="btnSpeech" style="flex:1;padding:5px;font-size:11px">🔊 Ansage</button>
                 <button class="btn" id="btnDebug" style="flex:1;padding:5px;font-size:11px">⬛ Debug</button>
@@ -858,7 +867,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.99';
+const APP_VERSION = '2.3.100';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3055,6 +3064,157 @@ document.getElementById('btnDetect').addEventListener('click', () => {
 });
 
 document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
+
+// ── VERGLEICHS-MODUS ──────────────────────────────────────────────────────────
+// Eigene Test-/Auswertungs-Logik unabhängig von der Live-Erkennung:
+// - User setzt Referenz mit leerer Scheibe (compareReference)
+// - Hängt beschossene Scheibe auf, klickt "Vergleiche jetzt"
+// - Algorithmus findet ALLE Differenz-Cluster (= einzelne Schuss-Löcher)
+// - Jeder Cluster wird als Treffer in hits[] eingefügt mit Ringauswertung
+// Vorteil gegenüber Live-Erkennung: kein 15-2500-Pixel-Limit, kein 2-Frame-Confirm.
+let compareReference = null;  // ImageData von der leeren Scheibe
+
+function setCompareReference() {
+    if (!ctx || !canvas.width) {
+        setStatus('Kein Bild verfügbar', 'warn');
+        return;
+    }
+    try {
+        compareReference = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        document.getElementById('compareStatus').textContent =
+            `✓ Referenz gesetzt (${canvas.width}×${canvas.height})`;
+        document.getElementById('btnCompareNow').disabled = false;
+        document.getElementById('btnCompareReset').disabled = false;
+        setStatus('Vergleichs-Referenz gesetzt — beschossene Scheibe aufhängen, dann "Vergleiche jetzt"', 'ok');
+    } catch(e) {
+        setStatus('Pixel-Zugriff blockiert: ' + e.message, 'warn');
+    }
+}
+
+function resetCompareReference() {
+    compareReference = null;
+    document.getElementById('compareStatus').textContent = 'Keine Referenz';
+    document.getElementById('btnCompareNow').disabled = true;
+    document.getElementById('btnCompareReset').disabled = true;
+    setStatus('Vergleichs-Referenz verworfen', 'ok');
+}
+
+function compareNow() {
+    if (!compareReference) { setStatus('Erst Referenz setzen', 'warn'); return; }
+    if (!calib) { setStatus('Erst kalibrieren (Auto-Erkennung)', 'warn'); return; }
+    let cur;
+    try { cur = ctx.getImageData(0, 0, canvas.width, canvas.height); }
+    catch(e) { setStatus('Pixel-Zugriff blockiert', 'warn'); return; }
+
+    if (cur.width !== compareReference.width || cur.height !== compareReference.height) {
+        setStatus('Bildgröße hat sich geändert — neue Referenz nötig', 'warn');
+        return;
+    }
+
+    const prev = compareReference.data;
+    const next = cur.data;
+    const W = cur.width, H = cur.height;
+    const threshold = parseInt(document.getElementById('sens').value);
+
+    // 1. Differenz-Punkte sammeln (gleicher Algorithmus wie Live-Detection, aber kein Limit)
+    const STEP = 3;  // Subsampling — 3 px für Performance
+    const diffPoints = [];
+    for (let y = 1; y < H - 1; y += STEP) {
+        for (let x = 1; x < W - 1; x += STEP) {
+            const i = (y * W + x) * 4;
+            const d = (Math.abs(next[i]   - prev[i])   +
+                       Math.abs(next[i+1] - prev[i+1]) +
+                       Math.abs(next[i+2] - prev[i+2])) / 3;
+            if (d > threshold) diffPoints.push({ x, y });
+        }
+    }
+
+    if (diffPoints.length === 0) {
+        setStatus('Kein Unterschied gefunden — gleiche Scheibe?', 'warn');
+        return;
+    }
+    if (diffPoints.length > 50000) {
+        setStatus(`Zu viele Differenz-Punkte (${diffPoints.length}) — Schwelle erhöhen oder Spektiv stabil halten`, 'warn');
+        return;
+    }
+
+    // 2. Connected-Components: Greedy-Cluster mit Distanz-Schwelle
+    // Treffer von Luftgewehr ~5mm Loch → bei 25m+Spektiv sind 8-15 Pixel typisch
+    const CLUSTER_RADIUS = 20;  // Pixel — alle Punkte näher als 20px = ein Treffer
+    const clusters = [];
+    for (const p of diffPoints) {
+        let placed = false;
+        for (const c of clusters) {
+            // Distanz zum Cluster-Schwerpunkt
+            const cx = c.sumX / c.count, cy = c.sumY / c.count;
+            if (Math.hypot(p.x - cx, p.y - cy) < CLUSTER_RADIUS) {
+                c.sumX += p.x; c.sumY += p.y; c.count++;
+                if (p.x < c.minX) c.minX = p.x;
+                if (p.x > c.maxX) c.maxX = p.x;
+                if (p.y < c.minY) c.minY = p.y;
+                if (p.y > c.maxY) c.maxY = p.y;
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) {
+            clusters.push({
+                sumX: p.x, sumY: p.y, count: 1,
+                minX: p.x, maxX: p.x, minY: p.y, maxY: p.y
+            });
+        }
+    }
+
+    // 3. Cluster filtern: zu kleine = Rauschen, zu große = Beleuchtungs-Drift
+    const MIN_PTS = 3, MAX_PTS = 1500;
+    const validClusters = clusters.filter(c => c.count >= MIN_PTS && c.count <= MAX_PTS);
+
+    // 4. Bestehende hits[] leeren und neue Treffer eintragen mit Ringauswertung
+    hits = [];
+    const disc = DISCS[document.getElementById('discSel').value];
+    for (const c of validClusters) {
+        const cx = c.sumX / c.count;
+        const cy = c.sumY / c.count;
+        const dx = cx - calib.cx, dy = cy - calib.cy;
+        const aHalf = calib.a || 100, bHalf = calib.b || 100;
+        const angle = calib.angle || 0;
+        const cosA = Math.cos(-angle), sinA = Math.sin(-angle);
+        const rx = cosA * dx - sinA * dy;
+        const ry = sinA * dx + cosA * dy;
+        const normDist = Math.sqrt((rx/aHalf)*(rx/aHalf) + (ry/bHalf)*(ry/bHalf));
+        const distMm = normDist * Math.sqrt(aHalf * bHalf) / calib.pxPerMm;
+        const scoreDist = distMm - disc.kaliber / 2;
+        let ring = 0;
+        for (const rng of disc.ringe) {
+            if (scoreDist <= rng.radius) { ring = rng.r; break; }
+        }
+        const deg = hitDeg(cx, cy);
+        hits.push({ x: cx, y: cy, ring, distMm: distMm.toFixed(1), deg });
+    }
+    hits.sort((a, b) => b.ring - a.ring);  // Beste zuerst sortieren
+
+    document.getElementById('compareStatus').textContent =
+        `✓ ${hits.length} Treffer in ${diffPoints.length} Diff-Pixel · ${clusters.length - validClusters.length} Cluster verworfen`;
+    setStatus(`Vergleich: ${hits.length} Treffer erkannt`, 'ok');
+    setMsg('');
+    if (typeof updateScore === 'function') updateScore();
+}
+
+document.getElementById('btnCompareRef').addEventListener('click', setCompareReference);
+document.getElementById('btnCompareNow').addEventListener('click', compareNow);
+document.getElementById('btnCompareReset').addEventListener('click', () => {
+    resetCompareReference();
+    hits = [];
+    if (typeof updateScore === 'function') updateScore();
+});
+
+// Vergleichs-Buttons aktivieren sobald Stream + Kalibrierung bereit
+function enableCompareButtons() {
+    const btn = document.getElementById('btnCompareRef');
+    if (btn && appState !== 'IDLE') btn.disabled = false;
+}
+// Hooks: bei jedem state-Wechsel triggern
+const _origSetCalibStatus = (s, t) => setStatus(s, t);
 
 // Overlay-Toggle: Ringe + Treffer-Marker temporär ausblenden ohne Kalibrierung zu verlieren.
 document.getElementById('btnToggleOverlay').addEventListener('click', () => {
