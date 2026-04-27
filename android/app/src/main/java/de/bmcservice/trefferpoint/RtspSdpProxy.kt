@@ -489,17 +489,16 @@ class RtspSdpProxy(
                         if (spsToIdrRelabeled == 1)
                             AppLog.i(TAG, "Bug #9: FU-A(SPS→IDR) — SGK sendet IDR als SPS, korrigiere")
 
-                        // IDR-Threshold-Restart: SW-Decoder crasht beim IDR_RESTART_THRESHOLD-ten IDR.
-                        // IDR#1 (idrEverInjected=false): normal initialisieren, kein Restart.
-                        // IDR#2..N-1: durchlassen — Decoder verarbeitet sie problemlos.
-                        // IDR#N: onIdrBoundary VOR Socket-Close aufrufen → stopInternal landet
-                        // auf Main-Thread BEVOR ExoPlayers IO-Error-Handler feuern kann →
-                        // ExoPlayer ist gestoppt wenn er intern reconnecten will → sauberer Neustart.
+                        // IDR-Threshold-Restart: nur aktiv wenn `onIdrBoundary` gesetzt ist
+                        // (= alter ExoPlayer-Pfad). MediaCodec-direkt-Pfad (v2.3.88+) setzt
+                        // den Callback NICHT — Decoder verträgt IDR-Resets nativ, kein
+                        // Socket-Close nötig.
                         if (fuStartBit) idrSBitCount++
-                        if (fuStartBit && idrEverInjected && idrSBitCount >= IDR_RESTART_THRESHOLD) {
+                        val idrCb = onIdrBoundary
+                        if (idrCb != null && fuStartBit && idrEverInjected && idrSBitCount >= IDR_RESTART_THRESHOLD) {
                             AppLog.i(TAG, "IDR #$idrSBitCount S-Bit (Schwelle $IDR_RESTART_THRESHOLD): " +
                                 "onIdrBoundary vor Socket-Close")
-                            onIdrBoundary?.invoke()
+                            idrCb.invoke()
                             break
                         }
                     }
