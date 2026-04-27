@@ -786,8 +786,32 @@
             <div style="display:flex;gap:5px;margin-top:5px">
                 <button class="btn" id="btnToggleOverlay" style="flex:1;font-size:10px" title="Ring-Overlay ein/ausblenden">👁 Ringe</button>
                 <button class="btn" id="btnTsMask" style="flex:1;font-size:10px" title="Timestamp-Maske an/aus">🔳 Maske</button>
-                <button class="btn" id="btnTsMaskEdit" style="flex:1;font-size:10px" title="Maske verschieben">✎ Justieren</button>
                 <button class="btn" id="btnClearCalib" style="flex:1;font-size:10px" title="Kalibrierung verwerfen">✗ Reset</button>
+            </div>
+            <!-- Präzise Mask-Position via Slider (statt Drag, der bei WebView-Touch unzuverlässig ist) -->
+            <div id="tsMaskSliders" style="margin-top:5px;padding:5px;border:1px dashed var(--border);background:var(--surface)">
+                <div style="font-size:9px;color:var(--text-dim);margin-bottom:3px">MASKE-POSITION (Bild 0..1)</div>
+                <div style="display:flex;gap:4px;align-items:center;font-size:10px;margin-bottom:2px">
+                    <span style="width:18px">cx</span>
+                    <input type="range" id="tsMaskCx" min="0" max="1" step="0.01" style="flex:1">
+                    <span id="tsMaskCxVal" style="width:36px;text-align:right">0.40</span>
+                </div>
+                <div style="display:flex;gap:4px;align-items:center;font-size:10px;margin-bottom:2px">
+                    <span style="width:18px">cy</span>
+                    <input type="range" id="tsMaskCy" min="0" max="1" step="0.01" style="flex:1">
+                    <span id="tsMaskCyVal" style="width:36px;text-align:right">0.97</span>
+                </div>
+                <div style="display:flex;gap:4px;align-items:center;font-size:10px;margin-bottom:2px">
+                    <span style="width:18px">w</span>
+                    <input type="range" id="tsMaskW" min="0.05" max="1" step="0.01" style="flex:1">
+                    <span id="tsMaskWVal" style="width:36px;text-align:right">0.55</span>
+                </div>
+                <div style="display:flex;gap:4px;align-items:center;font-size:10px;margin-bottom:3px">
+                    <span style="width:18px">h</span>
+                    <input type="range" id="tsMaskH" min="0.02" max="0.5" step="0.01" style="flex:1">
+                    <span id="tsMaskHVal" style="width:36px;text-align:right">0.06</span>
+                </div>
+                <button class="btn" id="btnTsMaskDefault" style="font-size:10px;padding:3px 6px;width:100%">↺ Default-Position</button>
             </div>
             <div class="calib-status" id="calibStatus">Nicht kalibriert</div>
         </div>
@@ -904,7 +928,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.109';
+const APP_VERSION = '2.3.110';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3394,27 +3418,36 @@ tsMaskBtn.addEventListener('click', () => {
 });
 tsMaskBtn.style.opacity = timestampMaskVisible ? '1' : '0.6';
 
-// Maske-Edit-Modus Toggle: ein eigener Button, Click aktiviert/deaktiviert.
-// Edit-Mode an: Drag auf Canvas verschiebt Mask. Click erneut = speichern + aus.
-const tsMaskEditBtn = document.getElementById('btnTsMaskEdit');
-tsMaskEditBtn.addEventListener('click', () => {
-    tsMaskEditMode = !tsMaskEditMode;
-    if (tsMaskEditMode) {
-        if (!timestampMaskVisible) {
-            // Maske automatisch einblenden wenn Edit-Mode aktiviert
-            timestampMaskVisible = true;
-            localStorage.setItem('tp_ts_mask', 'true');
-            tsMaskBtn.style.opacity = '1';
-        }
-        tsMaskEditBtn.style.background = 'rgba(232,64,64,0.4)';
-        tsMaskEditBtn.style.color = '#fff';
-        setStatus('Maske-Edit aktiv: ziehen um zu verschieben, "✎ Justieren" zum Speichern', 'warn');
-    } else {
+// Mask-Position via Slider (präzise, kein Drag nötig)
+function syncTsMaskSliders() {
+    document.getElementById('tsMaskCx').value = TS_MASK.cx;
+    document.getElementById('tsMaskCy').value = TS_MASK.cy;
+    document.getElementById('tsMaskW').value = TS_MASK.w;
+    document.getElementById('tsMaskH').value = TS_MASK.h;
+    document.getElementById('tsMaskCxVal').textContent = TS_MASK.cx.toFixed(2);
+    document.getElementById('tsMaskCyVal').textContent = TS_MASK.cy.toFixed(2);
+    document.getElementById('tsMaskWVal').textContent = TS_MASK.w.toFixed(2);
+    document.getElementById('tsMaskHVal').textContent = TS_MASK.h.toFixed(2);
+}
+['Cx','Cy','W','H'].forEach(k => {
+    const slider = document.getElementById('tsMask' + k);
+    const lbl = document.getElementById('tsMask' + k + 'Val');
+    slider.addEventListener('input', () => {
+        const v = parseFloat(slider.value);
+        const key = k.toLowerCase();
+        TS_MASK[key] = v;
+        lbl.textContent = v.toFixed(2);
         saveTsMask();
-        tsMaskEditBtn.style.background = '';
-        tsMaskEditBtn.style.color = '';
-        setStatus('Maske-Position gespeichert', 'ok');
-    }
+    });
+});
+syncTsMaskSliders();
+
+// Reset auf Default-Position
+document.getElementById('btnTsMaskDefault').addEventListener('click', () => {
+    TS_MASK.cx = 0.40; TS_MASK.cy = 0.97; TS_MASK.w = 0.55; TS_MASK.h = 0.06;
+    saveTsMask();
+    syncTsMaskSliders();
+    setStatus('Maske-Position auf Default zurückgesetzt', 'ok');
 });
 
 // Drag auf Canvas verschiebt Mask wenn Edit-Mode aktiv
