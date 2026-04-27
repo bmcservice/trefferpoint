@@ -903,7 +903,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.106';
+const APP_VERSION = '2.3.107';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1051,9 +1051,11 @@ let overlayVisible = (localStorage.getItem('tp_overlay_visible') !== 'false');
 // Default: kleines Rechteck mittig unten (nur Uhrzeit-Bereich; Datum ändert sich nicht
 // während einer Schießserie und ist daher unkritisch).
 let timestampMaskVisible = (localStorage.getItem('tp_ts_mask') !== 'false');
-// Maske-Position relativ zum Bild (0..1). Werte tunen falls die Kamera den Stempel
-// woanders platziert. Default: mittig-unten, 50% breit, 7% hoch.
-const TS_MASK = { cx: 0.5, cy: 0.94, w: 0.50, h: 0.07 };
+// Maske-Position relativ zum Bild (0..1). Werte aus Snapshot-Analyse v2.3.106:
+// SGK schreibt "2K YYYY-MM-DD HH:MM:SS" links-unten. cx=0.40 mittiger Mittelpunkt
+// des Stempels (eher links), cy=0.975 ganz unten, w=0.55 deckt 13-keys-Block ab,
+// h=0.05 schmal weil Schrift nur ~25px hoch.
+const TS_MASK = { cx: 0.40, cy: 0.975, w: 0.55, h: 0.055 };
 function isInTsMask(x, y, W, H) {
     if (!timestampMaskVisible) return false;
     const mw = TS_MASK.w * W, mh = TS_MASK.h * H;
@@ -2583,19 +2585,32 @@ function resetSession() {
 // --- Bridge Frame-Receiver (für USB-UVC UND RTSP — beide pushen JPEGs via tpReceiveFrame) ---
 // IDEMPOTENT: Funktion kann mehrfach gerufen werden (Stream Stop+Start);
 // imgEl + Handler werden jedes Mal frisch initialisiert.
+//
+// DOUBLE-BUFFER: imgEl ist das im loop() gezeichnete "Front-Image" (immer ready).
+// imgLoading ist das "Back-Image" das gerade von tpReceiveFrame befüllt wird.
+// Beim onload: Pointer swappen. Damit wird im loop() nie ein halb-geladenes Bild
+// gezeichnet → kein Tearing/Flackern beim Bildwechsel.
 let bridgeReceiverReady = false;
+let imgLoading = null;  // Back-Buffer: lädt gerade
 function setupBridgeFrameReceiver() {
     bridgeReceiverReady = true;
 
-    imgEl = new Image();
+    imgEl = new Image();        // Front-Buffer (im Loop gezeichnet)
+    imgLoading = new Image();    // Back-Buffer
     let firstFrameDone = false;
-    imgEl.onload = () => {
-        // Canvas-Größe bei jedem Frame syncen (z.B. bei Auflösungswechsel HD/SD)
-        if (imgEl.naturalWidth > 0 &&
-            (canvas.width !== imgEl.naturalWidth || canvas.height !== imgEl.naturalHeight)) {
-            canvas.width = imgEl.naturalWidth;
-            canvas.height = imgEl.naturalHeight;
+
+    imgLoading.onload = () => {
+        // Canvas-Größe syncen falls Auflösung wechselt
+        if (imgLoading.naturalWidth > 0 &&
+            (canvas.width !== imgLoading.naturalWidth || canvas.height !== imgLoading.naturalHeight)) {
+            canvas.width = imgLoading.naturalWidth;
+            canvas.height = imgLoading.naturalHeight;
         }
+        // Swap Front ↔ Back
+        const tmp = imgEl;
+        imgEl = imgLoading;
+        imgLoading = tmp;
+
         if (firstFrameDone) return;
         firstFrameDone = true;
         appState = 'READY';
@@ -2616,10 +2631,12 @@ function setupBridgeFrameReceiver() {
             const arr = new Uint8Array(bin.length);
             for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
             const blob = new Blob([arr], { type: 'image/jpeg' });
-            const old = imgEl.src;
+            // BACK-Buffer mit neuem Frame befüllen (= imgLoading, nicht imgEl).
+            // imgEl bleibt unangetastet bis onload feuert + swap macht.
+            const old = imgLoading.src;
             const url = URL.createObjectURL(blob);
             if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
-            imgEl.src = url;
+            imgLoading.src = url;
         } catch (e) { console.error('tpReceiveFrame Fehler', e); }
     };
 
