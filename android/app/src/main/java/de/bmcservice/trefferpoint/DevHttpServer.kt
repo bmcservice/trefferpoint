@@ -176,14 +176,17 @@ class DevHttpServer(
 <style>
   body{margin:0;background:#0d0d0d;color:#eee;font-family:monospace;padding:8px}
   h1{font-size:14px;margin:0 0 8px;color:#c8a84b}
-  img{max-width:100%;display:block;border:1px solid #333}
-  .row{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-  .row a{color:#c8a84b;text-decoration:none;padding:6px 10px;border:1px solid #333}
-  pre{background:#1a1a1a;padding:8px;font-size:11px;color:#9d9}
+  .stage{display:flex;justify-content:center;align-items:center;overflow:hidden}
+  img{max-width:100%;display:block;border:1px solid #333;transition:transform .2s}
+  .row{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center}
+  .row a,.row button{color:#c8a84b;background:#0d0d0d;text-decoration:none;padding:6px 10px;border:1px solid #333;font-family:monospace;cursor:pointer}
+  .row button:hover{background:#1a1a1a}
+  pre{background:#1a1a1a;padding:8px;font-size:11px;color:#9d9;margin-top:8px}
 </style></head><body>
 <h1>TrefferPoint — Developer Stream Sibling</h1>
-<img id="liveStream" src="/stream" alt="MJPEG Stream"/>
+<div class="stage"><img id="liveStream" src="/stream" alt="MJPEG Stream"/></div>
 <div class="row">
+  <button id="btnRotate">↻ Bild drehen (<span id="rotState">0°</span>)</button>
   <a href="/stream" target="_blank">Raw Stream</a>
   <a href="/snapshot" target="_blank">Snapshot</a>
   <a href="/status" target="_blank">Status JSON</a>
@@ -191,6 +194,19 @@ class DevHttpServer(
 </div>
 <pre id="status">Status …</pre>
 <script>
+  const img = document.getElementById('liveStream');
+  const rotLabel = document.getElementById('rotState');
+  let rot = parseInt(localStorage.getItem('tpDevRot') || '0', 10);
+  function applyRot() {
+    img.style.transform = 'rotate(' + rot + 'deg)';
+    rotLabel.textContent = rot + '°';
+    localStorage.setItem('tpDevRot', String(rot));
+  }
+  document.getElementById('btnRotate').addEventListener('click', () => {
+    rot = (rot + 90) % 360;
+    applyRot();
+  });
+  applyRot();
   setInterval(async () => {
     try {
       const r = await fetch('/status');
