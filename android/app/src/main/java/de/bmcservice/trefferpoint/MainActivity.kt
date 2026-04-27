@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var lastFrameSize: Int = 0
     @Volatile private var activeMode: String = "none"  // "usb" | "rtsp" | "mjpeg" | "none"
 
-    private var rtspPipeline: RtspImageReaderPipeline? = null
+    private var rtspPipeline: RtspMediaCodecPipeline? = null
     private var mjpegPipeline: MjpegHttpPipeline? = null
 
     private var tts: TextToSpeech? = null
@@ -449,7 +449,7 @@ class MainActivity : AppCompatActivity() {
         /**
          * Stream starten. URL-Schema entscheidet die Pipeline:
          *   - http://...:8080/?action=stream  →  MjpegHttpPipeline (SGK GoPlus / Generalplus)
-         *   - rtsp://...                      →  RtspImageReaderPipeline
+         *   - rtsp://...                      →  RtspMediaCodecPipeline (direkter MediaCodec)
          *   - leer                            →  Default für SGK: MJPEG auf Gateway:8080
          *
          * Hintergrund: Reverse-Engineering der Viidure-App v3.3.1 hat gezeigt dass
@@ -490,8 +490,22 @@ class MainActivity : AppCompatActivity() {
                         activeMode = "mjpeg"
                         p.start(finalUrl)
                     } else {
-                        AppLog.i(TAG, "startStream (RTSP): $finalUrl")
-                        val p = RtspImageReaderPipeline(applicationContext, onJpeg, onStatus)
+                        AppLog.i(TAG, "startStream (RTSP): $finalUrl — direkter MediaCodec-Pfad")
+                        val p = RtspMediaCodecPipeline(applicationContext, onJpeg, onStatus)
+                        // Mail-Socket-Nachrichten der Kamera an JS weiterleiten (REC-Status etc.)
+                        p.onMailMessage = { msg ->
+                            val escaped = msg
+                                .replace("\\", "\\\\")
+                                .replace("'", "\\'")
+                                .replace("\n", "\\n")
+                                .replace("\r", "")
+                            runOnUiThread {
+                                webView.evaluateJavascript(
+                                    "window.tpOnSgkMail && window.tpOnSgkMail('$escaped')",
+                                    null
+                                )
+                            }
+                        }
                         rtspPipeline = p
                         activeMode = "rtsp"
                         p.start(finalUrl)
