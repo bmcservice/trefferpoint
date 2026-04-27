@@ -808,9 +808,9 @@
                  Eigene Logik: kein Cluster-Limit, Connected-Component findet alle Treffer. -->
             <div style="margin-top:6px;padding:5px;border:1px dashed var(--border);background:var(--surface)">
                 <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px">VERGLEICHS-MODUS (Test)</div>
-                <button class="btn" id="btnCompareRef" disabled style="font-size:10px;margin-bottom:3px">📷 Leere Scheibe</button>
-                <button class="btn" id="btnCompareNow" disabled style="font-size:10px;margin-bottom:3px">🔍 Vergleiche jetzt</button>
-                <button class="btn" id="btnCompareReset" disabled style="font-size:10px">↺ Reset</button>
+                <button class="btn" id="btnCompareRef" style="font-size:10px;margin-bottom:3px">📷 Leere Scheibe</button>
+                <button class="btn" id="btnCompareNow" style="font-size:10px;margin-bottom:3px">🔍 Vergleiche jetzt</button>
+                <button class="btn" id="btnCompareReset" style="font-size:10px">↺ Reset</button>
                 <div id="compareStatus" style="font-size:9px;color:var(--text-dim);margin-top:3px">Keine Referenz</div>
             </div>
             <!-- Frame-Snapshot zum Speichern (Downloads/TrefferPoint/snapshot_*.jpg).
@@ -874,7 +874,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.101';
+const APP_VERSION = '2.3.102';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
