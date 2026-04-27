@@ -29,7 +29,7 @@ Gemeinsame TrefferPoint-Logik (Erkennung, Kalibrierung, Trefferauswertung) in `i
 - **Primärgerät:** Samsung Android-Tablet mit **TrefferPoint-APK** (Zero-Config Plug-and-Play)
 - **Alternative:** Windows-Laptop mit USB-Kamera direkt an Chrome
 
-## Aktueller Stand (v2.3.84 — RTSP-Pipeline läuft stabil mit Live-Bild)
+## Aktueller Stand (v2.3.92 — MediaCodec direkt, kein Crash, kein Pulsieren)
 
 **Aktiver Entwicklungsfokus: KK25 (.22) und GK25 (9mm) — 25 Meter**
 
@@ -43,14 +43,16 @@ SGK GK720X WiFi-Cam
        ↓
     RtspSdpProxy (Localhost 15554) — patcht "a=recvonly", korrigiert FU-A SPS→IDR
        ↓
-    ExoPlayer (TrackSelector: Audio deaktiviert)
-       ├─ MediaCodec-Adapter: forceEnableMediaCodecAsynchronousQueueing()
-       ├─ MediaCodecSelector: nur SW (c2.android.avc.decoder)
-       └─ setVideoSurface(imageReader.surface)
+    RtspMediaCodecPipeline — eigener RTSP-Client (DESCRIBE/SETUP/PLAY auf Localhost:15554)
+       ├─ RTP-Reader-Thread + FU-A-Reassembler
+       ├─ MediaCodec.createByCodecName("c2.android.avc.decoder")
+       │  └─ configure(SPS+PPS aus sprop-parameter-sets als CSD)
+       ├─ setVideoSurface(imageReader.surface)
+       └─ Output-Loop: dequeueOutputBuffer + releaseOutputBuffer(render=true)
        ↓
-    ImageReader 960×540 YUV_420_888 (maxImages=6)
+    ImageReader 960×540 YUV_420_888 (maxImages=6, USAGE_CPU_READ_OFTEN)
        ↓
-    yuv420ToNv21 → YuvImage.compressToJpeg(quality=90)
+    yuv420ToNv21 → YuvImage.compressToJpeg(quality=80)
        ↓
     onJpegFrame → MainActivity.pushFrameToWebView
        ↓
@@ -58,15 +60,17 @@ SGK GK720X WiFi-Cam
        ↓
     JS: atob → Blob → URL.createObjectURL → imgEl.src
        ↓
-    loop() → canvas.drawImage(imgEl) → 30fps Display
+    loop() (akzeptiert inputMode='rtsp') → canvas.drawImage(imgEl)
 ```
 
-### Schlüssel-Erkenntnisse aus v2.3.65–84 Versuchsreihe
+### Schlüssel-Erkenntnisse aus v2.3.65–92 Versuchsreihe
 
 1. **Adreno HW-Decoder verweigert CPU-lesbare Surfaces**: `OMX.qcom.video.decoder.avc` rendert ausschließlich in Hardware-Overlay. Bewiesen durch Test-Pattern in v2.3.73 (GL-Pipeline OK, OES-Texture leer) und ImageReader v2.3.74-76 (auch mit `USAGE_CPU_READ_OFTEN` nur 1 Frame).
 2. **SW-Decoder + Synchronous-Adapter blockiert**: `IllegalStateException` bei `dequeueInputBuffer` bei jedem Init nach Frame 1. Lösung: `forceEnableMediaCodecAsynchronousQueueing()`.
-3. **Audio-Track destabilisiert Video-Decoder**: g711-alaw Audio-Track muss explizit per `setRendererDisabled(C.TRACK_TYPE_AUDIO, true)` deaktiviert werden, sonst `CodecException 0x80000000` nach Frame 1.
-4. **JS-Loop akzeptierte `inputMode='rtsp'` nicht**: Letzter Display-Bug — Loop returned weil Bedingung nur `'stream'` zuließ. Fix: `inputMode === 'rtsp'` auch zulassen.
+3. **Audio-Track destabilisiert Video-Decoder**: g711-alaw Audio-Track muss explizit per `setRendererDisabled(C.TRACK_TYPE_AUDIO, true)` deaktiviert werden, sonst `CodecException 0x80000000` nach Frame 1. (In v2.3.88+ irrelevant — wir setupen nur Video-Track.)
+4. **JS-Loop akzeptierte `inputMode='rtsp'` nicht**: Display-Bug v2.3.84 — Loop returned weil Bedingung nur `'stream'` zuließ. Fix: `inputMode === 'rtsp'` auch zulassen.
+5. **ExoPlayer + IDR-Reset = Crash, MediaCodec direkt + IDR-Reset = OK**: `c2.android.avc.decoder` verträgt H.264-spec-konforme IDR-Resets, wenn er direkt mit kompletten NAL-Units gefüttert wird. Im ExoPlayer-Pfad crashte er alle ~11s. Im direkten Pfad kein Crash, kein flush() nötig.
+6. **frame_num-Smoothing brach Reference-Picture-DPB**: v2.3.86 verhinderte den Crash, aber modifizierte IDRs verwirren das Reference-Picture-Management → grün-korrumpierte Bilder. Spec-Verstoß ist nicht der richtige Weg.
 
 ### Verworfene Pfade (nicht mehr nutzen)
 - TextureView.getBitmap() — Samsung HW-Layer-Bug (schwarz)
@@ -76,16 +80,20 @@ SGK GK720X WiFi-Cam
 - ImageReader + HW-Decoder + `USAGE_CPU_READ_OFTEN` — 1 Frame/Session (Hardware-Overlay-Bypass)
 - ImageReader + SW-Decoder mit Audio-Track aktiv — 1 Frame/Session (Audio-Decoder destabilisiert)
 - ImageReader + SW-Decoder mit Sync-Adapter — IllegalStateException bei dequeueInputBuffer
+- ExoPlayer + SW-Decoder + ImageReader (v2.3.82-87) — Crash alle ~11s an IDR-Boundaries
+- H264 frame_num-Smoothing im RtspSdpProxy — bricht Reference-Picture-Management
+- MediaCodec direkt + Async-JPEG-Encoder-Thread — Decoder-Output-Race, dequeueOutputBuffer-Exceptions
 
 ### Aktive Files
-- `RtspImageReaderPipeline.kt` (ersetzt RtspPipeline.kt + RtspGlRenderer.kt)
-- `RtspSdpProxy.kt` (unverändert seit v2.3.65)
-- `MainActivity.kt` (sgkSaveFrame Bridge wieder integriert in v2.3.79)
+- `RtspMediaCodecPipeline.kt` (ersetzt RtspPipeline.kt + RtspGlRenderer.kt + RtspImageReaderPipeline.kt)
+- `RtspSdpProxy.kt` (Bug-Fixes für a=recvonly, FU-A SPS→IDR, SPS/PPS-Dedup, Seq/TS-Continuity)
+- `MainActivity.kt`
 - `activity_main.xml` — nur WebView, kein SurfaceView/GLSurfaceView mehr
 
 ### Offen
 - Treffererkennung-Algorithmus: noch nicht aktiviert (RTSP-Pipeline jetzt stabil als Voraussetzung erfüllt)
 - Bild-Rotation der Spektiv-Kamera (Hochformat) per "BILD DREHEN"-Button
+- Frame-Rate-Optimierung (~15fps statt 30fps) — JPEG-Encoding-Bottleneck, für Trefferdetection ausreichend
 
 **Architektur — Native APK (Android):**
 - `android/app/src/main/java/de/bmcservice/trefferpoint/MainActivity.kt` — UVC-Kamera via `com.herohan:UVCAndroid`

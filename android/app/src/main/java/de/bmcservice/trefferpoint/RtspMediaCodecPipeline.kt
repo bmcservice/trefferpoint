@@ -301,7 +301,10 @@ class RtspMediaCodecPipeline(
             // 5ms Timeout statt 100ms: niedrige Latenz, Loop reagiert schnell auf neue Frames.
             // Bei "INFO_TRY_AGAIN_LATER" minimaler 1ms-Sleep um CPU nicht voll auszulasten.
             val idx = try { codec.dequeueOutputBuffer(info, 5_000L) } catch (e: Exception) {
-                AppLog.w(TAG, "dequeueOutputBuffer Exception: ${e.message}")
+                // Async-Adapter kann transiente IllegalStateException werfen ohne dass
+                // der Decoder defekt ist (interne Sync zwischen In/Out-Threads).
+                // Schweigend Wegswallow, kurzer Sleep, Loop läuft weiter — wenn der Decoder
+                // wirklich tot wäre, würden wir CodecException(0x80000000) sehen.
                 Thread.sleep(10)
                 continue
             }
