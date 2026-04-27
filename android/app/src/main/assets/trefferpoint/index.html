@@ -757,6 +757,7 @@
             <button class="btn" id="btnCalib" disabled style="font-size:11px">✎ Manuell (2 Klicks)</button>
             <div style="display:flex;gap:5px;margin-top:5px">
                 <button class="btn" id="btnToggleOverlay" style="flex:1;font-size:10px" title="Ring-Overlay ein/ausblenden">👁 Ringe</button>
+                <button class="btn" id="btnTsMask" style="flex:1;font-size:10px" title="Timestamp-Maske unten ein/aus">🔳 Maske</button>
                 <button class="btn" id="btnClearCalib" style="flex:1;font-size:10px" title="Kalibrierung verwerfen">✗ Reset</button>
             </div>
             <div class="calib-status" id="calibStatus">Nicht kalibriert</div>
@@ -874,7 +875,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.102';
+const APP_VERSION = '2.3.103';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1017,6 +1018,9 @@ let appState = 'IDLE'; // IDLE | READY | CALIB_CTR | CALIB_EDGE | CALIBRATED | D
 // Nutzer kann bei aktiver Kalibrierung das Overlay temporär ausblenden um das
 // reine Kamerabild zu sehen — Kalibrierung bleibt intakt.
 let overlayVisible = (localStorage.getItem('tp_overlay_visible') !== 'false');
+// Timestamp-Maske: SGK-Kameras schreiben Datum/Uhrzeit unten ins Bild.
+// Wird vor der Erkennung ausgeschnitten + visuell mit schwarzem Balken überdeckt.
+let timestampMaskVisible = (localStorage.getItem('tp_ts_mask') !== 'false');
 let refWarmup = 0;
 let pendingHit = null;
 let speechEnabled = true;
@@ -1858,6 +1862,16 @@ function loop() {
     }
     ctx.restore();
 
+    // Visuelle Timestamp-Maske: schwarzer Balken am unteren Bildrand
+    // (deckt Kamera-OSD-Overlay ab; wird auch in Erkennung/Vergleich ignoriert)
+    if (timestampMaskVisible && canvas.height > 0) {
+        const maskH = Math.floor(canvas.height * 0.12);
+        ctx.save();
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, canvas.height - maskH, canvas.width, maskH);
+        ctx.restore();
+    }
+
     if (calib && overlayVisible) {
         drawOverlay();
         hits.forEach((h, i) => drawHit(h, i + 1, i === hits.length - 1));
@@ -2235,11 +2249,16 @@ function runDetection() {
     const next = cur.data;
     const threshold = parseInt(document.getElementById('sens').value);
     const W = canvas.width, H = canvas.height;
+    // Maskierung: SGK-Kameras schreiben einen Timestamp ins Bild (unten links).
+    // Sekundenwechsel würde sonst als ständiger "Treffer" erkannt werden.
+    // Default: untere 12% des Bildes ignorieren — abdeckt typische Overlay-Bereiche.
+    const MASK_BOTTOM_FRACTION = 0.12;
+    const yMax = Math.max(2, H - 1 - Math.floor(H * MASK_BOTTOM_FRACTION));
 
     let pts = [], sumX = 0, sumY = 0;
     let minX = W, maxX = 0, minY = H, maxY = 0;
 
-    for (let y = 1; y < H - 1; y += 3) {
+    for (let y = 1; y < yMax; y += 3) {
         for (let x = 1; x < W - 1; x += 3) {
             const i = (y * W + x) * 4;
             const d = (Math.abs(next[i]   - prev[i])   +
@@ -3122,11 +3141,14 @@ function compareNow() {
     const next = cur.data;
     const W = cur.width, H = cur.height;
     const threshold = parseInt(document.getElementById('sens').value);
+    // Untere 12% maskieren — Kamera-Timestamp-Overlay würde sonst Cluster bilden
+    const MASK_BOTTOM_FRACTION = 0.12;
+    const yMax = Math.max(2, H - 1 - Math.floor(H * MASK_BOTTOM_FRACTION));
 
     // 1. Differenz-Punkte sammeln (gleicher Algorithmus wie Live-Detection, aber kein Limit)
     const STEP = 3;  // Subsampling — 3 px für Performance
     const diffPoints = [];
-    for (let y = 1; y < H - 1; y += STEP) {
+    for (let y = 1; y < yMax; y += STEP) {
         for (let x = 1; x < W - 1; x += STEP) {
             const i = (y * W + x) * 4;
             const d = (Math.abs(next[i]   - prev[i])   +
@@ -3269,6 +3291,18 @@ document.getElementById('btnToggleOverlay').addEventListener('click', () => {
         btn.textContent = overlayVisible ? '👁 Ringe' : '👁‍🗨 Ringe aus';
         btn.style.opacity = overlayVisible ? '1' : '0.6';
     }
+})();
+
+// Timestamp-Maske Toggle
+document.getElementById('btnTsMask').addEventListener('click', () => {
+    timestampMaskVisible = !timestampMaskVisible;
+    localStorage.setItem('tp_ts_mask', timestampMaskVisible ? 'true' : 'false');
+    const b = document.getElementById('btnTsMask');
+    b.style.opacity = timestampMaskVisible ? '1' : '0.6';
+});
+(function() {
+    const b = document.getElementById('btnTsMask');
+    if (b) b.style.opacity = timestampMaskVisible ? '1' : '0.6';
 })();
 
 // Reset: Kalibrierung komplett verwerfen (auch aus localStorage entfernen).
