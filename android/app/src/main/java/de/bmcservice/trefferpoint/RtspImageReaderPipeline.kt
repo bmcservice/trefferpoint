@@ -172,6 +172,31 @@ class RtspImageReaderPipeline(
                             decodeErrorRestarts = 0
                             consecutiveIdrBoundaries = 0
                             AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${image.width}x${image.height}")
+                        } else if (frameCount == 5L) {
+                            // Auto-Diagnose: Frame #5 in Downloads/TrefferPoint/diag-frame5.jpg ablegen.
+                            // So können wir ohne UI-Tap sehen was tatsächlich im JPEG steht.
+                            try {
+                                val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+                                val ctx = context
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                                    val v = android.content.ContentValues().apply {
+                                        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, "diag-frame5_$ts.jpg")
+                                        put(android.provider.MediaStore.Downloads.MIME_TYPE, "image/jpeg")
+                                        put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/TrefferPoint")
+                                    }
+                                    ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v)
+                                        ?.let { uri -> ctx.contentResolver.openOutputStream(uri)?.use { it.write(jpeg) } }
+                                }
+                                AppLog.i(TAG, "Auto-Diag: diag-frame5_$ts.jpg geschrieben (${jpeg.size}B)")
+                            } catch (e: Exception) {
+                                AppLog.w(TAG, "Auto-Diag-Save fehlgeschlagen: ${e.message}")
+                            }
+                            val yBuf = image.planes[0].buffer
+                            val first4 = ByteArray(4)
+                            yBuf.position(0)
+                            yBuf.get(first4, 0, minOf(4, yBuf.remaining()))
+                            val hex = first4.joinToString("") { "%02x".format(it) }
+                            AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG, Y[0..3]=$hex")
                         } else if (frameCount <= 5L || frameCount % 30L == 0L) {
                             // Frame-Diversity-Log: erste 4 Y-Bytes + JPEG-Größe.
                             // Wenn die Bytes sich ändern, läuft echtes Video durch (statt Standbild).
