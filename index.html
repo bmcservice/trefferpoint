@@ -785,7 +785,8 @@
             <button class="btn" id="btnCalib" disabled style="font-size:11px">✎ Manuell (2 Klicks)</button>
             <div style="display:flex;gap:5px;margin-top:5px">
                 <button class="btn" id="btnToggleOverlay" style="flex:1;font-size:10px" title="Ring-Overlay ein/ausblenden">👁 Ringe</button>
-                <button class="btn" id="btnTsMask" style="flex:1;font-size:10px" title="Timestamp-Maske unten ein/aus">🔳 Maske</button>
+                <button class="btn" id="btnTsMask" style="flex:1;font-size:10px" title="Timestamp-Maske an/aus">🔳 Maske</button>
+                <button class="btn" id="btnTsMaskEdit" style="flex:1;font-size:10px" title="Maske verschieben">✎ Justieren</button>
                 <button class="btn" id="btnClearCalib" style="flex:1;font-size:10px" title="Kalibrierung verwerfen">✗ Reset</button>
             </div>
             <div class="calib-status" id="calibStatus">Nicht kalibriert</div>
@@ -903,7 +904,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.108';
+const APP_VERSION = '2.3.109';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3384,40 +3385,37 @@ document.getElementById('btnToggleOverlay').addEventListener('click', () => {
     }
 })();
 
-// Timestamp-Maske Toggle (Click = an/aus, Long-Press = Edit-Mode)
+// Timestamp-Maske Toggle (an/aus)
 const tsMaskBtn = document.getElementById('btnTsMask');
-let tsMaskBtnPressTimer = null;
-tsMaskBtn.addEventListener('click', (e) => {
-    if (tsMaskEditMode) {
-        // Im Edit-Mode: Click beendet ihn
-        tsMaskEditMode = false;
-        saveTsMask();
-        setStatus('Maske-Position gespeichert', 'ok');
-        tsMaskBtn.style.background = '';
-        tsMaskBtn.title = 'Timestamp-Maske ein/aus · Long-Press: Edit';
-        return;
-    }
+tsMaskBtn.addEventListener('click', () => {
     timestampMaskVisible = !timestampMaskVisible;
     localStorage.setItem('tp_ts_mask', timestampMaskVisible ? 'true' : 'false');
     tsMaskBtn.style.opacity = timestampMaskVisible ? '1' : '0.6';
 });
-// Long-Press auf Mask-Button = Edit-Modus aktivieren (Drag im Canvas)
-const startTsEdit = () => {
-    if (!timestampMaskVisible) return;
-    tsMaskBtnPressTimer = setTimeout(() => {
-        tsMaskEditMode = true;
-        tsMaskBtn.style.background = 'rgba(232,64,64,0.3)';
-        setStatus('Maske-Edit aktiv: Drag auf Bild zum Verschieben, Click auf Maske-Button zum Speichern', 'warn');
-    }, 600);
-};
-const cancelTsEdit = () => { clearTimeout(tsMaskBtnPressTimer); tsMaskBtnPressTimer = null; };
-tsMaskBtn.addEventListener('mousedown', startTsEdit);
-tsMaskBtn.addEventListener('touchstart', startTsEdit, { passive: true });
-tsMaskBtn.addEventListener('mouseup', cancelTsEdit);
-tsMaskBtn.addEventListener('mouseleave', cancelTsEdit);
-tsMaskBtn.addEventListener('touchend', cancelTsEdit);
-tsMaskBtn.title = 'Timestamp-Maske ein/aus · Long-Press: Edit-Modus';
 tsMaskBtn.style.opacity = timestampMaskVisible ? '1' : '0.6';
+
+// Maske-Edit-Modus Toggle: ein eigener Button, Click aktiviert/deaktiviert.
+// Edit-Mode an: Drag auf Canvas verschiebt Mask. Click erneut = speichern + aus.
+const tsMaskEditBtn = document.getElementById('btnTsMaskEdit');
+tsMaskEditBtn.addEventListener('click', () => {
+    tsMaskEditMode = !tsMaskEditMode;
+    if (tsMaskEditMode) {
+        if (!timestampMaskVisible) {
+            // Maske automatisch einblenden wenn Edit-Mode aktiviert
+            timestampMaskVisible = true;
+            localStorage.setItem('tp_ts_mask', 'true');
+            tsMaskBtn.style.opacity = '1';
+        }
+        tsMaskEditBtn.style.background = 'rgba(232,64,64,0.4)';
+        tsMaskEditBtn.style.color = '#fff';
+        setStatus('Maske-Edit aktiv: ziehen um zu verschieben, "✎ Justieren" zum Speichern', 'warn');
+    } else {
+        saveTsMask();
+        tsMaskEditBtn.style.background = '';
+        tsMaskEditBtn.style.color = '';
+        setStatus('Maske-Position gespeichert', 'ok');
+    }
+});
 
 // Drag auf Canvas verschiebt Mask wenn Edit-Mode aktiv
 function getCanvasPointer(e) {
