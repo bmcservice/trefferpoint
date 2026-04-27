@@ -62,7 +62,9 @@ class RtspMediaCodecPipeline(
         private const val TAG = "RtspMediaCodec"
         private const val IMAGE_WIDTH = 960
         private const val IMAGE_HEIGHT = 540
-        private const val JPEG_QUALITY = 90
+        // JPEG_QUALITY: 80 statt 90 → ~25% schneller, Bildqualität für Treffererkennung
+        // völlig ausreichend (Treffer-Detection braucht keine fotografische Schärfe).
+        private const val JPEG_QUALITY = 80
         private const val MAX_IMAGES = 6
         private const val NAL_BUFFER_SIZE = 256 * 1024  // max 256 KB pro NAL-Unit
         // PTS-Konversion: RTP-Timestamp ist in 90kHz, MediaCodec PTS in µs
@@ -229,10 +231,6 @@ class RtspMediaCodecPipeline(
     private fun setupImageReader() {
         imageThread = HandlerThread("RtspMediaCodecImg").apply { start() }
         imageHandler = Handler(imageThread!!.looper)
-        encoderThread = HandlerThread("RtspMediaCodecEnc").apply { start() }
-        encoderHandler = Handler(encoderThread!!.looper)
-        encodePending = false
-        encodeDropped = 0L
 
         imageReader = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ImageReader.newInstance(
@@ -242,45 +240,26 @@ class RtspMediaCodecPipeline(
         } else {
             ImageReader.newInstance(IMAGE_WIDTH, IMAGE_HEIGHT, ImageFormat.YUV_420_888, MAX_IMAGES)
         }
+        // Synchroner Encoder-Pfad: war in v2.3.89 stabil. Async-Variante destabilisierte
+        // den Decoder (dequeueOutputBuffer-Exception nach Frame 5). YUV→JPEG ist ~30ms,
+        // bei 30fps-Budget knapp aber tragbar; Frame-Rate fällt ggf. auf 20fps was OK ist.
         imageReader!!.setOnImageAvailableListener({ reader ->
             try {
                 val image = reader.acquireNextImage() ?: return@setOnImageAvailableListener
                 try {
-                    // YUV-Plane-Daten kopieren während Image noch lebt.
-                    // YuvImage.compressToJpeg ist die teure Op (~30ms) — wird auf encoderThread
-                    // ausgelagert, damit dieser Listener schnell zurückkehrt und der
-                    // Decoder-Output-Pool nicht blockiert.
-                    val nv21 = yuv420ToNv21(image)
                     val w = image.width
                     val h = image.height
-
-                    // Drop-Frame wenn Encoder noch beschäftigt — bevor Backlog entsteht.
-                    if (encodePending) {
-                        encodeDropped++
-                        if (encodeDropped == 1L || encodeDropped % 30L == 0L) {
-                            AppLog.i(TAG, "Encoder-Backlog: $encodeDropped Frames gedroppt")
-                        }
-                        return@setOnImageAvailableListener
+                    val nv21 = yuv420ToNv21(image)
+                    val jpeg = nv21ToJpeg(nv21, w, h)
+                    lastFrameJpeg = jpeg
+                    frameCount++
+                    if (frameCount == 1L) {
+                        AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${w}x${h}")
+                        onStatus("RTSP-Stream aktiv")
+                    } else if (frameCount <= 5L || frameCount % 30L == 0L) {
+                        AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG")
                     }
-                    encodePending = true
-                    encoderHandler?.post {
-                        try {
-                            val jpeg = nv21ToJpeg(nv21, w, h)
-                            lastFrameJpeg = jpeg
-                            frameCount++
-                            if (frameCount == 1L) {
-                                AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${w}x${h}")
-                                onStatus("RTSP-Stream aktiv")
-                            } else if (frameCount <= 5L || frameCount % 30L == 0L) {
-                                AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG (drops=$encodeDropped)")
-                            }
-                            onJpegFrame(jpeg)
-                        } catch (e: Exception) {
-                            AppLog.w(TAG, "JPEG-Encode Fehler: ${e.message}")
-                        } finally {
-                            encodePending = false
-                        }
-                    }
+                    onJpegFrame(jpeg)
                 } finally {
                     image.close()
                 }
