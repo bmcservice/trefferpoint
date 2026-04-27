@@ -36,8 +36,6 @@ class RtspSdpProxy(
         // → Bild grün-korrumpiert. Smoother deaktiviert in v2.3.87, Threshold zurück.
         // v2.3.88+ wird MediaCodec direkt ansteuern um den Recycle durch flush() zu ersetzen.
         private const val IDR_RESTART_THRESHOLD = 3
-        // Smoother komplett aus: H.264-konform Stream durchlassen, kein frame_num-Patch.
-        private const val ENABLE_FRAMENUM_SMOOTHER = false
     }
 
     @Volatile private var active = false
@@ -48,10 +46,8 @@ class RtspSdpProxy(
     // wiederholte SPS+PPS an Segment-Grenzen, damit ExoPlayer keinen Decoder-Reset versucht).
     @Volatile private var idrEverInjected = false
 
-    // H.264 frame_num Smoother — fängt den frame_num-Reset-Bug der Kamera ab,
-    // der den SW-Decoder nach mehreren IDR-Boundaries zum Crash bringt.
-    // SPS wird beim DESCRIBE-Response aus sprop-parameter-sets extrahiert.
-    private val frameNumSmoother = H264FrameNumSmoother()
+    // (H264FrameNumSmoother in v2.3.87 entfernt — verworfener Wurzelfix-Versuch.
+    //  v2.3.88+ nutzt MediaCodec direkt mit decoder.flush() bei IDR.)
 
     /**
      * Wird am Anfang jedes Kamera-Reconnects (Segment-Boundary) aufgerufen —
@@ -77,7 +73,6 @@ class RtspSdpProxy(
         serverSock = ServerSocket(proxyPort)
         active = true
         idrEverInjected = false  // neue Session — IDR-Relabel wieder erlauben
-        frameNumSmoother.fullReset()  // SPS muss erneut geparsed werden
         thread(name = "rtsp-proxy-accept") {
             try {
                 while (active) {
@@ -343,20 +338,8 @@ class RtspSdpProxy(
         val headers = response.substring(0, cut + 4)
         var sdp = response.substring(cut + 4)
 
-        // sprop-parameter-sets aus SDP extrahieren — enthält SPS+PPS als Base64.
-        // Format: a=fmtp:96 ... sprop-parameter-sets=<SPS-base64>,<PPS-base64>
-        // SPS muss vor dem ersten RTP-Paket geparsed sein damit der frame_num-
-        // Smoother log2_max_frame_num_minus4 kennt.
-        val spropMatch = Regex("sprop-parameter-sets=([A-Za-z0-9+/=]+)(,[A-Za-z0-9+/=]+)?")
-            .find(sdp)
-        if (spropMatch != null) {
-            val spsBase64 = spropMatch.groupValues[1]
-            val ok = frameNumSmoother.parseSpsFromBase64(spsBase64)
-            AppLog.i(TAG, "SDP sprop-parameter-sets geparsed: SPS-Base64='${spsBase64.take(40)}...' " +
-                "→ Smoother-Init ${if (ok) "OK" else "FEHLER"}")
-        } else {
-            AppLog.w(TAG, "SDP enthält kein sprop-parameter-sets — Smoother bleibt inaktiv")
-        }
+        // (sprop-parameter-sets-Extraktion war für den Smoother — entfernt in v2.3.88.
+        //  RtspMediaCodecPipeline parsed jetzt selbst SPS+PPS aus seinem eigenen DESCRIBE.)
 
         sdp = sdp.replace("\r\na=recvonly", "")
         sdp = sdp.replace("\na=recvonly", "")
@@ -522,39 +505,9 @@ class RtspSdpProxy(
                     }
                 }
 
-                // ─── H.264 frame_num Smoothing (deaktiviert seit v2.3.87) ───
-                // v2.3.86 hat bewiesen: Smoothing verhindert Crash, bricht aber
-                // Reference-Picture-Management → grün-korrumpierte Bilder.
-                // Decoder erwartet IDR mit frame_num=0; modifizierte IDRs verwirren den DPB.
-                // Roadmap: v2.3.88+ → MediaCodec direkt + flush() bei IDR.
-                if (ENABLE_FRAMENUM_SMOOTHER && !isAudioPacket && ch % 2 == 0 && len >= 14) {
-                    val nt = pktBuf[16].toInt() and 0x1F
-                    val rtpHdrLen = 12  // Standard RTP-Header
-                    when (nt) {
-                        1, 5 -> {
-                            // Single NAL Unit packet, Slice-Body bei pktBuf[16 + 1] = [17]
-                            val sliceOff = 4 + rtpHdrLen + 1  // 4 (TCP) + 12 (RTP) + 1 (NAL-Header)
-                            val sliceLen = len - rtpHdrLen - 1
-                            if (sliceLen > 0) {
-                                frameNumSmoother.patchSliceFrameNum(pktBuf, sliceOff, sliceLen, isIdr = (nt == 5))
-                            }
-                        }
-                        28 -> {
-                            // FU-A: Original-NAL-Type aus FU-Header (pktBuf[17] bits 0-4).
-                            // Patch nur beim S-Bit-Fragment (= erstes Fragment einer Slice-NAL).
-                            val fuHdr = pktBuf[17].toInt()
-                            val origType = fuHdr and 0x1F
-                            val sBit = (fuHdr and 0x80) != 0
-                            if (sBit && (origType == 1 || origType == 5)) {
-                                val sliceOff = 4 + rtpHdrLen + 2  // FU-Indicator + FU-Header
-                                val sliceLen = len - rtpHdrLen - 2
-                                if (sliceLen > 0) {
-                                    frameNumSmoother.patchSliceFrameNum(pktBuf, sliceOff, sliceLen, isIdr = (origType == 5))
-                                }
-                            }
-                        }
-                    }
-                }
+                // (frame_num Smoothing-Block in v2.3.87/88 entfernt — Wurzelfix-Versuch
+                //  scheiterte am Reference-Picture-Management. Korrekter Fix:
+                //  RtspMediaCodecPipeline mit decoder.flush() bei IDR-Boundary.)
 
                 // SPS/PPS-Dedup (Firmware-Bug #8): Kamera resendet SPS+PPS vor jedem
                 // Segment. ExoPlayer's RtpH264Reader interpretiert das als Format-Change
