@@ -377,37 +377,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Drop-Frame-Strategie für WebView-Push:
-    // Pipeline läuft mit ~30 fps; WebView-Roundtrip (Base64→atob→Blob→Canvas) schafft das
-    // nicht sauber → Flackern. Wir pushen nur dann ein neues Frame wenn das vorherige
-    // im WebView fertig ist (= evaluateJavascript-Callback gefeuert hat).
-    @Volatile private var webViewPushPending = false
+    // Drop-Frame-Strategie für WebView-Push (v2.3.98+):
+    // Hard-Throttle auf max ~25 fps zur WebView. Deterministisch, kein Callback-Race
+    // mehr (in v2.3.96/97 blieb webViewPushPending manchmal hängen → Flackern).
+    // Pipeline + DevHttpServer kriegen weiterhin alle Frames (volle 30 fps).
     @Volatile private var webViewDropped = 0L
     private var lastWebViewPushNs = 0L
+    private val webViewMinIntervalNs = 40_000_000L  // 40ms = max 25 fps
 
     private fun pushFrameToWebView(jpeg: ByteArray) {
-        if (webViewPushPending) {
+        val now = System.nanoTime()
+        if (now - lastWebViewPushNs < webViewMinIntervalNs) {
             webViewDropped++
-            if (webViewDropped == 1L || webViewDropped % 60L == 0L) {
-                AppLog.i(TAG, "WebView-Drop: $webViewDropped Frames übersprungen (Roundtrip-Backlog)")
+            if (webViewDropped == 1L || webViewDropped % 90L == 0L) {
+                AppLog.i(TAG, "WebView-Drop: $webViewDropped Frames übersprungen (Throttle 25fps)")
             }
             return
         }
-        webViewPushPending = true
+        lastWebViewPushNs = now
         val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
         runOnUiThread {
             try {
                 webView.evaluateJavascript(
-                    "window.tpReceiveFrame && window.tpReceiveFrame('$b64')"
-                ) { _ ->
-                    // Callback feuert wenn JS-Evaluation komplett ist (img.src=blob fertig).
-                    webViewPushPending = false
-                }
-            } catch (e: Exception) {
-                webViewPushPending = false
-            }
+                    "window.tpReceiveFrame && window.tpReceiveFrame('$b64')",
+                    null
+                )
+            } catch (_: Exception) {}
         }
-        lastWebViewPushNs = System.nanoTime()
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
