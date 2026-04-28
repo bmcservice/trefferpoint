@@ -472,6 +472,44 @@
         body.view-anzeige .camera-wrap { flex: 1; }
         body.view-anzeige .overlay-msg { display: none; }
         body.view-anzeige .last-hit-pop { display: flex; }
+        /* Anzeige-Modus: Header minimieren → maximale Kamerafläche */
+        body.view-anzeige header {
+            height: 36px;
+            padding: 0 8px;
+            gap: 8px;
+        }
+        body.view-anzeige .logo,
+        body.view-anzeige .logo-sub { display: none; }
+
+        /* PANEL COLLAPSE TOGGLE BAR */
+        .panel-toggle-bar {
+            width: 18px;
+            background: var(--surface);
+            border-left: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .panel-toggle-bar button {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 13px;
+            cursor: pointer;
+            padding: 16px 0;
+            line-height: 1;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+        .panel-toggle-bar button:hover { color: var(--accent); }
+        body.panel-collapsed .panel { width: 0 !important; overflow: hidden; min-width: 0; border: none; }
+        /* In portrait the panel sits at bottom — toggle n/a */
+        @media (orientation: portrait) { .panel-toggle-bar { display: none; } }
+        /* In Anzeige/Treffer the panel is already gone — toggle n/a */
+        body.view-anzeige .panel-toggle-bar,
+        body.view-treffer .panel-toggle-bar { display: none; }
 
         .tv-scores {
             display: flex;
@@ -816,6 +854,11 @@
         <button class="btn" id="btnExportTv" style="margin:8px 16px;display:none">💾 Testbericht speichern</button>
     </div>
 
+    <!-- PANEL COLLAPSE TOGGLE -->
+    <div class="panel-toggle-bar">
+        <button id="btnPanelToggle" title="Panel ein-/ausblenden">▶</button>
+    </div>
+
     <!-- SIDE PANEL -->
     <div class="panel">
 
@@ -1052,7 +1095,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.119';
+const APP_VERSION = '2.3.120';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2275,97 +2318,61 @@ function loop() {
     rafId = requestAnimationFrame(loop);
 }
 
-// --- Calibration Overlay (synthetisch überlagert mit Ellipsen) ---
+// --- Calibration Overlay (v2.3.120: nur farbige Ring-Konturen, kein Fill) ---
+// Grün  = Kalibrierung gesichert (pxPerMm im Normalbereich 1.0–3.5)
+// Rot   = manueller Eingriff nötig (pxPerMm außerhalb, oder manueller Kalib-Modus)
 function drawOverlay() {
     if (!calib) return;
     const disc = DISCS[document.getElementById('discSel').value];
     const { cx, cy, a, b, angle, pxPerMm } = calib;
 
-    // Hilfsfunktion: Ellipse zeichnen (rotiert)
-    function drawEllipseRing(c, radiusMm, strokeStyle, lineWidth, fillStyle) {
-        const ra = radiusMm * (a / Math.sqrt(a * b));  // Halbachse X skaliert
-        const rb = radiusMm * (b / Math.sqrt(a * b));  // Halbachse Y skaliert
-        c.save();
-        c.translate(cx, cy);
-        c.rotate(angle);
-        c.beginPath();
-        c.ellipse(0, 0, ra, rb, 0, 0, Math.PI * 2);
-        if (fillStyle) { c.fillStyle = fillStyle; c.fill(); }
-        if (strokeStyle) { c.strokeStyle = strokeStyle; c.lineWidth = lineWidth; c.stroke(); }
-        c.restore();
+    // Farbe je nach Kalibrierungs-Qualität
+    const ppmOk = pxPerMm >= 1.0 && pxPerMm <= 3.5;
+    const manualMode = appState === 'CALIB_CTR' || appState === 'CALIB_EDGE';
+    const isGreen = ppmOk && !manualMode;
+    // Grün: 40,185,80 / Rot: 220,60,50
+    const colOuter = isGreen ? 'rgba(40,185,80,0.75)'  : 'rgba(220,60,50,0.80)';
+    const colInner = isGreen ? 'rgba(40,185,80,0.45)'  : 'rgba(220,60,50,0.50)';
+    const colBlack = isGreen ? 'rgba(40,185,80,0.30)'  : 'rgba(220,60,50,0.35)';
+
+    // Hilfsfunktion: Ellipsen-Kontur ohne Fill
+    function strokeRing(radiusMm, color, lw, dash) {
+        const ra = radiusMm * (a / Math.sqrt(a * b));
+        const rb = radiusMm * (b / Math.sqrt(a * b));
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, ra, rb, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw;
+        if (dash) ctx.setLineDash(dash);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
     }
 
-    // Synthetische Scheibe semi-transparent
-    ctx.save();
-    ctx.globalAlpha = 0.3;
-    // Ringe von außen nach innen füllen
-    [...disc.ringe].reverse().forEach(rng => {
-        const isBlack = determineRingColor(disc, rng.r);
-        drawEllipseRing(ctx, rng.radius, null, 0, isBlack ? '#111' : '#fff');
-    });
-    ctx.restore();
-
-    // Goldene Ring-Konturen
-    ctx.save();
+    // Alle Ringe — Spiegel (Ring ≥ 7) heller, Außenringe dunkler
     disc.ringe.forEach(rng => {
-        drawEllipseRing(ctx, rng.radius,
-            rng.r >= 9 ? 'rgba(200,168,75,0.85)' : 'rgba(200,168,75,0.4)',
-            rng.r >= 9 ? 1.5 : 1, null);
+        const isSpiegel = rng.r >= 7;
+        strokeRing(rng.radius,
+            isSpiegel ? colOuter : colInner,
+            isSpiegel ? (rng.r >= 9 ? 1.8 : 1.2) : 0.8);
     });
 
-    // ✓ Grüne Ziel-Erfassungsmarkierung — zeigt dass Kalibrierung aktiv ist
-    const outerRadius = disc.ringe[0].radius * 1.04;
-    drawEllipseRing(ctx, outerRadius, 'rgba(62,207,142,0.9)', 3, null);
+    // Äußerer Rahmen-Ring (etwas außerhalb Ring 3 — zeigt aktiven Erkennungsbereich)
+    strokeRing(disc.ringe[disc.ringe.length - 1].radius * 1.05,
+        isGreen ? 'rgba(40,185,80,0.55)' : 'rgba(220,60,50,0.60)', 1.5, [6,4]);
 
-    // 🎯 ERKENNUNGS-DEBUG: zeigt WORAN sich die App orientiert hat
-    // Rote gestrichelte Ellipse = erkannter Schwarz/Weiß-Übergang (Spiegel-Außenrand)
-    if (a && b) {
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate(angle);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, a, b, 0, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(232,133,58,0.9)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 5]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.restore();
-    }
-
-    // Cyan-Fadenkreuz + Punkt am erkannten geometrischen Zentrum
+    // Zentrum-Kreuz (klein, transparent)
     ctx.save();
-    ctx.strokeStyle = 'rgba(62,207,207,0.95)';
-    ctx.fillStyle = 'rgba(62,207,207,0.95)';
-    ctx.lineWidth = 2;
-    const crossSize = 22;
+    ctx.strokeStyle = isGreen ? 'rgba(40,185,80,0.70)' : 'rgba(220,60,50,0.75)';
+    ctx.lineWidth = 1.5;
+    const cs = Math.max(10, (a || 50) * 0.06);
     ctx.beginPath();
-    ctx.moveTo(cx - crossSize, cy); ctx.lineTo(cx + crossSize, cy);
-    ctx.moveTo(cx, cy - crossSize); ctx.lineTo(cx, cy + crossSize);
+    ctx.moveTo(cx - cs, cy); ctx.lineTo(cx + cs, cy);
+    ctx.moveTo(cx, cy - cs); ctx.lineTo(cx, cy + cs);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // (Das goldene Fadenkreuz wurde durch den Cyan-Zentrums-Marker oben ersetzt —
-    //  das Cyan ist eindeutig das ERKANNTE Zentrum, nicht nur normative Ring-Mitte.)
-
-    // Ellipsen-Hauptachsen anzeigen wenn deutlich oval (ab 8% Abweichung)
-    if (calib.a && calib.b && Math.abs(calib.a - calib.b) > calib.a * 0.08) {
-        ctx.strokeStyle = 'rgba(200,168,75,0.5)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate(angle);
-        ctx.beginPath();
-        ctx.moveTo(-a, 0); ctx.lineTo(a, 0);
-        ctx.moveTo(0, -b); ctx.lineTo(0, b);
-        ctx.stroke();
-        ctx.restore();
-        ctx.setLineDash([]);
-    }
     ctx.restore();
 }
 
@@ -2869,6 +2876,17 @@ function toggleFullscreen() {
         document.getElementById('btnFullscreen').title = 'Vollbild';
     }
 }
+
+// Panel collapse toggle
+(function() {
+    const btn = document.getElementById('btnPanelToggle');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        const collapsed = document.body.classList.toggle('panel-collapsed');
+        btn.textContent = collapsed ? '◀' : '▶';
+        btn.title = collapsed ? 'Panel einblenden' : 'Panel ausblenden';
+    });
+})();
 document.addEventListener('fullscreenchange', () => {
     const btn = document.getElementById('btnFullscreen');
     if (!document.fullscreenElement) {
