@@ -929,7 +929,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.115';
+const APP_VERSION = '2.3.116';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1040,6 +1040,11 @@ const DISCS = {
         kaliberLabel: '.22',
         kaliber: 5.6,  // mm (intern genutzt)
         sensDefault: 40,  // v2.3.115: aus Offline-Sweep (.22 / 14 Treffer Ground-Truth)
+        // v2.3.116: niedrigerer minPtsFactor für .22 — JPEG-Kompression reduziert
+        // Diff-Signal an Lochrändern → Cluster hat live 7-8 statt 9 Punkte.
+        // Per-Disc (nur kk25, nicht gk25) → 9mm-Zählgenauigkeit bleibt erhalten.
+        // Offline-Sweep: mpf=0.75 → .22=16 (+2 FP offline, aber Persistenz-Maske live filtert).
+        minPtsFactor: 0.75,
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -2693,6 +2698,7 @@ function setupBridgeFrameReceiver() {
         document.getElementById('btnRef').disabled = false;
         document.getElementById('btnDetect').disabled = false;
         document.getElementById('camControlsSection').style.display = '';
+        initShutterPresets();  // v2.3.116: sicherheitshalber nochmal aufrufen (idempotent)
         setStatus('Stream aktiv \u00b7 native Bridge', 'ok');
         setMsg('Auto-Erkennung \u2192 Button klicken');
         if (!rafId) startLoop();
@@ -3497,8 +3503,12 @@ function compareNow() {
     // Erwartete Diff-Pixel pro Loch ≈ π × (kaliber × pxPerMm)² / (4 × STEP²).
     // v2.3.115: MIN_PTS = volle Erwartung (Faktor 1.0) statt 0.6 — strenger Filter
     // gegen Cluster-Splits durch Background-Drift. Empirisch validiert.
+    // v2.3.116: per-Disc-Faktor (disc.minPtsFactor). kk25=0.75, gk25=1.0.
+    // JPEG-Kompression reduziert .22-Lochwert auf 7-8 Punkte → minPtsFactor=0.75
+    // erlaubt Cluster ab 7 Punkten. Persistenz-Maske federt Offline-FP-Risiko ab.
     const expectedPerHole = Math.PI * bulletPx * bulletPx / (4 * STEP * STEP);
-    const MIN_PTS = Math.max(5, Math.round(expectedPerHole * 1.0));
+    const mpf = (typeof disc.minPtsFactor === 'number') ? disc.minPtsFactor : 1.0;
+    const MIN_PTS = Math.max(5, Math.round(expectedPerHole * mpf));
     const MAX_PTS = Math.max(1500, Math.round(expectedPerHole * 8));
     const validClusters = clusters.filter(c => c.count >= MIN_PTS && c.count <= MAX_PTS);
 
@@ -3694,14 +3704,20 @@ document.getElementById('btnClearCalib').addEventListener('click', () => {
     setMsg('Auto-Erkennung oder Manuell zum neu Kalibrieren');
 });
 
-// Shutter-Time-Presets nur in Android-APK einblenden + Event-Handler anbinden
-(function() {
+// Shutter-Time-Presets (Belichtung + Gain) für Android-APK einblenden.
+// v2.3.116: Named-Function statt IIFE — idempotent (data-init Guard).
+// Wird beim Page-Load UND aus setupBridgeFrameReceiver aufgerufen,
+// damit der Abschnitt auch dann erscheint wenn tpBridge erst nach dem
+// ersten Parse-Durchlauf verfügbar wird (ältere WebView-Varianten).
+function initShutterPresets() {
     const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
         window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
     if (!inAndroidApp) return;
     const presetsBox = document.getElementById('shutterPresets');
-    const statusEl = document.getElementById('shutterStatus');
+    if (presetsBox.dataset.init) return;  // idempotent: Event-Listener nur einmal anbinden
+    presetsBox.dataset.init = '1';
     presetsBox.style.display = '';
+    const statusEl = document.getElementById('shutterStatus');
     document.querySelectorAll('.shutter-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const ms = parseInt(btn.dataset.ms);
@@ -3737,7 +3753,8 @@ document.getElementById('btnClearCalib').addEventListener('click', () => {
             statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
         }
     });
-})();
+}
+initShutterPresets();  // Versuch beim Page-Load (tpBridge meist schon verfügbar)
 
 document.getElementById('btnRotateCam').addEventListener('click', () => {
     camRotation = (camRotation + 90) % 360;
