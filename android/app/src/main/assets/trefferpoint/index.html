@@ -929,7 +929,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.112';
+const APP_VERSION = '2.3.113';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3244,7 +3244,54 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
 // - Algorithmus findet ALLE Differenz-Cluster (= einzelne Schuss-Löcher)
 // - Jeder Cluster wird als Treffer in hits[] eingefügt mit Ringauswertung
 // Vorteil gegenüber Live-Erkennung: kein 15-2500-Pixel-Limit, kein 2-Frame-Confirm.
-let compareReference = null;  // ImageData von der leeren Scheibe
+// v2.3.113: compareReference ist jetzt ein Wrapper-Objekt:
+//   { imageData, refSpiegelCx, refSpiegelCy }
+// Damit kann compareNow() den aktuellen Spiegel-Mittelpunkt erneut detektieren
+// und die Reference-Pixelposition entsprechend verschieben (Auto-Re-Align).
+// Das fängt das physische Problem ab, dass beim Spiegel-Tausch der Inner-Spiegel
+// um 1-3 Pixel wandert → ohne Re-Align würden ALLE Ring-Linien als Diff registrieren.
+let compareReference = null;
+
+// detectSpiegelCenter: Schwerpunkt der dunklen Pixel in einem Suchfenster.
+// hint = {cx, cy, r} schränkt Suchbereich ein (typisch von calib).
+// Liefert {cx, cy, count} oder null wenn nicht detektierbar.
+function detectSpiegelCenter(imageData, W, H, hint) {
+    const data = imageData.data;
+    const STEP = 4;
+    let xMin = 0, xMax = W, yMin = 0, yMax = H;
+    if (hint && hint.cx != null) {
+        const r = hint.r || 250;
+        xMin = Math.max(0, Math.round(hint.cx - r));
+        xMax = Math.min(W, Math.round(hint.cx + r));
+        yMin = Math.max(0, Math.round(hint.cy - r));
+        yMax = Math.min(H, Math.round(hint.cy + r));
+    }
+    // Pass 1: Helligkeits-Mittel im Fenster
+    let total = 0, count = 0;
+    for (let y = yMin; y < yMax; y += STEP) {
+        for (let x = xMin; x < xMax; x += STEP) {
+            const i = (y * W + x) * 4;
+            total += (data[i] + data[i+1] + data[i+2]) / 3;
+            count++;
+        }
+    }
+    if (count === 0) return null;
+    const avgBright = total / count;
+    const darkThreshold = avgBright * 0.45;
+    // Pass 2: Schwerpunkt der dunklen Pixel
+    let sumX = 0, sumY = 0, darkCount = 0;
+    for (let y = yMin; y < yMax; y += STEP) {
+        for (let x = xMin; x < xMax; x += STEP) {
+            const i = (y * W + x) * 4;
+            const b = (data[i] + data[i+1] + data[i+2]) / 3;
+            if (b < darkThreshold) {
+                sumX += x; sumY += y; darkCount++;
+            }
+        }
+    }
+    if (darkCount < 50) return null;
+    return { cx: sumX / darkCount, cy: sumY / darkCount, count: darkCount };
+}
 
 function setCompareReference() {
     if (!ctx || !canvas.width) {
@@ -3252,9 +3299,19 @@ function setCompareReference() {
         return;
     }
     try {
-        compareReference = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Inner-Spiegel-Mittelpunkt im Reference-Frame detektieren (Hint aus Kalibrierung)
+        const hint = (calib && calib.cx != null) ?
+            { cx: calib.cx, cy: calib.cy, r: Math.max(calib.a || 200, calib.b || 200) * 1.5 } : null;
+        const center = detectSpiegelCenter(imageData, canvas.width, canvas.height, hint);
+        compareReference = {
+            imageData: imageData,
+            refSpiegelCx: center ? center.cx : null,
+            refSpiegelCy: center ? center.cy : null
+        };
+        const alignTxt = center ? ` · Spiegel-Center (${center.cx.toFixed(1)}, ${center.cy.toFixed(1)})` : ' · ohne Auto-Align';
         document.getElementById('compareStatus').textContent =
-            `✓ Referenz gesetzt (${canvas.width}×${canvas.height})`;
+            `✓ Referenz gesetzt (${canvas.width}×${canvas.height})${alignTxt}`;
         document.getElementById('btnCompareNow').disabled = false;
         document.getElementById('btnCompareReset').disabled = false;
         setStatus('Vergleichs-Referenz gesetzt — beschossene Scheibe aufhängen, dann "Vergleiche jetzt"', 'ok');
@@ -3278,27 +3335,61 @@ function compareNow() {
     try { cur = ctx.getImageData(0, 0, canvas.width, canvas.height); }
     catch(e) { setStatus('Pixel-Zugriff blockiert', 'warn'); return; }
 
-    if (cur.width !== compareReference.width || cur.height !== compareReference.height) {
+    const refImg = compareReference.imageData;
+    if (cur.width !== refImg.width || cur.height !== refImg.height) {
         setStatus('Bildgröße hat sich geändert — neue Referenz nötig', 'warn');
         return;
     }
 
-    const prev = compareReference.data;
+    const prev = refImg.data;
     const next = cur.data;
     const W = cur.width, H = cur.height;
     const threshold = parseInt(document.getElementById('sens').value);
 
-    // 1. Differenz-Punkte sammeln (gleicher Algorithmus wie Live-Detection, aber kein Limit)
+    // v2.3.113 Auto-Re-Align: aktuellen Spiegel-Mittelpunkt detektieren und mit
+    // dem Mittelpunkt aus dem Reference-Frame vergleichen. Differenz = Δx, Δy.
+    // Beim Diff lesen wir Reference an Position (x-Δx, y-Δy) statt (x, y) →
+    // Spiegel-Tausch-Drift wird kompensiert.
+    let alignDx = 0, alignDy = 0;
+    let alignInfo = '';
+    if (compareReference.refSpiegelCx != null) {
+        const hint = { cx: calib.cx, cy: calib.cy, r: Math.max(calib.a || 200, calib.b || 200) * 1.5 };
+        const curCenter = detectSpiegelCenter(cur, W, H, hint);
+        if (curCenter) {
+            const dx = curCenter.cx - compareReference.refSpiegelCx;
+            const dy = curCenter.cy - compareReference.refSpiegelCy;
+            // Sanity: nur shiften wenn plausible Verschiebung (max ±30 px)
+            if (Math.abs(dx) <= 30 && Math.abs(dy) <= 30) {
+                alignDx = Math.round(dx);
+                alignDy = Math.round(dy);
+                alignInfo = ` · Re-Align Δ(${alignDx >= 0 ? '+' : ''}${alignDx}, ${alignDy >= 0 ? '+' : ''}${alignDy})`;
+            } else {
+                alignInfo = ` · Δ(${dx.toFixed(0)}, ${dy.toFixed(0)}) verworfen (>30px)`;
+            }
+        }
+    }
+
+    // Spatial-Filter (A): nur Diff INNERHALB Inner-Spiegel + 10% Margin werten.
+    // Außerhalb (Ring 1-6 auf großer Scheibe) sind Drift-Linien nicht relevant für Treffer.
+    const spiegelR = Math.max(calib.a || 200, calib.b || 200) * 1.10;
+    const spCx = calib.cx, spCy = calib.cy;
+
+    // 1. Differenz-Punkte sammeln (mit Auto-Re-Align Offset auf Reference-Seite)
     const STEP = 3;  // Subsampling — 3 px für Performance
     const diffPoints = [];
     for (let y = 1; y < H - 1; y += STEP) {
         for (let x = 1; x < W - 1; x += STEP) {
             // Timestamp-Maske ignorieren (kleines Rechteck mittig unten)
             if (isInTsMask(x, y, W, H)) continue;
-            const i = (y * W + x) * 4;
-            const d = (Math.abs(next[i]   - prev[i])   +
-                       Math.abs(next[i+1] - prev[i+1]) +
-                       Math.abs(next[i+2] - prev[i+2])) / 3;
+            // Nur innerhalb Spiegel-Bereich
+            if (Math.hypot(x - spCx, y - spCy) > spiegelR) continue;
+            const rx = x - alignDx, ry = y - alignDy;
+            if (rx < 1 || rx >= W - 1 || ry < 1 || ry >= H - 1) continue;
+            const iCur = (y * W + x) * 4;
+            const iRef = (ry * W + rx) * 4;
+            const d = (Math.abs(next[iCur]   - prev[iRef])   +
+                       Math.abs(next[iCur+1] - prev[iRef+1]) +
+                       Math.abs(next[iCur+2] - prev[iRef+2])) / 3;
             if (d > threshold) diffPoints.push({ x, y });
         }
     }
@@ -3312,9 +3403,12 @@ function compareNow() {
         return;
     }
 
-    // 2. Connected-Components: Greedy-Cluster mit Distanz-Schwelle
-    // Treffer von Luftgewehr ~5mm Loch → bei 25m+Spektiv sind 8-15 Pixel typisch
-    const CLUSTER_RADIUS = 20;  // Pixel — alle Punkte näher als 20px = ein Treffer
+    // 2. Connected-Components: Greedy-Cluster mit Kaliber-adaptivem Radius
+    // Bullet-Loch-Pixel-Durchmesser = kaliber × pxPerMm. Cluster-Radius = 1.2× davon
+    // damit eng beieinander liegende Punkte eines Lochs zusammen finden.
+    const disc = DISCS[document.getElementById('discSel').value];
+    const bulletPx = (disc.kaliber || 5) * (calib.pxPerMm || 1);
+    const CLUSTER_RADIUS = Math.max(15, Math.round(bulletPx * 1.2));
     const clusters = [];
     for (const p of diffPoints) {
         let placed = false;
@@ -3339,8 +3433,12 @@ function compareNow() {
         }
     }
 
-    // 3. Cluster filtern: zu kleine = Rauschen, zu große = Beleuchtungs-Drift
-    const MIN_PTS = 3, MAX_PTS = 1500;
+    // 3. Cluster filtern: kaliber-adaptive MIN_PTS basierend auf Loch-Fläche.
+    // Erwartete Diff-Pixel pro Loch ≈ π × (kaliber × pxPerMm)² / (4 × STEP²).
+    // MIN_PTS auf 60% davon (Safety-Margin), aber mind. 5.
+    const expectedPerHole = Math.PI * bulletPx * bulletPx / (4 * STEP * STEP);
+    const MIN_PTS = Math.max(5, Math.round(expectedPerHole * 0.6));
+    const MAX_PTS = Math.max(1500, Math.round(expectedPerHole * 8));
     const validClusters = clusters.filter(c => c.count >= MIN_PTS && c.count <= MAX_PTS);
 
     // 4. Bestehende hits[] leeren und neue Treffer eintragen mit Ringauswertung
@@ -3368,8 +3466,8 @@ function compareNow() {
     hits.sort((a, b) => b.ring - a.ring);  // Beste zuerst sortieren
 
     document.getElementById('compareStatus').textContent =
-        `✓ ${hits.length} Treffer in ${diffPoints.length} Diff-Pixel · ${clusters.length - validClusters.length} Cluster verworfen`;
-    setStatus(`Vergleich: ${hits.length} Treffer erkannt`, 'ok');
+        `✓ ${hits.length} Treffer · ${diffPoints.length} Diff-Pixel · ${clusters.length - validClusters.length} verworfen · min-pts=${MIN_PTS} r=${CLUSTER_RADIUS}${alignInfo}`;
+    setStatus(`Vergleich: ${hits.length} Treffer erkannt${alignInfo}`, 'ok');
     setMsg('');
     if (typeof updateScore === 'function') updateScore();
 }
@@ -3638,7 +3736,10 @@ document.getElementById('btnExport').addEventListener('click', function() {
                 angle: calib.angle, pxPerMm: calib.pxPerMm
             } : null,
             hits: hits.map(function(h) {
-                return { ring: h.ring, clock: h.clock, dx: h.dx, dy: h.dy };
+                // v2.3.113: alle Felder durchreichen (compare-mode hat x/y/distMm/deg,
+                // live-detection hat x/y/ring/clock/dx/dy). Vorher: nur ring/clock/dx/dy
+                // → compare-mode-Reports waren leer außer ring.
+                return Object.assign({}, h);
             }),
             appLog: (typeof window.tpBridge !== 'undefined') ? window.tpBridge.getLog() : '',
             appStatus: (typeof window.tpBridge !== 'undefined') ? window.tpBridge.getStatus() : ''
