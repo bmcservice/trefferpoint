@@ -345,6 +345,63 @@
             padding: 4px 8px;
             font-size: 12px;
         }
+
+        /* ⚙ KAMERA QUICK-SETTINGS */
+        .cam-settings-btn {
+            position: absolute;
+            top: 8px; right: 8px;
+            background: rgba(15,18,24,0.72);
+            border: 1px solid rgba(200,168,75,0.45);
+            color: var(--accent);
+            font-size: 18px;
+            width: 38px; height: 38px;
+            border-radius: 6px;
+            cursor: pointer;
+            z-index: 20;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(4px);
+            transition: border-color 0.15s, background 0.15s;
+            user-select: none;
+        }
+        .cam-settings-btn:hover,
+        .cam-settings-btn.cqs-open {
+            background: rgba(200,168,75,0.18);
+            border-color: var(--accent);
+        }
+        #camQuickPanel {
+            display: none;
+            position: absolute;
+            top: 52px; right: 8px;
+            width: 262px;
+            max-height: calc(100% - 68px);
+            overflow-y: auto;
+            background: rgba(13,16,22,0.97);
+            border: 1px solid var(--accent);
+            border-radius: 6px;
+            z-index: 21;
+            padding: 10px 12px 14px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.85);
+            backdrop-filter: blur(8px);
+        }
+        #camQuickPanel.cqp-open { display: block; }
+        .cqp-hdr {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 9px; padding-bottom: 7px;
+            border-bottom: 1px solid var(--border);
+        }
+        .cqp-title {
+            font-size: 9.5px; letter-spacing: 0.22em;
+            color: var(--text-dim); text-transform: uppercase;
+        }
+        .cqp-close {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-dim);
+            font-size: 11px; padding: 2px 8px;
+            cursor: pointer; border-radius: 4px;
+        }
+        .cqp-sep { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+
         /* D-PAD */
         .dpad-btn {
             width: 52px; height: 52px;
@@ -657,6 +714,56 @@
                 <button class="dpad-step" id="dpadCancel" style="background:#5a1a1a;color:#fff" title="Manuelle Kalibrierung abbrechen">✗ Abbrechen</button>
             </div>
         </div>
+
+        <!-- ⚙ KAMERA QUICK-SETTINGS -->
+        <button class="cam-settings-btn" id="btnCamSettings" title="Kamera-Einstellungen">⚙</button>
+        <div id="camQuickPanel">
+            <div class="cqp-hdr">
+                <span class="cqp-title">Kamera-Einstellungen</span>
+                <button class="cqp-close" id="btnCamQClose">✕</button>
+            </div>
+            <!-- SW-Zoom (immer verfügbar) -->
+            <div class="cam-ctrl-row">
+                <span class="cam-ctrl-label">SW-Zoom</span>
+                <input type="range" id="swZoomQ" min="0.3" max="2.0" step="0.05" value="1.0"
+                    style="flex:1;accent-color:var(--accent)">
+                <span class="cam-ctrl-val" id="swZoomQVal">1.0×</span>
+            </div>
+            <!-- HW-Regler (dynamisch) -->
+            <div id="camQuickControls"></div>
+            <!-- Auto-Optimieren -->
+            <button class="btn btn-primary" id="btnAutoOptQ"
+                style="margin-top:8px;width:100%;font-size:12px">⚙ Auto-Optimieren</button>
+            <!-- Android: Shutter + Gain -->
+            <div id="camQuickShutter" style="display:none">
+                <hr class="cqp-sep">
+                <div style="font-size:10px;color:var(--text-dim);margin-bottom:5px;
+                    font-family:'Share Tech Mono',monospace">
+                    Belichtung (50Hz → 10/20 ms kein Flicker)
+                </div>
+                <div style="display:flex;gap:5px">
+                    <button class="btn qshutter-btn" data-ms="10"
+                        style="flex:1;font-size:11px;padding:5px">10 ms</button>
+                    <button class="btn qshutter-btn" data-ms="20"
+                        style="flex:1;font-size:11px;padding:5px">20 ms</button>
+                    <button class="btn qshutter-btn" data-ms="33"
+                        style="flex:1;font-size:11px;padding:5px">33 ms</button>
+                    <button class="btn" id="btnExposureAutoQ"
+                        style="flex:1;font-size:11px;padding:5px">Auto</button>
+                </div>
+                <div id="qShutterStatus" style="font-size:10px;color:var(--text-dim);
+                    margin-top:3px;font-family:'Share Tech Mono',monospace"></div>
+                <div style="display:flex;align-items:center;gap:5px;margin-top:6px">
+                    <span style="font-size:10px;color:var(--text-dim);
+                        font-family:'Share Tech Mono',monospace;white-space:nowrap">Gain</span>
+                    <input type="range" id="uvcGainQ" min="0" max="255" step="1" value="128"
+                        style="flex:1;accent-color:var(--accent)">
+                    <span style="font-size:10px;color:var(--text-dim);
+                        font-family:'Share Tech Mono',monospace;min-width:28px;text-align:right"
+                        id="gainValQ">128</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- TREFFER-VOLLANSICHT -->
@@ -929,7 +1036,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.116';
+const APP_VERSION = '2.3.117';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1350,22 +1457,35 @@ async function startCamera() {
 }
 
 // --- Camera Controls ---
+// Hilfsfunktion: Wert in beiden Panels (Side + Quick) synchronisieren
+function syncCamVal(key, v, fmt) {
+    const txt = v.toFixed(fmt < 1 ? 1 : 0);
+    const spEl = document.getElementById('cv_' + key);
+    const qpEl = document.getElementById('qv_' + key);
+    if (spEl) spEl.textContent = txt;
+    if (qpEl) qpEl.textContent = txt;
+    document.querySelectorAll(`#camControls [data-key="${key}"], #camQuickControls [data-key="${key}"]`)
+        .forEach(el => { if (parseFloat(el.value) !== v) el.value = v; });
+}
+
 function buildCamControls() {
     const track = mediaStream?.getVideoTracks()[0];
     if (!track) return;
 
     const caps = track.getCapabilities();
     const settings = track.getSettings();
-    const container = document.getElementById('camControls');
+    const spBox = document.getElementById('camControls');       // Side-Panel
+    const qpBox = document.getElementById('camQuickControls'); // Quick-Panel
     const info = document.getElementById('camCapsInfo');
-    container.innerHTML = '';
+    spBox.innerHTML = '';
+    qpBox.innerHTML = '';
 
     // Welche Slider-Controls wollen wir anbieten
     const sliderDefs = [
-        { key: 'brightness',           label: 'Helligkeit',     step: 1  },
-        { key: 'contrast',             label: 'Kontrast',       step: 1  },
-        { key: 'saturation',           label: 'Sättigung',      step: 1  },
-        { key: 'sharpness',            label: 'Schärfe',        step: 1  },
+        { key: 'brightness',           label: 'Helligkeit',     step: 1   },
+        { key: 'contrast',             label: 'Kontrast',       step: 1   },
+        { key: 'saturation',           label: 'Sättigung',      step: 1   },
+        { key: 'sharpness',            label: 'Schärfe',        step: 1   },
         { key: 'zoom',                 label: 'Zoom',           step: 0.1 },
         { key: 'exposureCompensation', label: 'Belichtung EV',  step: 0.1 },
         { key: 'colorTemperature',     label: 'Farbtemperatur', step: 10  },
@@ -1384,62 +1504,73 @@ function buildCamControls() {
 
     let count = 0;
 
-    // Slider bauen
+    // Slider in beide Panels bauen
     sliderDefs.forEach(def => {
         const cap = caps[def.key];
         if (!cap || cap.min === undefined || cap.max === undefined) return;
         count++;
 
         const cur = settings[def.key] ?? ((cap.min + cap.max) / 2);
-        const row = document.createElement('div');
-        row.className = 'cam-ctrl-row';
-        row.innerHTML = `
-            <span class="cam-ctrl-label">${def.label}</span>
-            <input type="range"
-                min="${cap.min}" max="${cap.max}"
-                step="${def.step}"
-                value="${cur}"
-                style="flex:1;accent-color:var(--accent)"
-                data-key="${def.key}">
-            <span class="cam-ctrl-val" id="cv_${def.key}">${Number(cur).toFixed(def.step < 1 ? 1 : 0)}</span>`;
-        container.appendChild(row);
-
-        row.querySelector('input').addEventListener('input', async e => {
-            const v = parseFloat(e.target.value);
-            document.getElementById('cv_' + def.key).textContent =
-                v.toFixed(def.step < 1 ? 1 : 0);
-            try {
-                await track.applyConstraints({ advanced: [{ [def.key]: v }] });
-            } catch(err) {
-                document.getElementById('cv_' + def.key).textContent = '✕';
-            }
-        });
+        const fmt = def.step < 1 ? 1 : 0;
+        const mkRow = (idPfx) => {
+            const row = document.createElement('div');
+            row.className = 'cam-ctrl-row';
+            row.innerHTML = `
+                <span class="cam-ctrl-label">${def.label}</span>
+                <input type="range" min="${cap.min}" max="${cap.max}"
+                    step="${def.step}" value="${cur}"
+                    style="flex:1;accent-color:var(--accent)"
+                    data-key="${def.key}">
+                <span class="cam-ctrl-val" id="${idPfx}_${def.key}">${Number(cur).toFixed(fmt)}</span>`;
+            row.querySelector('input').addEventListener('input', async e => {
+                const v = parseFloat(e.target.value);
+                syncCamVal(def.key, v, def.step);
+                try {
+                    await track.applyConstraints({ advanced: [{ [def.key]: v }] });
+                } catch(err) {
+                    const d1 = document.getElementById('cv_' + def.key);
+                    const d2 = document.getElementById('qv_' + def.key);
+                    if (d1) d1.textContent = '✕';
+                    if (d2) d2.textContent = '✕';
+                }
+            });
+            return row;
+        };
+        spBox.appendChild(mkRow('cv'));
+        qpBox.appendChild(mkRow('qv'));
     });
 
-    // Selects bauen
+    // Selects bauen (Side-Panel + Quick-Panel)
     selectDefs.forEach(def => {
         const cap = caps[def.key];
         if (!cap || !Array.isArray(cap) || cap.length < 2) return;
         count++;
 
         const cur = settings[def.key] ?? cap[0];
-        const row = document.createElement('div');
-        row.className = 'cam-ctrl-toggle';
-        const opts = cap.map(v =>
-            `<option value="${v}"${v===cur?' selected':''}>${v}</option>`
-        ).join('');
-        row.innerHTML = `
-            <span class="cam-ctrl-label">${def.label}</span>
-            <select data-key="${def.key}" style="flex:1">${opts}</select>`;
-        container.appendChild(row);
-
-        row.querySelector('select').addEventListener('change', async e => {
-            try {
-                await track.applyConstraints({
-                    advanced: [{ [def.key]: e.target.value }]
-                });
-            } catch(err) { console.warn('Constraint failed:', def.key, err); }
-        });
+        const mkSel = () => {
+            const opts = cap.map(v =>
+                `<option value="${v}"${v===cur?' selected':''}>${v}</option>`
+            ).join('');
+            const row = document.createElement('div');
+            row.className = 'cam-ctrl-toggle';
+            row.innerHTML = `
+                <span class="cam-ctrl-label">${def.label}</span>
+                <select data-key="${def.key}" style="flex:1">${opts}</select>`;
+            row.querySelector('select').addEventListener('change', async e => {
+                // Beide Selects synchronisieren
+                document.querySelectorAll(
+                    `#camControls [data-key="${def.key}"], #camQuickControls [data-key="${def.key}"]`
+                ).forEach(el => { el.value = e.target.value; });
+                try {
+                    await track.applyConstraints({
+                        advanced: [{ [def.key]: e.target.value }]
+                    });
+                } catch(err) { console.warn('Constraint failed:', def.key, err); }
+            });
+            return row;
+        };
+        spBox.appendChild(mkSel());
+        qpBox.appendChild(mkSel());
     });
 
     // Section anzeigen
@@ -1453,36 +1584,38 @@ function buildCamControls() {
 
     // --- Zoom Force-Test ---
     // Manche Kameras unterstützen Zoom aber melden es nicht in getCapabilities()
-    // Wir versuchen es einfach — wenn kein Fehler kommt, bauen wir den Regler nach
     if (!caps.zoom) {
         track.applyConstraints({ advanced: [{ zoom: 1.5 }] })
             .then(() => {
-                // Erfolgreich! Zoom wird unterstützt, aber nicht reported
-                // Regler nachträglich hinzufügen
-                track.applyConstraints({ advanced: [{ zoom: 1.0 }] }); // zurücksetzen
-                const row = document.createElement('div');
-                row.className = 'cam-ctrl-row';
-                row.innerHTML = `
-                    <span class="cam-ctrl-label">Zoom ⚡</span>
-                    <input type="range" min="1.0" max="5.0" step="0.1" value="1.0"
-                        style="flex:1;accent-color:var(--accent)" data-key="zoom">
-                    <span class="cam-ctrl-val" id="cv_zoom">1.0</span>`;
-                container.insertBefore(row, container.firstChild);
-                row.querySelector('input').addEventListener('input', async e => {
-                    const v = parseFloat(e.target.value);
-                    document.getElementById('cv_zoom').textContent = v.toFixed(1);
-                    try {
-                        await track.applyConstraints({ advanced: [{ zoom: v }] });
-                    } catch(err) {
-                        document.getElementById('cv_zoom').textContent = '✕';
-                    }
-                });
-                info.textContent = (info.textContent || '') + ' · Zoom via Force-Test gefunden ⚡';
+                track.applyConstraints({ advanced: [{ zoom: 1.0 }] });
+                const mkZoom = (idPfx, targetBox) => {
+                    const row = document.createElement('div');
+                    row.className = 'cam-ctrl-row';
+                    row.innerHTML = `
+                        <span class="cam-ctrl-label">Zoom ⚡</span>
+                        <input type="range" min="1.0" max="5.0" step="0.1" value="1.0"
+                            style="flex:1;accent-color:var(--accent)" data-key="zoom">
+                        <span class="cam-ctrl-val" id="${idPfx}_zoom">1.0</span>`;
+                    targetBox.insertBefore(row, targetBox.firstChild);
+                    row.querySelector('input').addEventListener('input', async e => {
+                        const v = parseFloat(e.target.value);
+                        syncCamVal('zoom', v, 0.1);
+                        try {
+                            await track.applyConstraints({ advanced: [{ zoom: v }] });
+                        } catch(err) {
+                            const d1 = document.getElementById('cv_zoom');
+                            const d2 = document.getElementById('qv_zoom');
+                            if (d1) d1.textContent = '✕';
+                            if (d2) d2.textContent = '✕';
+                        }
+                    });
+                };
+                mkZoom('cv', spBox);
+                mkZoom('qv', qpBox);
+                info.textContent = (info.textContent || '') + ' · Zoom via Force-Test ⚡';
                 document.getElementById('camControlsSection').style.display = '';
             })
-            .catch(() => {
-                // Zoom wirklich nicht unterstützt — kein Regler
-            });
+            .catch(() => { /* Zoom wirklich nicht unterstützt */ });
     }
 }
 
@@ -3209,10 +3342,16 @@ applyDiscPresets();
 // Vorschau beim Start zeichnen
 updatePreview();
 
-document.getElementById('swZoom').addEventListener('input', e => {
-    softwareZoom = parseFloat(e.target.value);
-    document.getElementById('swZoomVal').textContent = softwareZoom.toFixed(2) + '×';
-});
+function applySwZoom(v) {
+    softwareZoom = v;
+    const txt = v.toFixed(2) + '×';
+    document.getElementById('swZoom').value  = v;
+    document.getElementById('swZoomQ').value = v;
+    document.getElementById('swZoomVal').textContent  = txt;
+    document.getElementById('swZoomQVal').textContent = txt;
+}
+document.getElementById('swZoom').addEventListener('input', e => applySwZoom(parseFloat(e.target.value)));
+document.getElementById('swZoomQ').addEventListener('input', e => applySwZoom(parseFloat(e.target.value)));
 
 document.getElementById('btnCam').addEventListener('click', startCamera);
 document.getElementById('btnEnumCam').addEventListener('click', enumCameras);
@@ -3713,48 +3852,104 @@ function initShutterPresets() {
     const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
         window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
     if (!inAndroidApp) return;
+
+    // ---- Side-Panel ----
     const presetsBox = document.getElementById('shutterPresets');
-    if (presetsBox.dataset.init) return;  // idempotent: Event-Listener nur einmal anbinden
-    presetsBox.dataset.init = '1';
-    presetsBox.style.display = '';
-    const statusEl = document.getElementById('shutterStatus');
-    document.querySelectorAll('.shutter-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const ms = parseInt(btn.dataset.ms);
-            try {
-                window.tpBridge.setExposureTime(ms);
-                statusEl.textContent = '✓ Belichtung fest auf ' + ms + ' ms';
-                // Visuelle Aktiv-Markierung
-                document.querySelectorAll('.shutter-btn').forEach(b => b.style.background = '');
-                btn.style.background = 'var(--accent)';
-                btn.style.color = '#000';
-            } catch (e) {
-                statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
-            }
+    if (!presetsBox.dataset.init) {
+        presetsBox.dataset.init = '1';
+        presetsBox.style.display = '';
+        const statusEl = document.getElementById('shutterStatus');
+        document.querySelectorAll('.shutter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const ms = parseInt(btn.dataset.ms);
+                try {
+                    window.tpBridge.setExposureTime(ms);
+                    statusEl.textContent = '✓ Belichtung fest auf ' + ms + ' ms';
+                    document.querySelectorAll('.shutter-btn,.qshutter-btn').forEach(b => { b.style.background = ''; b.style.color = ''; });
+                    btn.style.background = 'var(--accent)';
+                    btn.style.color = '#000';
+                } catch (e) { statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message; }
+            });
         });
-    });
-    document.getElementById('btnExposureAuto').addEventListener('click', () => {
-        try {
-            window.tpBridge.setExposureAuto();
-            statusEl.textContent = '↻ Belichtung auf Auto zurückgesetzt';
-            document.querySelectorAll('.shutter-btn').forEach(b => { b.style.background = ''; b.style.color = ''; });
-        } catch (e) {
-            statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
-        }
-    });
-    const gainSlider = document.getElementById('uvcGain');
-    const gainValEl  = document.getElementById('gainVal');
-    gainSlider.addEventListener('input', () => { gainValEl.textContent = gainSlider.value; });
-    gainSlider.addEventListener('change', () => {
-        try {
-            window.tpBridge.setUvcGain(parseInt(gainSlider.value));
-            statusEl.textContent = '✓ Gain auf ' + gainSlider.value + ' gesetzt';
-        } catch (e) {
-            statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message;
-        }
-    });
+        document.getElementById('btnExposureAuto').addEventListener('click', () => {
+            try {
+                window.tpBridge.setExposureAuto();
+                statusEl.textContent = '↻ Auto';
+                document.querySelectorAll('.shutter-btn,.qshutter-btn').forEach(b => { b.style.background = ''; b.style.color = ''; });
+            } catch (e) { statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message; }
+        });
+        const gainSlider = document.getElementById('uvcGain');
+        const gainValEl  = document.getElementById('gainVal');
+        gainSlider.addEventListener('input', () => {
+            gainValEl.textContent = gainSlider.value;
+            document.getElementById('uvcGainQ').value    = gainSlider.value;
+            document.getElementById('gainValQ').textContent = gainSlider.value;
+        });
+        gainSlider.addEventListener('change', () => {
+            try {
+                window.tpBridge.setUvcGain(parseInt(gainSlider.value));
+                statusEl.textContent = '✓ Gain ' + gainSlider.value;
+            } catch (e) { statusEl.textContent = '⚠ Bridge-Fehler: ' + e.message; }
+        });
+    }
+
+    // ---- Quick-Panel ----
+    const qBox = document.getElementById('camQuickShutter');
+    if (!qBox.dataset.init) {
+        qBox.dataset.init = '1';
+        qBox.style.display = '';
+        const qStatus = document.getElementById('qShutterStatus');
+        document.querySelectorAll('.qshutter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const ms = parseInt(btn.dataset.ms);
+                try {
+                    window.tpBridge.setExposureTime(ms);
+                    qStatus.textContent = '✓ ' + ms + ' ms';
+                    document.querySelectorAll('.shutter-btn,.qshutter-btn').forEach(b => { b.style.background = ''; b.style.color = ''; });
+                    btn.style.background = 'var(--accent)';
+                    btn.style.color = '#000';
+                    // Auch Side-Panel-Status aktualisieren
+                    document.getElementById('shutterStatus').textContent = '✓ Belichtung fest auf ' + ms + ' ms';
+                } catch (e) { qStatus.textContent = '⚠ ' + e.message; }
+            });
+        });
+        document.getElementById('btnExposureAutoQ').addEventListener('click', () => {
+            try {
+                window.tpBridge.setExposureAuto();
+                qStatus.textContent = '↻ Auto';
+                document.querySelectorAll('.shutter-btn,.qshutter-btn').forEach(b => { b.style.background = ''; b.style.color = ''; });
+            } catch (e) { qStatus.textContent = '⚠ ' + e.message; }
+        });
+        const qGain = document.getElementById('uvcGainQ');
+        const qGainVal = document.getElementById('gainValQ');
+        qGain.addEventListener('input', () => {
+            qGainVal.textContent = qGain.value;
+            document.getElementById('uvcGain').value  = qGain.value;
+            document.getElementById('gainVal').textContent = qGain.value;
+        });
+        qGain.addEventListener('change', () => {
+            try {
+                window.tpBridge.setUvcGain(parseInt(qGain.value));
+                qStatus.textContent = '✓ Gain ' + qGain.value;
+            } catch (e) { qStatus.textContent = '⚠ ' + e.message; }
+        });
+    }
 }
 initShutterPresets();  // Versuch beim Page-Load (tpBridge meist schon verfügbar)
+
+// ⚙ Quick-Panel Toggle
+document.getElementById('btnCamSettings').addEventListener('click', () => {
+    const panel = document.getElementById('camQuickPanel');
+    const btn   = document.getElementById('btnCamSettings');
+    const open  = panel.classList.toggle('cqp-open');
+    btn.classList.toggle('cqs-open', open);
+});
+document.getElementById('btnCamQClose').addEventListener('click', () => {
+    document.getElementById('camQuickPanel').classList.remove('cqp-open');
+    document.getElementById('btnCamSettings').classList.remove('cqs-open');
+});
+// Auto-Optimieren im Quick-Panel
+document.getElementById('btnAutoOptQ').addEventListener('click', autoOptimizeCamera);
 
 document.getElementById('btnRotateCam').addEventListener('click', () => {
     camRotation = (camRotation + 90) % 360;
