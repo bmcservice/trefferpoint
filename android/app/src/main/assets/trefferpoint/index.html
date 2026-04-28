@@ -929,7 +929,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.114';
+const APP_VERSION = '2.3.115';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1039,7 +1039,7 @@ const DISCS = {
         name: 'Sportpistole 25m · KK .22',
         kaliberLabel: '.22',
         kaliber: 5.6,  // mm (intern genutzt)
-        sensDefault: 32,  // .22: kleineres Loch → empfindlicher detektieren
+        sensDefault: 40,  // v2.3.115: aus Offline-Sweep (.22 / 14 Treffer Ground-Truth)
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -1054,7 +1054,7 @@ const DISCS = {
         name: 'Pistole 25m · 9mm (GK)',
         kaliberLabel: '9mm',
         kaliber: 9.0,
-        sensDefault: 24,  // 9mm: größeres Loch, stärkeres Signal → weniger empfindlich reicht
+        sensDefault: 28,  // v2.3.115: aus Offline-Sweep (9mm / 15 Treffer Ground-Truth)
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -3465,10 +3465,10 @@ function compareNow() {
     }
 
     // 2. Connected-Components: Greedy-Cluster mit Kaliber-adaptivem Radius
-    // Bullet-Loch-Pixel-Durchmesser = kaliber × pxPerMm. Cluster-Radius = 1.2× davon
-    // damit eng beieinander liegende Punkte eines Lochs zusammen finden.
+    // v2.3.115: Faktor von 1.2 → 2.0 erhöht (entspricht Loch+Tear-Pattern-Größe).
+    // Empirisch gefunden via Offline-Sweep mit 9mm/15-Loch und .22/14-Loch Ground-Truth.
     const bulletPx = (disc.kaliber || 5) * (calib.pxPerMm || 1);
-    const CLUSTER_RADIUS = Math.max(15, Math.round(bulletPx * 1.2));
+    const CLUSTER_RADIUS = Math.max(15, Math.round(bulletPx * 2.0));
     const clusters = [];
     for (const p of diffPoints) {
         let placed = false;
@@ -3495,9 +3495,10 @@ function compareNow() {
 
     // 3. Cluster filtern: kaliber-adaptive MIN_PTS basierend auf Loch-Fläche.
     // Erwartete Diff-Pixel pro Loch ≈ π × (kaliber × pxPerMm)² / (4 × STEP²).
-    // MIN_PTS auf 60% davon (Safety-Margin), aber mind. 5.
+    // v2.3.115: MIN_PTS = volle Erwartung (Faktor 1.0) statt 0.6 — strenger Filter
+    // gegen Cluster-Splits durch Background-Drift. Empirisch validiert.
     const expectedPerHole = Math.PI * bulletPx * bulletPx / (4 * STEP * STEP);
-    const MIN_PTS = Math.max(5, Math.round(expectedPerHole * 0.6));
+    const MIN_PTS = Math.max(5, Math.round(expectedPerHole * 1.0));
     const MAX_PTS = Math.max(1500, Math.round(expectedPerHole * 8));
     const validClusters = clusters.filter(c => c.count >= MIN_PTS && c.count <= MAX_PTS);
 
