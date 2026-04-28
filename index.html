@@ -929,7 +929,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.113';
+const APP_VERSION = '2.3.114';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3293,31 +3293,83 @@ function detectSpiegelCenter(imageData, W, H, hint) {
     return { cx: sumX / darkCount, cy: sumY / darkCount, count: darkCount };
 }
 
+// v2.3.114: Reference-Setting mit 3-Frame-Persistenz-Sampling.
+// Sammelt 3 Frames im Abstand 700ms und ermittelt die Persistenz-Maske:
+// Pixel die zwischen ANY der 3 Frames diffen (= ändert sich auch ohne Schuss)
+// werden bei späterem Compare ignoriert. Das fängt Timestamp-Sekunden,
+// blinkende LEDs, sich bewegende Schatten und ähnliches automatisch ein,
+// ohne dass User Position/Größe einer Maske händisch konfigurieren muss.
 function setCompareReference() {
     if (!ctx || !canvas.width) {
         setStatus('Kein Bild verfügbar', 'warn');
         return;
     }
-    try {
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        // Inner-Spiegel-Mittelpunkt im Reference-Frame detektieren (Hint aus Kalibrierung)
+    const W = canvas.width, H = canvas.height;
+    const SAMPLE_INTERVAL_MS = 700;
+    const samples = [];
+    const btnRef = document.getElementById('btnCompareRef');
+    const btnCmp = document.getElementById('btnCompareNow');
+    const btnRst = document.getElementById('btnCompareReset');
+    if (btnRef) btnRef.disabled = true;
+    if (btnCmp) btnCmp.disabled = true;
+    if (btnRst) btnRst.disabled = true;
+
+    function captureNext() {
+        try {
+            samples.push(ctx.getImageData(0, 0, W, H));
+        } catch(e) {
+            setStatus('Pixel-Zugriff blockiert: ' + e.message, 'warn');
+            if (btnRef) btnRef.disabled = false;
+            return;
+        }
+        const n = samples.length;
+        if (n < 3) {
+            setStatus(`🟠 Sammle Hintergrund-Drift… ${n}/3`, 'warn');
+            document.getElementById('compareStatus').textContent =
+                `🟠 Sample ${n}/3 — ${(SAMPLE_INTERVAL_MS * (3 - n) / 1000).toFixed(1)}s verbleibend`;
+            setTimeout(captureNext, SAMPLE_INTERVAL_MS);
+            return;
+        }
+        // 3 Frames gesammelt → Persistenz-Maske bauen
+        const f1 = samples[0].data, f2 = samples[1].data, f3 = samples[2].data;
+        const threshold = parseInt(document.getElementById('sens').value);
+        const persistMask = new Uint8Array(W * H);
+        let persistCount = 0;
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                const i = (y * W + x) * 4;
+                const idx = y * W + x;
+                const d12 = (Math.abs(f1[i]-f2[i]) + Math.abs(f1[i+1]-f2[i+1]) + Math.abs(f1[i+2]-f2[i+2])) / 3;
+                const d23 = (Math.abs(f2[i]-f3[i]) + Math.abs(f2[i+1]-f3[i+1]) + Math.abs(f2[i+2]-f3[i+2])) / 3;
+                const d13 = (Math.abs(f1[i]-f3[i]) + Math.abs(f1[i+1]-f3[i+1]) + Math.abs(f1[i+2]-f3[i+2])) / 3;
+                if (Math.max(d12, d23, d13) > threshold) {
+                    persistMask[idx] = 1;
+                    persistCount++;
+                }
+            }
+        }
+        // Inner-Spiegel-Mittelpunkt im (letzten) Reference-Frame detektieren
         const hint = (calib && calib.cx != null) ?
             { cx: calib.cx, cy: calib.cy, r: Math.max(calib.a || 200, calib.b || 200) * 1.5 } : null;
-        const center = detectSpiegelCenter(imageData, canvas.width, canvas.height, hint);
+        const center = detectSpiegelCenter(samples[2], W, H, hint);
         compareReference = {
-            imageData: imageData,
+            imageData: samples[2],
             refSpiegelCx: center ? center.cx : null,
-            refSpiegelCy: center ? center.cy : null
+            refSpiegelCy: center ? center.cy : null,
+            persistMask: persistMask
         };
-        const alignTxt = center ? ` · Spiegel-Center (${center.cx.toFixed(1)}, ${center.cy.toFixed(1)})` : ' · ohne Auto-Align';
+        const alignTxt = center ? ` · Center (${center.cx.toFixed(0)}, ${center.cy.toFixed(0)})` : '';
+        const persPct = (100 * persistCount / (W * H)).toFixed(1);
         document.getElementById('compareStatus').textContent =
-            `✓ Referenz gesetzt (${canvas.width}×${canvas.height})${alignTxt}`;
-        document.getElementById('btnCompareNow').disabled = false;
-        document.getElementById('btnCompareReset').disabled = false;
-        setStatus('Vergleichs-Referenz gesetzt — beschossene Scheibe aufhängen, dann "Vergleiche jetzt"', 'ok');
-    } catch(e) {
-        setStatus('Pixel-Zugriff blockiert: ' + e.message, 'warn');
+            `🟢 Referenz gesetzt (${W}×${H})${alignTxt} · Drift-Maske ${persistCount}px (${persPct}%)`;
+        if (btnCmp) btnCmp.disabled = false;
+        if (btnRst) btnRst.disabled = false;
+        if (btnRef) btnRef.disabled = false;
+        setStatus('🟢 Referenz fertig — beschossene Scheibe aufhängen, dann "Vergleiche jetzt"', 'ok');
     }
+    setStatus('🟠 Sammle Hintergrund-Drift… 1/3', 'warn');
+    document.getElementById('compareStatus').textContent = '🟠 Sample 1/3 — 1.4s verbleibend';
+    captureNext();
 }
 
 function resetCompareReference() {
@@ -3369,20 +3421,29 @@ function compareNow() {
         }
     }
 
-    // Spatial-Filter (A): nur Diff INNERHALB Inner-Spiegel + 10% Margin werten.
-    // Außerhalb (Ring 1-6 auf großer Scheibe) sind Drift-Linien nicht relevant für Treffer.
-    const spiegelR = Math.max(calib.a || 200, calib.b || 200) * 1.10;
+    // v2.3.114 Spatial-Filter (weich): Ring-1-Außenrand × 1.2 als äußere Grenze.
+    // → Erfasst die GESAMTE große Scheibe (alle Ringe 1-10) plus 20% Sicherheit.
+    // → Treffer in Pappe/Wand neben der Scheibe werden ignoriert (User-Wunsch).
+    // → Treffer ZWISCHEN Ring 1-Rand und Filter-Grenze werden trotzdem als Ring 0 gewertet.
+    const disc = DISCS[document.getElementById('discSel').value];
+    const ringe = disc.ringe || [];
+    const ring1Mm = (ringe.length > 0) ? ringe[ringe.length - 1].radius : 250;  // letztes Element = Ring 1 (innen→außen)
+    const ring1Px = ring1Mm * (calib.pxPerMm || 1) * 1.2;
     const spCx = calib.cx, spCy = calib.cy;
+    const persistMask = compareReference.persistMask || null;
 
     // 1. Differenz-Punkte sammeln (mit Auto-Re-Align Offset auf Reference-Seite)
     const STEP = 3;  // Subsampling — 3 px für Performance
     const diffPoints = [];
+    let skippedPersist = 0;
     for (let y = 1; y < H - 1; y += STEP) {
         for (let x = 1; x < W - 1; x += STEP) {
-            // Timestamp-Maske ignorieren (kleines Rechteck mittig unten)
+            // Timestamp-Maske als Sicherheitsnetz (Persistenz sollte sie sowieso erfassen)
             if (isInTsMask(x, y, W, H)) continue;
-            // Nur innerhalb Spiegel-Bereich
-            if (Math.hypot(x - spCx, y - spCy) > spiegelR) continue;
+            // Spatial-Filter: nur innerhalb Scheiben-Bereich (Ring 1 + Margin)
+            if (Math.hypot(x - spCx, y - spCy) > ring1Px) continue;
+            // Persistenz-Filter: Pixel die im Reference-Sample wechselten ignorieren
+            if (persistMask && persistMask[y * W + x]) { skippedPersist++; continue; }
             const rx = x - alignDx, ry = y - alignDy;
             if (rx < 1 || rx >= W - 1 || ry < 1 || ry >= H - 1) continue;
             const iCur = (y * W + x) * 4;
@@ -3406,7 +3467,6 @@ function compareNow() {
     // 2. Connected-Components: Greedy-Cluster mit Kaliber-adaptivem Radius
     // Bullet-Loch-Pixel-Durchmesser = kaliber × pxPerMm. Cluster-Radius = 1.2× davon
     // damit eng beieinander liegende Punkte eines Lochs zusammen finden.
-    const disc = DISCS[document.getElementById('discSel').value];
     const bulletPx = (disc.kaliber || 5) * (calib.pxPerMm || 1);
     const CLUSTER_RADIUS = Math.max(15, Math.round(bulletPx * 1.2));
     const clusters = [];
@@ -3443,7 +3503,6 @@ function compareNow() {
 
     // 4. Bestehende hits[] leeren und neue Treffer eintragen mit Ringauswertung
     hits = [];
-    const disc = DISCS[document.getElementById('discSel').value];
     for (const c of validClusters) {
         const cx = c.sumX / c.count;
         const cy = c.sumY / c.count;
