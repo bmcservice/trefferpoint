@@ -1036,7 +1036,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.117';
+const APP_VERSION = '2.3.118';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1167,6 +1167,9 @@ const DISCS = {
         kaliberLabel: '9mm',
         kaliber: 9.0,
         sensDefault: 28,  // v2.3.115: aus Offline-Sweep (9mm / 15 Treffer Ground-Truth)
+        // v2.3.118: Zoom-unabhängige Untergrenze. Bei pxPerMm=1.41 (wenig Zoom) → calcPts=14 → FP-Rauschen.
+        // minPtsAbsolute=20 erzwingt Mindest-Clustergröße egal wie klein pxPerMm ist.
+        minPtsAbsolute: 20,
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -1244,6 +1247,7 @@ let rafId = null;
 let softwareZoom = 1.0;    // Software-Zoom: <1.0 = rauszoomen, >1.0 = reinzoomen
 let calib = null;          // { cx, cy, outerPx, pxPerMm }
 let calibFailFlashUntil = 0;  // Zeitpunkt bis zu dem ein roter Fehler-Flash gezeigt wird
+let calibOkFlashUntil = 0;   // v2.3.118: grüner Erfolgs-Flash 3s nach Auto-Kalibrierung
 let calibPt1 = null;       // temp center point during calibration
 let refFrame = null;       // ImageData reference
 let hits = [];
@@ -2148,6 +2152,49 @@ function loop() {
         ctx.restore();
     }
 
+    // v2.3.118: Grüner Kreis-Flash 3s nach erfolgreicher Auto-Kalibrierung.
+    // Zeigt den erkannten Spiegel-Umriss + pxPerMm deutlich sichtbar auf dem Bild.
+    if (calibOkFlashUntil > Date.now() && calib) {
+        const remain = calibOkFlashUntil - Date.now();
+        const alpha = Math.min(1, remain / 600);
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 120);
+        ctx.save();
+        // Detektierter Spiegel-Kreis
+        ctx.beginPath();
+        ctx.ellipse(calib.cx, calib.cy, calib.a || 100, calib.b || 100, calib.angle || 0, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(50,220,80,' + (0.55 + 0.45 * pulse) * alpha + ')';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+        // pxPerMm + Radius als Text
+        const ppm = (calib.pxPerMm || 0).toFixed(2);
+        const warn = calib.pxPerMm < 1.0 || calib.pxPerMm > 3.5;
+        const fsize = Math.max(18, canvas.width / 35);
+        ctx.font = 'bold ' + fsize + "px 'Share Tech Mono', monospace";
+        ctx.textAlign = 'center';
+        const label = warn
+            ? `⚠ px/mm=${ppm} — Zoom anpassen!`
+            : `✓ Kalibriert · r=${(calib.a || 0).toFixed(0)}px · ${ppm} px/mm`;
+        ctx.fillStyle = warn ? 'rgba(255,120,40,' + (0.9 * alpha) + ')' : 'rgba(50,220,80,' + (0.9 * alpha) + ')';
+        ctx.fillText(label, canvas.width / 2, calib.cy - (calib.a || 100) - 12);
+        ctx.restore();
+    }
+
+    // v2.3.118: Permanente pxPerMm-Anzeige unten-links — immer sichtbar wenn kalibriert.
+    // Gibt dem Schützen sofortiges Feedback ob Zoom passt (Soll ≥ 1.7 px/mm für 9mm).
+    if (calib && calib.pxPerMm) {
+        const ppm = calib.pxPerMm;
+        const warn = ppm < 1.0 || ppm > 3.5;
+        ctx.save();
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'left';
+        const label = `px/mm ${ppm.toFixed(2)}${warn ? ' ⚠' : ''}`;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(2, canvas.height - 18, ctx.measureText(label).width + 8, 16);
+        ctx.fillStyle = warn ? 'rgba(255,110,50,0.95)' : 'rgba(180,210,100,0.85)';
+        ctx.fillText(label, 6, canvas.height - 5);
+        ctx.restore();
+    }
+
     // Manueller Pointer einzeichnen
     if (manualPointer) drawManualPointer();
 
@@ -2422,10 +2469,21 @@ function autoCalib() {
 
             appState = 'CALIBRATED';
             const qualityInfo = ` · ${inliers.length}/${edgePixels.length} Rand-Pixel`;
-            setMsg('✓ Auto-kalibriert (Kreisfit)' + qualityInfo + ' — Referenzframe setzen, dann Erkennung starten');
-            setStatus('Auto-kalibriert', 'ok');
+
+            // v2.3.118: pxPerMm-Plausibilitätsprüfung — Warnung wenn Zoom nicht passt.
+            // Normalbereich 1.0–3.5 px/mm. Darunter: zu wenig Zoom → MIN_PTS zu niedrig, Rauschen überlebt.
+            // Darüber: extrem nah / Kalibrierung auf Teilausschnitt → Auswertung unrealistisch.
+            const ppmWarn = pxPerMm < 1.0 || pxPerMm > 3.5;
+            if (ppmWarn) {
+                setMsg(`⚠ Auto-kalibriert — aber pxPerMm=${pxPerMm.toFixed(2)} außerhalb Normalbereich (1.0–3.5)! Zoom anpassen, dann neu kalibrieren.`);
+                setStatus('Kalibrierung: Zoom prüfen', 'warn');
+            } else {
+                setMsg('✓ Auto-kalibriert (Kreisfit)' + qualityInfo + ' — Referenzframe setzen, dann Erkennung starten');
+                setStatus('Auto-kalibriert', 'ok');
+            }
+            calibOkFlashUntil = Date.now() + 3000;  // grüner Kreis-Flash 3s
             document.getElementById('calibStatus').textContent =
-                `✓ Auto · ${disc.name} · r=${refined.r.toFixed(0)}px · ${pxPerMm.toFixed(2)} px/mm${qualityInfo}`;
+                `${ppmWarn ? '⚠' : '✓'} Auto · ${disc.name} · r=${refined.r.toFixed(0)}px · ${pxPerMm.toFixed(2)} px/mm${ppmWarn ? ' ← ZOOM PRÜFEN' : qualityInfo}`;
             document.getElementById('btnDetect').disabled = false;
 
         } catch(e) {
@@ -3327,7 +3385,11 @@ function applyDiscPresets() {
         }
     } else {
         calib = null;
-        document.getElementById('calibStatus').textContent = 'Nicht kalibriert';
+        // v2.3.118: explizite Warnung statt stillem "Nicht kalibriert" — verhindert 0-Treffer-Sessions
+        // weil Schütze Disziplin gewechselt hat ohne zu merken dass Kalibrierung fehlt.
+        document.getElementById('calibStatus').textContent = `⚠ ${disc.name}: keine Kalibrierung gespeichert`;
+        setStatus('Kalibrierung erforderlich', 'warn');
+        setMsg(`⚠ ${disc.name}: Keine gespeicherte Kalibrierung — bitte Auto-Kalibrierung starten (Knopf links).`);
     }
 }
 
@@ -3645,9 +3707,12 @@ function compareNow() {
     // v2.3.116: per-Disc-Faktor (disc.minPtsFactor). kk25=0.75, gk25=1.0.
     // JPEG-Kompression reduziert .22-Lochwert auf 7-8 Punkte → minPtsFactor=0.75
     // erlaubt Cluster ab 7 Punkten. Persistenz-Maske federt Offline-FP-Risiko ab.
+    // v2.3.118: minPtsAbsolute — Zoom-unabhängige Untergrenze (verhindert Rauschen bei wenig Zoom).
+    // Bei pxPerMm=1.41 (gk25): calcPts=14 → ohne Limit Rauschen überlebt; mit minPtsAbsolute=20 blockiert.
     const expectedPerHole = Math.PI * bulletPx * bulletPx / (4 * STEP * STEP);
     const mpf = (typeof disc.minPtsFactor === 'number') ? disc.minPtsFactor : 1.0;
-    const MIN_PTS = Math.max(5, Math.round(expectedPerHole * mpf));
+    const calcPts = Math.max(5, Math.round(expectedPerHole * mpf));
+    const MIN_PTS = (typeof disc.minPtsAbsolute === 'number') ? Math.max(disc.minPtsAbsolute, calcPts) : calcPts;
     const MAX_PTS = Math.max(1500, Math.round(expectedPerHole * 8));
     const validClusters = clusters.filter(c => c.count >= MIN_PTS && c.count <= MAX_PTS);
 
@@ -3697,8 +3762,14 @@ document.getElementById('btnSnapshot').addEventListener('click', () => {
     if (typeof window.tpBridge !== 'undefined' && typeof window.tpBridge.sgkSaveFrame === 'function') {
         try {
             const result = window.tpBridge.sgkSaveFrame();
-            status.textContent = '✓ ' + result;
-            setStatus('Snapshot gespeichert: ' + result, 'ok');
+            // v2.3.118: Fehler-Check — vorher immer ✓ gezeigt, auch bei "Fehler: kein Frame verfügbar"
+            if (result.startsWith('Fehler') || result.startsWith('Error')) {
+                status.textContent = '✗ ' + result;
+                setStatus('Snapshot fehlgeschlagen: ' + result, 'warn');
+            } else {
+                status.textContent = '✓ ' + result;
+                setStatus('Snapshot gespeichert: ' + result, 'ok');
+            }
         } catch(e) {
             status.textContent = '✗ ' + e.message;
             setStatus('Snapshot-Fehler: ' + e.message, 'warn');

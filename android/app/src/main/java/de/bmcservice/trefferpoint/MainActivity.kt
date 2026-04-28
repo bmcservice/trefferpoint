@@ -308,6 +308,10 @@ class MainActivity : AppCompatActivity() {
 
     @Volatile private var autoModesDisabled = false
     @Volatile private var uvcFrameCount = 0L
+    // v2.3.118: letztes UVC-Frame für sgkSaveFrame() — rtsp/mjpeg hatten bereits lastFrameJpeg,
+    // USB-C-Kamera wurde nie gespeichert → sgkSaveFrame() lieferte immer "Fehler: kein Frame verfügbar"
+    // obwohl die Kamera live lief. Benutzer sah ✓ im UI aber kein File wurde geschrieben.
+    @Volatile private var lastUvcFrameJpeg: ByteArray? = null
 
     private val frameCallback = object : IFrameCallback {
         private var logged = false
@@ -322,6 +326,7 @@ class MainActivity : AppCompatActivity() {
                 val jpeg = if (isJpeg(bytes)) bytes else nv21ToJpeg(bytes, w, h)
                 frameCount++
                 uvcFrameCount++
+                lastUvcFrameJpeg = jpeg   // v2.3.118: für sgkSaveFrame() im USB-Modus
                 lastFrameSize = jpeg.size
                 if (!logged) {
                     AppLog.i(TAG, "Erster Frame: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
@@ -711,7 +716,8 @@ class MainActivity : AppCompatActivity() {
          */
         @JavascriptInterface
         fun sgkSaveFrame(): String {
-            val jpeg = rtspPipeline?.lastFrameJpeg ?: mjpegPipeline?.lastFrameJpeg
+            // v2.3.118: lastUvcFrameJpeg als Fallback für USB-C-Kamera-Modus
+            val jpeg = rtspPipeline?.lastFrameJpeg ?: mjpegPipeline?.lastFrameJpeg ?: lastUvcFrameJpeg
                 ?: return "Fehler: kein Frame verfügbar"
             val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault())
                 .format(java.util.Date())
