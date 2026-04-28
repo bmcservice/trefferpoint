@@ -680,6 +680,52 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // v2.3.119: UVC-Bild-Controls (Helligkeit, Kontrast, Sättigung, Schärfe, Zoom)
+        // Ermöglicht dem Schützen Kamera-Anpassungen direkt aus dem Quick-Panel.
+
+        /** Gibt UVC-Capabilities als JSON zurück — JS zeigt nur die vorhandenen Slider. */
+        @JavascriptInterface
+        fun getUvcImageControls(): String {
+            val uvc = cameraHelper?.uvcControl
+                ?: return "{\"available\":false}"
+            val result = StringBuilder("{\"available\":true")
+            fun tryRange(name: String, getter: () -> Int?, min: Int, max: Int) {
+                try {
+                    val cur = getter()
+                    if (cur != null) result.append(",\"$name\":{\"min\":$min,\"max\":$max,\"cur\":$cur}")
+                } catch (_: Exception) {}
+            }
+            tryRange("brightness", { uvc.brightness }, 0, 255)
+            tryRange("contrast",   { uvc.contrast   }, 0, 255)
+            tryRange("saturation", { uvc.saturation }, 0, 255)
+            tryRange("sharpness",  { uvc.sharpness  }, 0, 255)
+            tryRange("hue",        { uvc.hue        }, -180, 180)
+            result.append("}")
+            return result.toString()
+        }
+
+        /** Setzt einen UVC-Bild-Parameter (key: brightness|contrast|saturation|sharpness|hue). */
+        @JavascriptInterface
+        fun setUvcImageControl(key: String, value: Int) {
+            val helper = cameraHelper ?: return
+            runOnUiThread {
+                try {
+                    val uvc = helper.uvcControl ?: return@runOnUiThread
+                    when (key) {
+                        "brightness"  -> uvc.setBrightness(value)
+                        "contrast"    -> uvc.setContrast(value)
+                        "saturation"  -> uvc.setSaturation(value)
+                        "sharpness"   -> uvc.setSharpness(value)
+                        "hue"         -> uvc.setHue(value)
+                        else -> AppLog.w(TAG, "setUvcImageControl: unbekannter Key '$key'")
+                    }
+                    AppLog.i(TAG, "UVC: $key = $value")
+                } catch (e: Exception) {
+                    AppLog.w(TAG, "setUvcImageControl($key=$value) fehlgeschlagen: ${e.message}")
+                }
+            }
+        }
+
         /** Native TTS — verlässlicher als Web-Speech im WebView. */
         @JavascriptInterface
         fun speak(text: String) {

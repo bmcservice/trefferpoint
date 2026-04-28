@@ -734,6 +734,22 @@
             <!-- Auto-Optimieren -->
             <button class="btn btn-primary" id="btnAutoOptQ"
                 style="margin-top:8px;width:100%;font-size:12px">⚙ Auto-Optimieren</button>
+            <!-- v2.3.119: WLAN-Kamera HTTP-Befehle (SGK GK720X) -->
+            <div id="camQuickWlan" style="display:none">
+                <hr class="cqp-sep">
+                <div style="font-size:10px;color:var(--text-dim);margin-bottom:5px;
+                    font-family:'Share Tech Mono',monospace">WLAN-Kamera</div>
+                <div style="display:flex;gap:5px;margin-bottom:5px">
+                    <button class="btn" id="btnCamSnapshot"
+                        style="flex:1;font-size:11px;padding:5px" title="Foto auf SD-Karte">📷 Foto</button>
+                    <button class="btn" id="btnCamRecOn"
+                        style="flex:1;font-size:11px;padding:5px" title="Aufnahme starten">⏺ REC</button>
+                    <button class="btn" id="btnCamRecOff"
+                        style="flex:1;font-size:11px;padding:5px" title="Aufnahme stoppen">⏹ Stop</button>
+                </div>
+                <div id="camWlanStatus" style="font-size:10px;color:var(--text-dim);
+                    font-family:'Share Tech Mono',monospace"></div>
+            </div>
             <!-- Android: Shutter + Gain -->
             <div id="camQuickShutter" style="display:none">
                 <hr class="cqp-sep">
@@ -1036,7 +1052,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.118';
+const APP_VERSION = '2.3.119';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1474,7 +1490,53 @@ function syncCamVal(key, v, fmt) {
 
 function buildCamControls() {
     const track = mediaStream?.getVideoTracks()[0];
-    if (!track) return;
+    const spBox = document.getElementById('camControls');
+    const qpBox = document.getElementById('camQuickControls');
+    const info  = document.getElementById('camCapsInfo');
+
+    // v2.3.119: Kein getUserMedia-Track → zeige UVC-Controls (Android APK STREAM/WLAN-Modus)
+    if (!track) {
+        spBox.innerHTML = '';
+        qpBox.innerHTML = '';
+        if (typeof window.tpBridge === 'undefined' || !window.tpBridge.getUvcImageControls) return;
+        let caps;
+        try { caps = JSON.parse(window.tpBridge.getUvcImageControls()); } catch(e) { return; }
+        if (!caps.available) {
+            const msg = '<div style="font-size:10px;color:var(--text-dim);padding:4px 0">Keine UVC-Kamera aktiv</div>';
+            spBox.innerHTML = msg; qpBox.innerHTML = msg; return;
+        }
+        const labels = { brightness:'Helligkeit', contrast:'Kontrast',
+                         saturation:'Sättigung', sharpness:'Schärfe', hue:'Farbton' };
+        let count = 0;
+        ['brightness','contrast','saturation','sharpness','hue'].forEach(key => {
+            const cap = caps[key]; if (!cap) return;
+            count++;
+            const mkRow = idPfx => {
+                const row = document.createElement('div');
+                row.className = 'cam-ctrl-row';
+                row.innerHTML = `<span class="cam-ctrl-label">${labels[key]||key}</span>
+                    <input type="range" min="${cap.min}" max="${cap.max}" step="1" value="${cap.cur}"
+                        style="flex:1;accent-color:var(--accent)" data-uvc-key="${key}">
+                    <span class="cam-ctrl-val" id="${idPfx}_uvc_${key}">${cap.cur}</span>`;
+                row.querySelector('input').addEventListener('change', e => {
+                    const v = parseInt(e.target.value);
+                    document.querySelectorAll(`[data-uvc-key="${key}"]`)
+                        .forEach(el => { el.value = v; });
+                    document.querySelectorAll(`#cv_uvc_${key},#qv_uvc_${key}`)
+                        .forEach(el => { el.textContent = v; });
+                    try { window.tpBridge.setUvcImageControl(key, v); } catch(err) {}
+                });
+                return row;
+            };
+            spBox.appendChild(mkRow('cv'));
+            qpBox.appendChild(mkRow('qv'));
+        });
+        if (count > 0) {
+            document.getElementById('camControlsSection').style.display = '';
+            info.textContent = `${count} UVC-Parameter verfügbar`;
+        }
+        return;
+    }
 
     const caps = track.getCapabilities();
     const settings = track.getSettings();
@@ -2890,6 +2952,7 @@ function setupBridgeFrameReceiver() {
         document.getElementById('btnDetect').disabled = false;
         document.getElementById('camControlsSection').style.display = '';
         initShutterPresets();  // v2.3.116: sicherheitshalber nochmal aufrufen (idempotent)
+        buildCamControls();    // v2.3.119: UVC-Controls in Quick-Panel bef\u00fcllen (kein getUserMedia-Track)
         setStatus('Stream aktiv \u00b7 native Bridge', 'ok');
         setMsg('Auto-Erkennung \u2192 Button klicken');
         if (!rafId) startLoop();
@@ -3216,6 +3279,7 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
             setMsg('' + e);
         }
         document.getElementById('btnRtspStop').style.display = '';
+        initWlanCamButtons(); // v2.3.119: SGK-Kamera-Buttons aktivieren
     });
 
     // RTSP stoppen
@@ -3414,6 +3478,35 @@ function applySwZoom(v) {
 }
 document.getElementById('swZoom').addEventListener('input', e => applySwZoom(parseFloat(e.target.value)));
 document.getElementById('swZoomQ').addEventListener('input', e => applySwZoom(parseFloat(e.target.value)));
+
+// v2.3.119: Pinch-to-Zoom auf dem Kamerabild (zwei Finger spreizen/zusammenziehen)
+// Ändert softwareZoom stufenlos. Tablet-native Geste, kein Button nötig.
+{
+    let _pinchDist = 0, _pinchZoom = 1.0;
+    canvas.addEventListener('touchstart', e => {
+        if (e.touches.length === 2) {
+            _pinchDist = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            _pinchZoom = softwareZoom;
+            e.preventDefault();
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchmove', e => {
+        if (e.touches.length !== 2) return;
+        const dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+        );
+        if (_pinchDist < 10) return;
+        const raw = _pinchZoom * (dist / _pinchDist);
+        // Auf 0.05er-Schritte runden, Bereich 0.3–2.0
+        const snapped = Math.round(Math.min(2.0, Math.max(0.3, raw)) * 20) / 20;
+        applySwZoom(snapped);
+        e.preventDefault();
+    }, { passive: false });
+}
 
 document.getElementById('btnCam').addEventListener('click', startCamera);
 document.getElementById('btnEnumCam').addEventListener('click', enumCameras);
@@ -4007,6 +4100,50 @@ function initShutterPresets() {
     }
 }
 initShutterPresets();  // Versuch beim Page-Load (tpBridge meist schon verfügbar)
+
+// v2.3.119: WLAN-Kamera-Buttons (SGK GK720X) — Snapshot + Aufnahme über HTTP-API.
+// Aufruf via fetch() direkt zum Gateway; kein Kotlin-Proxy nötig (APK = file:// + CORS erlaubt).
+// initWlanCamButtons() wird beim RTSP-Stream-Start aufgerufen (WLAN-Modus aktiv).
+function initWlanCamButtons() {
+    const box = document.getElementById('camQuickWlan');
+    if (box.dataset.init) return;
+    box.dataset.init = '1';
+    box.style.display = '';
+
+    // Gateway-IP aus Bridge oder Fallback
+    let gwIp = '192.168.0.1';
+    try { if (window.tpBridge) gwIp = window.tpBridge.getWifiGateway() || gwIp; } catch(_) {}
+
+    const status = document.getElementById('camWlanStatus');
+    async function sgkCmd(path) {
+        try {
+            const r = await fetch('http://' + gwIp + path, { cache: 'no-store' });
+            const j = await r.json();
+            return j.result === 0 ? '✓ OK' : '⚠ result=' + j.result;
+        } catch(e) { return '✗ ' + e.message; }
+    }
+
+    document.getElementById('btnCamSnapshot').addEventListener('click', async () => {
+        status.textContent = '…';
+        status.textContent = await sgkCmd('/app/snapshot');
+    });
+    document.getElementById('btnCamRecOn').addEventListener('click', async () => {
+        status.textContent = '…';
+        status.textContent = await sgkCmd('/app/setparamvalue?param=rec&value=1');
+        document.getElementById('btnCamRecOn').style.background  = 'var(--accent)';
+        document.getElementById('btnCamRecOn').style.color       = '#000';
+        document.getElementById('btnCamRecOff').style.background = '';
+        document.getElementById('btnCamRecOff').style.color      = '';
+    });
+    document.getElementById('btnCamRecOff').addEventListener('click', async () => {
+        status.textContent = '…';
+        status.textContent = await sgkCmd('/app/setparamvalue?param=rec&value=0');
+        document.getElementById('btnCamRecOff').style.background = 'var(--accent)';
+        document.getElementById('btnCamRecOff').style.color      = '#000';
+        document.getElementById('btnCamRecOn').style.background  = '';
+        document.getElementById('btnCamRecOn').style.color       = '';
+    });
+}
 
 // ⚙ Quick-Panel Toggle
 document.getElementById('btnCamSettings').addEventListener('click', () => {
