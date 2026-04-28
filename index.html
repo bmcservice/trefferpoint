@@ -929,7 +929,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.111';
+const APP_VERSION = '2.3.112';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2666,7 +2666,11 @@ function setupBridgeFrameReceiver() {
     imgLoading = new Image();    // Back-Buffer
     let firstFrameDone = false;
 
-    imgLoading.onload = () => {
+    // BUGFIX v2.3.112: onload muss nach jedem Swap neu auf das aktuelle imgLoading
+    // gebunden werden. Sonst feuert nach dem ersten Swap nie wieder ein onload
+    // (das Original-Image, an das wir hier gebunden haben, ist nach Swap = imgEl
+    // und bekommt keinen neuen src mehr → WebView friert auf 1. Frame ein).
+    const onFrameLoaded = () => {
         // Canvas-Größe syncen falls Auflösung wechselt
         if (imgLoading.naturalWidth > 0 &&
             (canvas.width !== imgLoading.naturalWidth || canvas.height !== imgLoading.naturalHeight)) {
@@ -2677,6 +2681,8 @@ function setupBridgeFrameReceiver() {
         const tmp = imgEl;
         imgEl = imgLoading;
         imgLoading = tmp;
+        // Re-Bind: das NEUE imgLoading (= alte imgEl) braucht den Handler für nächste Frames
+        imgLoading.onload = onFrameLoaded;
 
         if (firstFrameDone) return;
         firstFrameDone = true;
@@ -2691,6 +2697,7 @@ function setupBridgeFrameReceiver() {
         setMsg('Auto-Erkennung \u2192 Button klicken');
         if (!rafId) startLoop();
     };
+    imgLoading.onload = onFrameLoaded;
 
     window.tpReceiveFrame = function(b64) {
         try {
