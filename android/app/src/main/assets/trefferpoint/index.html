@@ -654,6 +654,7 @@
                 <button class="dpad-step active-step" id="stepFine" data-step="1">1px</button>
                 <button class="dpad-step" id="stepMed" data-step="5">5px</button>
                 <button class="dpad-step" id="stepCoarse" data-step="20">20px</button>
+                <button class="dpad-step" id="dpadCancel" style="background:#5a1a1a;color:#fff" title="Manuelle Kalibrierung abbrechen">✗ Abbrechen</button>
             </div>
         </div>
     </div>
@@ -817,7 +818,7 @@
         </div>
 
         <!-- Camera Controls -->
-        <div class="ps" id="camControlsSection" style="display:none">
+        <div class="ps" id="camControlsSection">
             <div class="ps-label">Kamera-Einstellungen</div>
             <!-- Software-Zoom immer verfügbar -->
             <div class="cam-ctrl-row">
@@ -928,7 +929,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.110';
+const APP_VERSION = '2.3.111';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1889,6 +1890,21 @@ function confirmPointer() {
 document.getElementById('dConfirm').addEventListener('click', confirmPointer);
 document.getElementById('dConfirm').addEventListener('touchstart', e => { e.preventDefault(); confirmPointer(); }, { passive: false });
 
+// Abbrechen — schließt D-Pad ohne Kalibrierung zu ändern
+document.getElementById('dpadCancel').addEventListener('click', () => {
+    manualPointer = null;
+    calibPt1 = null;
+    showDpad(false);
+    if (calib) {
+        appState = 'CALIBRATED';
+        setStatus('Manuelle Kalibrierung abgebrochen', 'ok');
+    } else {
+        appState = 'READY';
+        setStatus('Manuelle Kalibrierung abgebrochen', 'ok');
+    }
+    setMsg('');
+});
+
 // Schrittweite Buttons
 document.querySelectorAll('.dpad-step').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2173,6 +2189,12 @@ function _refineCircle(inlierPoints) {
 }
 
 function autoCalib() {
+    // Falls manuelle Kalibrierung aktiv: zurücksetzen + D-Pad ausblenden.
+    // Sonst bleibt der Manuell-Modus stuck wenn der User zwischendurch Auto-Erkennung klickt.
+    manualPointer = null;
+    calibPt1 = null;
+    showDpad(false);
+
     setMsg('🔍 Scheibe wird erkannt...');
     setStatus('Auto-Kalibrierung läuft', 'warn');
 
