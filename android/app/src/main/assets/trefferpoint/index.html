@@ -707,19 +707,18 @@
 </div>
 
 <!-- Info-Overlay (mit App-Log + Version) -->
-<div id="infoOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;padding:20px;box-sizing:border-box;overflow:hidden"
-     onclick="if(event.target===this)this.style.display='none'">
+<div id="infoOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;padding:20px;box-sizing:border-box;overflow-y:auto;touch-action:manipulation;cursor:pointer">
     <div style="max-width:700px;margin:0 auto;background:#0f1218;border:1px solid var(--accent);
                 font-family:'Share Tech Mono',monospace;color:var(--accent);
-                display:flex;flex-direction:column;max-height:calc(100vh - 40px)">
-        <!-- Sticky Header mit ✕ — bleibt immer sichtbar -->
+                display:flex;flex-direction:column;max-height:calc(100dvh - 40px);cursor:default">
+        <!-- Header mit ✕ — flex-shrink:0 hält ihn immer sichtbar -->
         <div style="display:flex;justify-content:space-between;align-items:center;
-                    padding:14px 18px 10px;border-bottom:1px solid var(--border);flex-shrink:0;
-                    position:sticky;top:0;background:#0f1218;z-index:1">
+                    padding:14px 18px 10px;border-bottom:1px solid var(--border);flex-shrink:0">
             <div style="font-size:14px;letter-spacing:0.1em">TREFFERPOINT · INFO</div>
-            <button onclick="document.getElementById('infoOverlay').style.display='none'"
+            <button id="btnInfoClose"
                     style="background:none;border:1px solid var(--accent);color:var(--accent);
-                           padding:6px 14px;cursor:pointer;font-size:16px;min-width:44px;min-height:44px">✕</button>
+                           padding:6px 14px;cursor:pointer;font-size:16px;min-width:44px;min-height:44px;
+                           touch-action:manipulation">✕</button>
         </div>
         <!-- Scrollbarer Log-Bereich -->
         <pre id="infoContent" style="white-space:pre-wrap;word-break:break-word;font-size:11px;
@@ -965,7 +964,7 @@
                 style="width:100%;aspect-ratio:1;background:#fff;display:block;margin-bottom:8px;border:1px solid var(--border)">
             </canvas>
             <button class="btn btn-primary" id="btnAutoCalib" disabled>⊕ Auto-Erkennung</button>
-            <button class="btn" id="btnCalib" disabled style="font-size:11px">✎ Manuell (2 Klicks)</button>
+            <button class="btn" id="btnCalib" disabled style="font-size:11px">✎ Manuell (3 Klicks)</button>
             <div style="display:flex;gap:5px;margin-top:5px">
                 <button class="btn" id="btnToggleOverlay" style="flex:1;font-size:10px" title="Ring-Overlay ein/ausblenden">👁 Ringe</button>
                 <button class="btn" id="btnTsMask" style="flex:1;font-size:10px" title="Timestamp-Maske an/aus">🔳 Maske</button>
@@ -1111,7 +1110,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.128';
+const APP_VERSION = '2.3.129';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2992,6 +2991,21 @@ function showInfo() {
     document.getElementById('infoContent').textContent = lines.join('\n');
     document.getElementById('infoOverlay').style.display = 'block';
 }
+
+// Info-Overlay schließen — robuste Listener für Android WebView
+(function() {
+    function closeInfo() { document.getElementById('infoOverlay').style.display = 'none'; }
+    const overlay = document.getElementById('infoOverlay');
+    const closeBtn = document.getElementById('btnInfoClose');
+    // ✕-Button: click + touchend
+    closeBtn.addEventListener('click', closeInfo);
+    closeBtn.addEventListener('touchend', e => { e.preventDefault(); closeInfo(); });
+    // Backdrop-Tap: nur wenn direkt das äußere div getroffen (nicht innerer Content)
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeInfo(); });
+    overlay.addEventListener('touchend', e => {
+        if (e.target === overlay) { e.preventDefault(); closeInfo(); }
+    });
+})();
 
 function toggleFullscreen() {
     if (!document.fullscreenElement) {
