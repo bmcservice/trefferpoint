@@ -739,10 +739,16 @@
             <div class="last-hit-label" id="lhDist"></div>
         </div>
 
-        <!-- Manueller Pointer D-Pad -->
-        <div id="dpad" style="display:none;position:absolute;bottom:20px;left:50%;
-            transform:translateX(-50%);display:none;flex-direction:column;
-            align-items:center;gap:4px;z-index:10">
+        <!-- Manueller Pointer D-Pad (verschiebbar per Drag auf Titelleiste) -->
+        <div id="dpad" style="display:none;position:absolute;left:50%;top:60%;
+            flex-direction:column;align-items:center;gap:4px;z-index:10;
+            transform:translateX(-50%)">
+            <!-- Drag-Handle -->
+            <div id="dpadHandle" style="cursor:grab;width:100%;text-align:center;
+                padding:3px 8px;background:rgba(15,18,24,0.92);
+                border:1px solid rgba(200,168,75,0.35);border-radius:4px;
+                font-size:10px;color:var(--text-dim);letter-spacing:1px;
+                user-select:none;touch-action:none">⠿ VERSCHIEBEN</div>
             <div style="display:flex;gap:4px;justify-content:center">
                 <button class="dpad-btn" id="dUp">▲</button>
             </div>
@@ -1105,7 +1111,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.126';
+const APP_VERSION = '2.3.127';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2037,8 +2043,42 @@ let dpadStep = 1;          // Schrittweite in Pixeln
 
 function showDpad(show) {
     const d = document.getElementById('dpad');
+    if (show && !d._dpadInit) {
+        // Initiale Position: unteres Drittel des Cam-Bereichs, horizontal zentriert
+        d._dpadInit = true;
+        // transform:translateX(-50%) für horizontale Zentrierung bleibt; top in % genügt
+    }
     d.style.display = show ? 'flex' : 'none';
 }
+
+// D-Pad Drag (Ziehgriff): verschiebt das gesamte D-Pad-Element
+(function() {
+    const dpad = document.getElementById('dpad');
+    const handle = document.getElementById('dpadHandle');
+    let drag = null;
+
+    handle.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        // Entferne transform (war für initiale Zentrierung) und wechsle auf px-Positionierung
+        const rect = dpad.getBoundingClientRect();
+        dpad.style.transform = '';
+        dpad.style.left = rect.left + 'px';
+        dpad.style.top  = rect.top  + 'px';
+        drag = { ox: e.clientX - rect.left, oy: e.clientY - rect.top };
+        handle.style.cursor = 'grabbing';
+        handle.setPointerCapture(e.pointerId);
+    });
+    handle.addEventListener('pointermove', e => {
+        if (!drag) return;
+        e.preventDefault();
+        dpad.style.left = (e.clientX - drag.ox) + 'px';
+        dpad.style.top  = (e.clientY - drag.oy) + 'px';
+    });
+    handle.addEventListener('pointerup', () => {
+        drag = null;
+        handle.style.cursor = 'grab';
+    });
+})();
 
 function drawManualPointer() {
     if (!manualPointer) return;
@@ -2451,6 +2491,49 @@ function _refineCircle(inlierPoints) {
     return { cx, cy, r: Math.sqrt(r2sum / n) };
 }
 
+// Least-Squares-Ellipsenfit auf Inlier-Punktwolke (nach RANSAC-Kreisfit).
+// Fittet A·u² + B·u·v + C·v² = 1 (u/v = Koordinaten relativ zu cx_est/cy_est).
+// Löst 3×3 Normalsystem via Cramerscher Regel → semi-Achsen a,b + Winkel.
+function _refineEllipse(pts, cx_est, cy_est) {
+    if (pts.length < 8) return null;
+    let s_u4=0, s_u3v=0, s_u2v2=0, s_uv3=0, s_v4=0;
+    let s_u2=0, s_uv=0, s_v2=0;
+    for (const p of pts) {
+        const u = p.x - cx_est, v = p.y - cy_est;
+        const u2=u*u, uv=u*v, v2=v*v;
+        s_u4   += u2*u2; s_u3v  += u2*uv; s_u2v2 += u2*v2;
+        s_uv3  += uv*v2; s_v4   += v2*v2;
+        s_u2   += u2;    s_uv   += uv;    s_v2   += v2;
+    }
+    // Symmetrische 3×3-Matrix M^T M mit Einträgen aus den Summen oben
+    // [s_u4,  s_u3v, s_u2v2]
+    // [s_u3v, s_u2v2, s_uv3]  (s22 = s_u2v2 = s13)
+    // [s_u2v2, s_uv3, s_v4]
+    const [a11,a12,a13, a23,a33] = [s_u4, s_u3v, s_u2v2, s_uv3, s_v4];
+    const [b1,b2,b3] = [s_u2, s_uv, s_v2];
+    const a22 = a13; // = s_u2v2
+    const det = a11*(a22*a33-a23*a23) - a12*(a12*a33-a23*a13) + a13*(a12*a23-a22*a13);
+    if (Math.abs(det) < 1e-8) return null;
+    const A = (b1*(a22*a33-a23*a23) - a12*(b2*a33-a23*b3) + a13*(b2*a23-a22*b3)) / det;
+    const B = (a11*(b2*a33-a23*b3) - b1*(a12*a33-a23*a13) + a13*(a12*b3-b2*a13)) / det;
+    const C = (a11*(a22*b3-b2*a23) - a12*(a12*b3-b2*a13) + b1*(a12*a23-a22*a13)) / det;
+    // Ellipse-Validierung: B²−4AC < 0 und A,C > 0
+    if (B*B - 4*A*C >= -1e-9 || A <= 0 || C <= 0) return null;
+    // Eigenwerte der Matrix [[A, B/2],[B/2, C]] → semi-Achsen
+    const hB = B / 2;
+    const disc = Math.sqrt((A-C)*(A-C) + B*B);
+    const lam1 = (A+C+disc)/2;   // größer → kleinere Achse
+    const lam2 = (A+C-disc)/2;   // kleiner → größere Achse (semi-major)
+    if (lam1 <= 0 || lam2 <= 0) return null;
+    const semiA = 1 / Math.sqrt(lam2);   // semi-major
+    const semiB = 1 / Math.sqrt(lam1);   // semi-minor
+    if (semiA < 10 || semiB < 10 || semiA/semiB > 2.5) return null;  // Plausibilitäts-Check
+    // Winkel der Hauptachse (Eigenvektror zu lam2)
+    const angle = (Math.abs(hB) < 1e-6) ? (A <= C ? 0 : Math.PI/2)
+                                         : Math.atan2(-(A - lam2), hB);
+    return { cx: cx_est, cy: cy_est, a: semiA, b: semiB, angle };
+}
+
 function autoCalib() {
     // Falls manuelle Kalibrierung aktiv: zurücksetzen + D-Pad ausblenden.
     // Sonst bleibt der Manuell-Modus stuck wenn der User zwischendurch Auto-Erkennung klickt.
@@ -2520,25 +2603,32 @@ function autoCalib() {
                 return;
             }
 
-            // Inlier sammeln für Verfeinerung
+            // Inlier sammeln (Punkte nahe dem RANSAC-Kreis = wahrscheinliche Spiegel-Randpixel)
             const inliers = edgePixels.filter(p =>
-                Math.abs(Math.hypot(p.x - ransac.cx, p.y - ransac.cy) - ransac.r) < 5);
+                Math.abs(Math.hypot(p.x - ransac.cx, p.y - ransac.cy) - ransac.r) < 8);
 
-            // Least-Squares-Verfeinerung für präziseres Zentrum und Radius
-            const refined = _refineCircle(inliers) || ransac;
+            // ─── Ellipsen-Fit auf Inlier ───
+            // Besser als Kreisfit bei leicht schrägem Spektiv (Spiegel erscheint als Ellipse).
+            // _refineEllipse fittet A·u²+B·uv+C·v²=1 → liefert korrekte Halbachsen + Winkel.
+            const ellipse = _refineEllipse(inliers, ransac.cx, ransac.cy);
 
-            const cx = refined.cx;
-            const cy = refined.cy;
-            // Wir nutzen einen Kreis → a=b=r, angle=0 (keine Ellipsen-Rotation nötig)
-            let a = refined.r;
-            let b = refined.r;
-            const angle = 0;
-            const rawRatio = 1;
-            const circleForced = false;
+            let cx, cy, a, b, angle, fitLabel;
+            if (ellipse) {
+                cx = ellipse.cx; cy = ellipse.cy;
+                a  = ellipse.a;  b  = ellipse.b;  angle = ellipse.angle;
+                const ar = (a / b);
+                fitLabel = ar > 1.03 ? `Ellipse ${ar.toFixed(2)}:1` : 'Kreis (≈rund)';
+            } else {
+                // Fallback: Kreis-Verfeinerung (Kåsa-Methode)
+                const refined = _refineCircle(inliers) || ransac;
+                cx = refined.cx; cy = refined.cy;
+                a = b = refined.r; angle = 0;
+                fitLabel = 'Kreisfit';
+            }
 
-            // pxPerMm aus Radius und Norm-Maß
+            // pxPerMm = √(a·b) / outer_mm (geometrisches Mittel → passt zur Scoring-Formel)
             const disc = DISCS[document.getElementById('discSel').value];
-            const pxPerMm = refined.r / disc.outer_mm;
+            const pxPerMm = Math.sqrt(a * b) / disc.outer_mm;
 
             calib = { cx, cy, a, b, angle, pxPerMm };
 
@@ -2557,15 +2647,15 @@ function autoCalib() {
                 setMsg(`⚠ Auto-kalibriert — aber pxPerMm=${pxPerMm.toFixed(2)} außerhalb Normalbereich (1.0–3.5)! Zoom anpassen, dann neu kalibrieren.`);
                 setStatus('Kalibrierung: Zoom prüfen', 'warn');
             } else if (inlierRate < 0.20) {
-                setMsg('✓ Auto-kalibriert (Kreisfit)' + qualityInfo + ' ⚠ Bitte Ring-Overlay auf Scheibe prüfen (wenig Übereinstimmung)');
+                setMsg(`✓ Auto-kalibriert (${fitLabel})` + qualityInfo + ' ⚠ Bitte Ring-Overlay auf Scheibe prüfen');
                 setStatus('Auto-kalibriert · bitte prüfen', 'warn');
             } else {
-                setMsg('✓ Auto-kalibriert (Kreisfit)' + qualityInfo + ' — Referenzframe setzen, dann Erkennung starten');
+                setMsg(`✓ Auto-kalibriert (${fitLabel})` + qualityInfo + ' — Referenzframe setzen, dann Erkennung starten');
                 setStatus('Auto-kalibriert', 'ok');
             }
             calibOkFlashUntil = Date.now() + 3000;  // grüner Kreis-Flash 3s
             document.getElementById('calibStatus').textContent =
-                `${ppmWarn ? '⚠' : '✓'} Auto · ${disc.name} · r=${refined.r.toFixed(0)}px · ${pxPerMm.toFixed(2)} px/mm${ppmWarn ? ' ← ZOOM PRÜFEN' : qualityInfo}`;
+                `${ppmWarn ? '⚠' : '✓'} Auto · ${disc.name} · a=${a.toFixed(0)} b=${b.toFixed(0)}px · ${pxPerMm.toFixed(2)} px/mm · ${fitLabel}${ppmWarn ? ' ← ZOOM PRÜFEN' : ''}`;
             document.getElementById('btnDetect').disabled = false;
 
         } catch(e) {
