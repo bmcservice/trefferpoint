@@ -1110,7 +1110,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.129';
+const APP_VERSION = '2.3.130';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2970,6 +2970,12 @@ async function manualUpdateCheck() {
 }
 
 function showInfo() {
+    // DEBUG v2.3.130: Aufrufer in Status-Bar anzeigen (1. Zeile des Stack-Trace)
+    try {
+        const stack = new Error().stack || '';
+        const caller = stack.split('\n').slice(2, 4).join(' | ').replace(/\s+/g, ' ');
+        setStatus('showInfo aufgerufen: ' + caller.substring(0, 80), 'warn');
+    } catch(_) {}
     const lines = [];
     lines.push('Version:  ' + APP_VERSION);
     lines.push('URL:      ' + location.href);
