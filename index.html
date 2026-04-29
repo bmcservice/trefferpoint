@@ -1105,7 +1105,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.124';
+const APP_VERSION = '2.3.125';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2094,7 +2094,7 @@ function confirmPointer() {
         const _disc = DISCS[document.getElementById('discSel').value];
         const _edgeLabel = (_disc.id === 'lp10' || _disc.id === 'kk25' || _disc.id === 'kk50')
             ? 'Spiegel-Außenrand (schwarzer Bereich)' : 'Rand des äußersten Rings';
-        setMsg(`Schritt 2/2 — Pointer auf ${_edgeLabel} setzen → OK`);
+        setMsg(`Schritt 2/2 — Tippe auf ${_edgeLabel} (oder D-Pad → OK)`);
         setStatus('Kalibrierung: Außenrand', 'warn');
 
     } else if (appState === 'CALIB_EDGE' && calibPt1) {
@@ -2512,7 +2512,7 @@ function autoCalib() {
             // ─── RANSAC-Kreisfit ───
             // Wir fitten einen Kreis (nicht Ellipse): frontal aufgenommene DSB-Scheiben sind symmetrisch.
             // RANSAC wirft Outlier (Artefakte, Fremdkanten) automatisch raus.
-            const ransac = _ransacCircle(edgePixels, W, H, 200, 5);
+            const ransac = _ransacCircle(edgePixels, W, H, 400, 5);
             if (!ransac) {
                 setMsg('⚠ Kein passender Kreis gefunden — manuell kalibrieren');
                 setStatus('Auto-Kalibrierung fehlgeschlagen', 'warn');
@@ -2546,6 +2546,7 @@ function autoCalib() {
             try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(calib)); } catch(e) {}
 
             appState = 'CALIBRATED';
+            const inlierRate = edgePixels.length > 0 ? inliers.length / edgePixels.length : 0;
             const qualityInfo = ` · ${inliers.length}/${edgePixels.length} Rand-Pixel`;
 
             // v2.3.118: pxPerMm-Plausibilitätsprüfung — Warnung wenn Zoom nicht passt.
@@ -2555,6 +2556,9 @@ function autoCalib() {
             if (ppmWarn) {
                 setMsg(`⚠ Auto-kalibriert — aber pxPerMm=${pxPerMm.toFixed(2)} außerhalb Normalbereich (1.0–3.5)! Zoom anpassen, dann neu kalibrieren.`);
                 setStatus('Kalibrierung: Zoom prüfen', 'warn');
+            } else if (inlierRate < 0.20) {
+                setMsg('✓ Auto-kalibriert (Kreisfit)' + qualityInfo + ' ⚠ Bitte Ring-Overlay auf Scheibe prüfen (wenig Übereinstimmung)');
+                setStatus('Auto-kalibriert · bitte prüfen', 'warn');
             } else {
                 setMsg('✓ Auto-kalibriert (Kreisfit)' + qualityInfo + ' — Referenzframe setzen, dann Erkennung starten');
                 setStatus('Auto-kalibriert', 'ok');
@@ -2580,20 +2584,24 @@ function startCalib() {
     // Pointer in der Bildmitte starten
     manualPointer = { x: canvas.width / 2, y: canvas.height / 2 };
     showDpad(true);
-    setMsg('Schritt 1/2 — Pointer auf MITTELPUNKT setzen → OK');
+    setMsg('Schritt 1/2 — Tippe auf Scheiben-Mitte (oder D-Pad → OK)');
     setStatus('Kalibrierung: Mittelpunkt', 'warn');
     if (!rafId) startLoop();
 }
 
-// Canvas-Klick nur noch für Info (kein manuelles Kalibrieren mehr per Klick)
+// Canvas-Tap: in CALIB_CTR/CALIB_EDGE → Punkt direkt per Tippen setzen (kein D-Pad nötig)
 canvas.addEventListener('click', e => {
-    // Nur Info wenn kein Pointer aktiv
-    if (manualPointer) return;
+    if (appState === 'CALIB_CTR' || appState === 'CALIB_EDGE') {
+        const p = getCanvasPointer(e);
+        manualPointer = { x: p.x, y: p.y };
+        confirmPointer();
+        return;
+    }
 });
 
 // --- Hit Detection ---
 function setRef() {
-    if (!mediaStream && inputMode !== 'stream') return;
+    if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
     try {
         ctx.getImageData(0, 0, 1, 1);
         refFrame = null;
@@ -2913,6 +2921,14 @@ document.addEventListener('fullscreenchange', () => {
         btn.textContent = '⛶'; btn.title = 'Vollbild';
     }
 });
+
+// Vollbild-Button in Android WebView ausblenden (requestFullscreen nicht unterstützt)
+try {
+    if (window.tpBridge && typeof window.tpBridge.isAndroidApp === 'function' && window.tpBridge.isAndroidApp()) {
+        const btn = document.getElementById('btnFullscreen');
+        if (btn) btn.style.display = 'none';
+    }
+} catch(e) {}
 
 function setStatus(msg, type) {
     document.getElementById('statusTxt').textContent = msg;
