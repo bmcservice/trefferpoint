@@ -707,13 +707,23 @@
 </div>
 
 <!-- Info-Overlay (mit App-Log + Version) -->
-<div id="infoOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;overflow:auto;padding:20px;box-sizing:border-box">
-    <div style="max-width:700px;margin:0 auto;background:#0f1218;border:1px solid var(--accent);padding:18px;font-family:'Share Tech Mono',monospace;color:var(--accent)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<div id="infoOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;padding:20px;box-sizing:border-box;overflow:hidden"
+     onclick="if(event.target===this)this.style.display='none'">
+    <div style="max-width:700px;margin:0 auto;background:#0f1218;border:1px solid var(--accent);
+                font-family:'Share Tech Mono',monospace;color:var(--accent);
+                display:flex;flex-direction:column;max-height:calc(100vh - 40px)">
+        <!-- Sticky Header mit ✕ — bleibt immer sichtbar -->
+        <div style="display:flex;justify-content:space-between;align-items:center;
+                    padding:14px 18px 10px;border-bottom:1px solid var(--border);flex-shrink:0;
+                    position:sticky;top:0;background:#0f1218;z-index:1">
             <div style="font-size:14px;letter-spacing:0.1em">TREFFERPOINT · INFO</div>
-            <button onclick="document.getElementById('infoOverlay').style.display='none'" style="background:none;border:1px solid var(--accent);color:var(--accent);padding:4px 10px;cursor:pointer">✕</button>
+            <button onclick="document.getElementById('infoOverlay').style.display='none'"
+                    style="background:none;border:1px solid var(--accent);color:var(--accent);
+                           padding:6px 14px;cursor:pointer;font-size:16px;min-width:44px;min-height:44px">✕</button>
         </div>
-        <pre id="infoContent" style="white-space:pre-wrap;word-break:break-word;font-size:11px;color:#c8a84b;margin:0;max-height:70vh;overflow:auto"></pre>
+        <!-- Scrollbarer Log-Bereich -->
+        <pre id="infoContent" style="white-space:pre-wrap;word-break:break-word;font-size:11px;
+                                     color:#c8a84b;margin:0;padding:14px 18px;overflow-y:auto;flex:1"></pre>
     </div>
 </div>
 
@@ -1095,7 +1105,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.122';
+const APP_VERSION = '2.3.123';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2884,6 +2894,17 @@ function toggleFullscreen() {
         btn.title = collapsed ? 'Panel einblenden' : 'Panel ausblenden';
     });
 })();
+// Escape / Android-Back-Button schließt Info-Overlay
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' || e.key === 'Back') {
+        const overlay = document.getElementById('infoOverlay');
+        if (overlay && overlay.style.display !== 'none') {
+            overlay.style.display = 'none';
+            e.preventDefault();
+        }
+    }
+});
+
 document.addEventListener('fullscreenchange', () => {
     const btn = document.getElementById('btnFullscreen');
     if (!document.fullscreenElement) {
