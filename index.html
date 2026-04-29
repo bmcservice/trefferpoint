@@ -1111,7 +1111,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.127';
+const APP_VERSION = '2.3.128';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1257,7 +1257,7 @@ const DISCS = {
 };
 
 // --- State ---
-let appState = 'IDLE'; // IDLE | READY | CALIB_CTR | CALIB_EDGE | CALIBRATED | DETECTING
+let appState = 'IDLE'; // IDLE | READY | CALIB_CTR | CALIB_EDGE | CALIB_Y_EDGE | CALIBRATED | DETECTING
 // Overlay-Sichtbarkeit (Ringe + Treffer-Marker). Persistiert in localStorage.
 // Nutzer kann bei aktiver Kalibrierung das Overlay temporär ausblenden um das
 // reine Kamerabild zu sehen — Kalibrierung bleibt intakt.
@@ -1324,6 +1324,7 @@ let calib = null;          // { cx, cy, outerPx, pxPerMm }
 let calibFailFlashUntil = 0;  // Zeitpunkt bis zu dem ein roter Fehler-Flash gezeigt wird
 let calibOkFlashUntil = 0;   // v2.3.118: grüner Erfolgs-Flash 3s nach Auto-Kalibrierung
 let calibPt1 = null;       // temp center point during calibration
+let calibPt2 = null;       // temp X-axis edge point (3 Uhr) during 3-click calibration
 let refFrame = null;       // ImageData reference
 let hits = [];
 let detecting = false;
@@ -2138,24 +2139,36 @@ function confirmPointer() {
         setStatus('Kalibrierung: Außenrand', 'warn');
 
     } else if (appState === 'CALIB_EDGE' && calibPt1) {
-        const dx = x - calibPt1.x, dy = y - calibPt1.y;
-        const outerPx = Math.sqrt(dx*dx + dy*dy);
+        // Schritt 2 → X-Halbachse (3-Uhr-Punkt) gesetzt, jetzt Y-Halbachse (6-Uhr-Punkt)
+        calibPt2 = { x, y };
+        appState = 'CALIB_Y_EDGE';
+        // Pointer nach unten versetzen (6 Uhr)
+        const dxE = x - calibPt1.x, dyE = y - calibPt1.y;
+        const rEst = Math.sqrt(dxE*dxE + dyE*dyE);
+        manualPointer = { x: calibPt1.x, y: calibPt1.y + rEst };
+        setMsg('Schritt 3/3 — Tippe auf Spiegel-Rand bei 6 Uhr (oder D-Pad → OK)');
+        setStatus('Kalibrierung: Y-Halbachse', 'warn');
+
+    } else if (appState === 'CALIB_Y_EDGE' && calibPt1 && calibPt2) {
+        // Schritt 3 → Y-Halbachse → Ellipse vollständig definiert
         const disc = DISCS[document.getElementById('discSel').value];
-        // Manuell → Kreis angenommen (a=b, angle=0)
-        calib = {
-            cx: calibPt1.x, cy: calibPt1.y,
-            a: outerPx, b: outerPx, angle: 0,
-            pxPerMm: outerPx / disc.outer_mm
-        };
-        // Persistent speichern
+        const a = Math.hypot(calibPt2.x - calibPt1.x, calibPt2.y - calibPt1.y);
+        const b = Math.hypot(x - calibPt1.x, y - calibPt1.y);
+        // Winkel: Richtung des X-Achsen-Punktes relativ zur Mitte
+        const angle = Math.atan2(calibPt2.y - calibPt1.y, calibPt2.x - calibPt1.x);
+        // pxPerMm aus geometrischem Mittel (stimmt mit strokeRing-Formel überein)
+        const pxPerMm = Math.sqrt(a * b) / disc.outer_mm;
+        calib = { cx: calibPt1.x, cy: calibPt1.y, a, b, angle, pxPerMm };
         try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(_calibToSrc(calib))); } catch(e) {}
+        calibPt2 = null;
         appState = 'CALIBRATED';
         manualPointer = null;
         showDpad(false);
-        setMsg('✓ Kalibriert (Kreis) — Referenzframe setzen, dann Erkennung starten');
+        const ar = (a / b).toFixed(2);
+        setMsg(`✓ Kalibriert (Ellipse ${ar}:1) — Referenzframe setzen, dann Erkennung starten`);
         setStatus('Kalibriert', 'ok');
         document.getElementById('calibStatus').textContent =
-            `✓ Manuell · ${disc.name} · ${calib.pxPerMm.toFixed(1)} px/mm`;
+            `✓ Manuell · ${disc.name} · ${pxPerMm.toFixed(1)} px/mm · ${ar}:1`;
         document.getElementById('btnDetect').disabled = false;
     }
 }
@@ -2188,6 +2201,7 @@ document.getElementById('dConfirm').addEventListener('touchstart', e => { e.prev
 document.getElementById('dpadCancel').addEventListener('click', () => {
     manualPointer = null;
     calibPt1 = null;
+    calibPt2 = null;
     showDpad(false);
     if (calib) {
         appState = 'CALIBRATED';
@@ -2375,7 +2389,7 @@ function drawOverlay() {
 
     // Farbe je nach Kalibrierungs-Qualität
     const ppmOk = pxPerMm >= 1.0 && pxPerMm <= 3.5;
-    const manualMode = appState === 'CALIB_CTR' || appState === 'CALIB_EDGE';
+    const manualMode = appState === 'CALIB_CTR' || appState === 'CALIB_EDGE' || appState === 'CALIB_Y_EDGE';
     const isGreen = ppmOk && !manualMode;
     // Grün: 40,185,80 / Rot: 220,60,50
     const colOuter = isGreen ? 'rgba(40,185,80,0.75)'  : 'rgba(220,60,50,0.80)';
@@ -2383,11 +2397,13 @@ function drawOverlay() {
     const colBlack = isGreen ? 'rgba(40,185,80,0.30)'  : 'rgba(220,60,50,0.35)';
 
     // Hilfsfunktion: Ellipsen-Kontur ohne Fill
-    // ra = radiusMm * pxPerMm (korrekte Pixel-Radius)
-    // rb berücksichtigt Aspekt-Verhältnis der Auto-Kalibrierung (a/b, für perspektivische Ellipse)
+    // pxPerMm = sqrt(a*b)/outer_mm → normalisiert auf geometrisches Mittel
+    // ra = radiusMm * pxPerMm * (a/sqrt(a*b)), rb entsprechend mit b
+    // → bei a=b degeneriert zu reinem Kreis, bei Ellipse korrekte Achsen
+    const sAB = Math.sqrt(a * b);
     function strokeRing(radiusMm, color, lw, dash) {
-        const ra = radiusMm * pxPerMm;
-        const rb = radiusMm * pxPerMm * (b / a);
+        const ra = radiusMm * pxPerMm * (a / sAB);
+        const rb = radiusMm * pxPerMm * (b / sAB);
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(angle);
@@ -2579,7 +2595,12 @@ function autoCalib() {
                     const bL = (data[iL] + data[iL+1] + data[iL+2]) / 3;
                     const bD = (data[iD] + data[iD+1] + data[iD+2]) / 3;
                     const bU = (data[iU] + data[iU+1] + data[iU+2]) / 3;
-                    if (bR >= threshold || bL >= threshold || bD >= threshold || bU >= threshold) {
+                    // Gradient-Filter: nur Pixel behalten, bei denen der Helligkeitsgradient
+                    // von der Bildmitte nach außen zeigt (= äußerer Spiegel-Rand).
+                    // Verhindert, dass innere Ringgrenzen, Schusslöcher oder Beschriftungen
+                    // als Spiegel-Rand erkannt werden.
+                    const gradOk = (bR - bL) * (x - W * 0.5) + (bD - bU) * (y - H * 0.5) > 0;
+                    if (gradOk && (bR >= threshold || bL >= threshold || bD >= threshold || bU >= threshold)) {
                         edgePixels.push({ x, y });
                     }
                 }
@@ -2679,9 +2700,9 @@ function startCalib() {
     if (!rafId) startLoop();
 }
 
-// Canvas-Tap: in CALIB_CTR/CALIB_EDGE → Punkt direkt per Tippen setzen (kein D-Pad nötig)
+// Canvas-Tap: in CALIB_CTR/CALIB_EDGE/CALIB_Y_EDGE → Punkt direkt per Tippen setzen (kein D-Pad nötig)
 canvas.addEventListener('click', e => {
-    if (appState === 'CALIB_CTR' || appState === 'CALIB_EDGE') {
+    if (appState === 'CALIB_CTR' || appState === 'CALIB_EDGE' || appState === 'CALIB_Y_EDGE') {
         const p = getCanvasPointer(e);
         manualPointer = { x: p.x, y: p.y };
         confirmPointer();
