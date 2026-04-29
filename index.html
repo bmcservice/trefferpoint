@@ -1095,7 +1095,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.120';
+const APP_VERSION = '2.3.121';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1583,9 +1583,6 @@ function buildCamControls() {
 
     const caps = track.getCapabilities();
     const settings = track.getSettings();
-    const spBox = document.getElementById('camControls');       // Side-Panel
-    const qpBox = document.getElementById('camQuickControls'); // Quick-Panel
-    const info = document.getElementById('camCapsInfo');
     spBox.innerHTML = '';
     qpBox.innerHTML = '';
 
@@ -4465,7 +4462,7 @@ document.getElementById('sens').addEventListener('input', e => {
 })();
 // Angezeigte Version aus APP_VERSION setzen (verhindert Drift zwischen Anzeige und Logik)
 document.title = 'TrefferPoint v' + APP_VERSION + ' — Digitale Schussauswertung';
-document.getElementById('logoSub').textContent = 'Digitale Schussauswertung · v' + APP_VERSION;
+document.getElementById('logoSub').textContent = 'v' + APP_VERSION;
 setTimeout(checkForUpdate, 2000);
 // --- Service Worker (nur im Web-Kontext; unter file:// oder Android-APK skippen) ---
 if ('serviceWorker' in navigator && location.protocol.startsWith('http') && typeof window.tpBridge === 'undefined') {
