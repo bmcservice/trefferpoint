@@ -1105,7 +1105,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.125';
+const APP_VERSION = '2.3.126';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2108,7 +2108,7 @@ function confirmPointer() {
             pxPerMm: outerPx / disc.outer_mm
         };
         // Persistent speichern
-        try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(calib)); } catch(e) {}
+        try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(_calibToSrc(calib))); } catch(e) {}
         appState = 'CALIBRATED';
         manualPointer = null;
         showDpad(false);
@@ -2543,7 +2543,7 @@ function autoCalib() {
             calib = { cx, cy, a, b, angle, pxPerMm };
 
             // Persistent speichern — Spektiv steht fest, selbe Kalibrierung beim nächsten App-Start
-            try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(calib)); } catch(e) {}
+            try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(_calibToSrc(calib))); } catch(e) {}
 
             appState = 'CALIBRATED';
             const inlierRate = edgePixels.length > 0 ? inliers.length / edgePixels.length : 0;
@@ -2922,13 +2922,6 @@ document.addEventListener('fullscreenchange', () => {
     }
 });
 
-// Vollbild-Button in Android WebView ausblenden (requestFullscreen nicht unterstützt)
-try {
-    if (window.tpBridge && typeof window.tpBridge.isAndroidApp === 'function' && window.tpBridge.isAndroidApp()) {
-        const btn = document.getElementById('btnFullscreen');
-        if (btn) btn.style.display = 'none';
-    }
-} catch(e) {}
 
 function setStatus(msg, type) {
     document.getElementById('statusTxt').textContent = msg;
@@ -3507,7 +3500,7 @@ function applyDiscPresets() {
     const saved = localStorage.getItem('tp_calib_' + disc.id);
     if (saved) {
         try {
-            calib = JSON.parse(saved);
+            calib = _calibFromSrc(JSON.parse(saved));  // Quell→Canvas-Koordinaten (aktueller Zoom)
             appState = 'CALIBRATED';
             document.getElementById('btnDetect').disabled = false;
             document.getElementById('calibStatus').textContent =
@@ -3539,7 +3532,46 @@ applyDiscPresets();
 // Vorschau beim Start zeichnen
 updatePreview();
 
+// Kalibrierungskoordinaten: Quell-Pixel-Raum (zoom-unabhängig) ↔ Canvas-Pixel-Raum
+// "Quell-Pixel" = Kamera-Frame-Pixel (zoom=1 equivalent, so gespeichert in localStorage).
+// Bei Zoom z: canvas_x = (src_x - W/2) * z + W/2; umgekehrt: src_x = (canvas_x - W/2) / z + W/2
+function _calibFromSrc(src) {
+    if (!src) return null;
+    const W = canvas.width, H = canvas.height, sz = softwareZoom;
+    if (W < 400 || sz === 1.0) return { ...src };
+    return { cx:(src.cx-W/2)*sz+W/2, cy:(src.cy-H/2)*sz+H/2,
+             a:src.a*sz, b:src.b*sz, angle:src.angle||0, pxPerMm:src.pxPerMm*sz };
+}
+function _calibToSrc(c) {
+    if (!c) return null;
+    const W = canvas.width, H = canvas.height, sz = softwareZoom;
+    if (W < 400 || sz === 1.0) return { ...c };
+    return { cx:(c.cx-W/2)/sz+W/2, cy:(c.cy-H/2)/sz+H/2,
+             a:c.a/sz, b:c.b/sz, angle:c.angle||0, pxPerMm:c.pxPerMm/sz };
+}
+
 function applySwZoom(v) {
+    // Kalibrierung mitziehen: calib.cx/cy/a/b sind Canvas-Koordinaten (zoom-abhängig).
+    // Transformationsformel: canvas_x = (src_x - W/2) * sz + W/2
+    // → Beim Zoom-Wechsel: new_canvas_x = (old_canvas_x - W/2) * (v/old) + W/2
+    if (calib && Math.abs(v - softwareZoom) > 0.001 && canvas.width >= 400) {
+        const W = canvas.width, H = canvas.height, sc = v / softwareZoom;
+        calib.cx = (calib.cx - W/2) * sc + W/2;
+        calib.cy = (calib.cy - H/2) * sc + H/2;
+        calib.a *= sc; calib.b *= sc; calib.pxPerMm *= sc;
+        // Referenzframe ist jetzt ungültig (aufgenommen bei anderem Zoom → falscher Diff)
+        if (refFrame) {
+            refFrame = null; pendingHit = null;
+            if (appState === 'DETECTING') {
+                appState = 'CALIBRATED';
+                document.getElementById('btnDetect').textContent = '⚡ Erkennung starten';
+                document.getElementById('btnDetect').className = 'btn';
+                document.getElementById('btnNewSpiegel').disabled = true;
+            }
+            setMsg('Zoom geändert — Referenzframe neu setzen');
+            setStatus('Referenz zurückgesetzt', 'warn');
+        }
+    }
     softwareZoom = v;
     const txt = v.toFixed(2) + '×';
     document.getElementById('swZoom').value  = v;
