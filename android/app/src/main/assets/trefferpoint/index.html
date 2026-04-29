@@ -1105,7 +1105,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.123';
+const APP_VERSION = '2.3.124';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2343,9 +2343,11 @@ function drawOverlay() {
     const colBlack = isGreen ? 'rgba(40,185,80,0.30)'  : 'rgba(220,60,50,0.35)';
 
     // Hilfsfunktion: Ellipsen-Kontur ohne Fill
+    // ra = radiusMm * pxPerMm (korrekte Pixel-Radius)
+    // rb berücksichtigt Aspekt-Verhältnis der Auto-Kalibrierung (a/b, für perspektivische Ellipse)
     function strokeRing(radiusMm, color, lw, dash) {
-        const ra = radiusMm * (a / Math.sqrt(a * b));
-        const rb = radiusMm * (b / Math.sqrt(a * b));
+        const ra = radiusMm * pxPerMm;
+        const rb = radiusMm * pxPerMm * (b / a);
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(angle);
