@@ -1095,7 +1095,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.121';
+const APP_VERSION = '2.3.122';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3194,20 +3194,34 @@ async function startStream() {
 }
 
 // --- Mode Toggle ---
+// Hilfsfunktion: alle laufenden Streams stoppen (RTSP-Bridge, MJPEG, getUserMedia)
+function stopAllActiveStreams() {
+    if (mjpegAbort) { mjpegAbort.abort(); mjpegAbort = null; }
+    if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+    try { if (window.tpBridge && window.tpBridge.stopRtsp) window.tpBridge.stopRtsp(); } catch(e) {}
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    appState = 'IDLE';
+}
+
 document.getElementById('btnModeUsb').addEventListener('click', () => {
+    stopAllActiveStreams();
     document.getElementById('modeUsb').style.display = '';
     document.getElementById('modeStream').style.display = 'none';
+    const mr = document.getElementById('modeRtsp'); if (mr) mr.style.display = 'none';
     document.getElementById('btnModeUsb').style.background = 'var(--accent)';
     document.getElementById('btnModeUsb').style.color = '#000';
     document.getElementById('btnModeUsb').style.borderColor = 'var(--accent)';
     document.getElementById('btnModeStream').style.background = '';
     document.getElementById('btnModeStream').style.color = '';
     document.getElementById('btnModeStream').style.borderColor = '';
+    const btnRtspMode = document.getElementById('btnModeRtsp');
+    if (btnRtspMode) { btnRtspMode.style.background = ''; btnRtspMode.style.color = ''; btnRtspMode.style.borderColor = ''; }
     inputMode = 'usb';
-    if (mjpegAbort) { mjpegAbort.abort(); mjpegAbort = null; }
+    setStatus('Bereit', 'ok');
 });
 
 document.getElementById('btnModeStream').addEventListener('click', () => {
+    stopAllActiveStreams();
     document.getElementById('modeUsb').style.display = 'none';
     document.getElementById('modeStream').style.display = '';
     const mr = document.getElementById('modeRtsp'); if (mr) mr.style.display = 'none';
@@ -3220,6 +3234,7 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     const btnRtspMode = document.getElementById('btnModeRtsp');
     if (btnRtspMode) { btnRtspMode.style.background = ''; btnRtspMode.style.color = ''; btnRtspMode.style.borderColor = ''; }
     inputMode = 'stream';
+    setStatus('Bereit', 'ok');
 });
 
 // RTSP-Mode: nur in Android-APK anbieten
@@ -3231,6 +3246,7 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     const btnModeRtsp = document.getElementById('btnModeRtsp');
     btnModeRtsp.style.display = '';
     btnModeRtsp.addEventListener('click', () => {
+        stopAllActiveStreams();
         document.getElementById('modeUsb').style.display = 'none';
         document.getElementById('modeStream').style.display = 'none';
         document.getElementById('modeRtsp').style.display = '';
@@ -3244,6 +3260,7 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         document.getElementById('btnModeStream').style.color = '';
         document.getElementById('btnModeStream').style.borderColor = '';
         inputMode = 'rtsp';
+        setStatus('Bereit', 'ok');
         // Gateway-IP als Vorschlag eintragen
         try {
             const gw = window.tpBridge.getWifiGateway();
