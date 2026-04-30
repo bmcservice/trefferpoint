@@ -285,6 +285,7 @@ class MainActivity : AppCompatActivity() {
                     cameraOpened = false
                     autoModesDisabled = false
                     uvcFrameCount = 0L
+                    stopWebViewPushLoop()
                 }
 
                 override fun onDeviceClose(device: UsbDevice?) {
@@ -382,33 +383,61 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Drop-Frame-Strategie für WebView-Push (v2.3.98+):
-    // Hard-Throttle auf max ~25 fps zur WebView. Deterministisch, kein Callback-Race
-    // mehr (in v2.3.96/97 blieb webViewPushPending manchmal hängen → Flackern).
-    // Pipeline + DevHttpServer kriegen weiterhin alle Frames (volle 30 fps).
-    @Volatile private var webViewDropped = 0L
-    private var lastWebViewPushNs = 0L
-    private val webViewMinIntervalNs = 40_000_000L  // 40ms = max 25 fps
+    // WebView-Push: Latest-Frame-Buffer + scheduled 25fps loop (v2.3.132+).
+    // Ersetzt die Hard-Throttle aus v2.3.98, die bei Burst-Output des RTSP-Decoders
+    // zu vielen Drops führte → effektiv nur ~15fps an der WebView → Stottern/Flackern.
+    //
+    // Neues Prinzip:
+    //  • Decoder-Callback speichert JPEG atomar in latestFrameB64 (kein Block).
+    //  • Ein Handler-Loop auf dem Main-Thread liefert alle 40ms den aktuellsten Frame.
+    //  • Kommt kein neuer Frame, wird kein leerer Push gemacht (keine Ghostframes).
+    //  • Ergebnis: WebView bekommt immer den frischesten Frame, gleichmäßig 25fps,
+    //    unabhängig davon ob der Decoder gerade bursted oder kurz pausiert.
+    private val latestFrameB64 = java.util.concurrent.atomic.AtomicReference<String?>(null)
+    @Volatile private var webViewDropped = 0L  // zählt überschriebene (nicht verlorene) Frames
+    @Volatile private var webViewPushCount = 0L
+
+    private val webViewPushHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile private var webViewLoopRunning = false
+
+    private val webViewPushRunnable = object : Runnable {
+        override fun run() {
+            val b64 = latestFrameB64.getAndSet(null)
+            if (b64 != null) {
+                webViewPushCount++
+                try {
+                    webView.evaluateJavascript(
+                        "window.tpReceiveFrame && window.tpReceiveFrame('$b64')",
+                        null
+                    )
+                } catch (_: Exception) {}
+            }
+            if (webViewLoopRunning) webViewPushHandler.postDelayed(this, 40)
+        }
+    }
+
+    private fun startWebViewPushLoop() {
+        if (webViewLoopRunning) return
+        webViewLoopRunning = true
+        webViewDropped = 0L
+        webViewPushCount = 0L
+        webViewPushHandler.postDelayed(webViewPushRunnable, 40)
+        AppLog.i(TAG, "WebView-Push-Loop gestartet (40ms/25fps)")
+    }
+
+    private fun stopWebViewPushLoop() {
+        if (!webViewLoopRunning) return
+        webViewLoopRunning = false
+        webViewPushHandler.removeCallbacks(webViewPushRunnable)
+        latestFrameB64.set(null)
+        AppLog.i(TAG, "WebView-Push-Loop gestoppt — ${webViewPushCount} Frames geliefert, ${webViewDropped} überschrieben")
+    }
 
     private fun pushFrameToWebView(jpeg: ByteArray) {
-        val now = System.nanoTime()
-        if (now - lastWebViewPushNs < webViewMinIntervalNs) {
-            webViewDropped++
-            if (webViewDropped == 1L || webViewDropped % 90L == 0L) {
-                AppLog.i(TAG, "WebView-Drop: $webViewDropped Frames übersprungen (Throttle 25fps)")
-            }
-            return
-        }
-        lastWebViewPushNs = now
         val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
-        runOnUiThread {
-            try {
-                webView.evaluateJavascript(
-                    "window.tpReceiveFrame && window.tpReceiveFrame('$b64')",
-                    null
-                )
-            } catch (_: Exception) {}
-        }
+        val prev = latestFrameB64.getAndSet(b64)
+        if (prev != null) webViewDropped++  // Vorheriger Frame wurde überschrieben (kein Verlust)
+        if (!webViewLoopRunning) startWebViewPushLoop()
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -428,6 +457,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try { devHttpServer?.stop() } catch (_: Exception) {}
+        stopWebViewPushLoop()
         try { rtspPipeline?.stop() } catch (_: Exception) {}
         try { mjpegPipeline?.stop() } catch (_: Exception) {}
         try { dummySurface?.release() } catch (_: Exception) {}
@@ -746,6 +776,7 @@ class MainActivity : AppCompatActivity() {
         fun stopRtsp() {
             runOnUiThread {
                 try {
+                    stopWebViewPushLoop()
                     rtspPipeline?.stop()
                     rtspPipeline = null
                     mjpegPipeline?.stop()
