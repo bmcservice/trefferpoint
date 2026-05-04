@@ -1118,7 +1118,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.138';
+const APP_VERSION = '2.3.139';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -4212,9 +4212,11 @@ function compareNow() {
     // erlaubt Cluster ab 7 Punkten. Persistenz-Maske federt Offline-FP-Risiko ab.
     // v2.3.118: minPtsAbsolute — Zoom-unabhängige Untergrenze (verhindert Rauschen bei wenig Zoom).
     // Bei pxPerMm=1.41 (gk25): calcPts=14 → ohne Limit Rauschen überlebt; mit minPtsAbsolute=20 blockiert.
+    // v2.3.139: Floor 5→3 — .22 bei pxPerMm≈1.6 liefert nur 3-4 diff_pts/Loch (STEP=3, kaliber=5.6mm).
+    // Offline-Sweep: 10→12/14 Treffer erkannt. persistMask verhindert FPs in Live-Nutzung.
     const expectedPerHole = Math.PI * bulletPx * bulletPx / (4 * STEP * STEP);
     const mpf = (typeof disc.minPtsFactor === 'number') ? disc.minPtsFactor : 1.0;
-    const calcPts = Math.max(5, Math.round(expectedPerHole * mpf));
+    const calcPts = Math.max(3, Math.round(expectedPerHole * mpf));
     const MIN_PTS = (typeof disc.minPtsAbsolute === 'number') ? Math.max(disc.minPtsAbsolute, calcPts) : calcPts;
     const MAX_PTS = Math.max(1500, Math.round(expectedPerHole * 8));
     const validClusters = clusters.filter(c => c.count >= MIN_PTS && c.count <= MAX_PTS);
