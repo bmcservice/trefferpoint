@@ -1118,7 +1118,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.134';
+const APP_VERSION = '2.3.135';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1228,7 +1228,7 @@ const DISCS = {
         name: 'Sportpistole 25m · KK .22',
         kaliberLabel: '.22',
         kaliber: 5.6,  // mm (intern genutzt)
-        sensDefault: 40,  // v2.3.115: aus Offline-Sweep (.22 / 14 Treffer Ground-Truth)
+        sensDefault: 25,  // v2.3.135: 40→25, bei pxPerMm≈1.6 zu hoch (Loch-Signal schwächer)
         // v2.3.116: niedrigerer minPtsFactor für .22 — JPEG-Kompression reduziert
         // Diff-Signal an Lochrändern → Cluster hat live 7-8 statt 9 Punkte.
         // Per-Disc (nur kk25, nicht gk25) → 9mm-Zählgenauigkeit bleibt erhalten.
@@ -2427,16 +2427,12 @@ function drawOverlay() {
     }
 
     // Alle Ringe — Spiegel (Ring ≥ 7) heller, Außenringe dunkler
+    // Ring 10 (innerster): lw=3.0 damit er auf kleinem Radius sichtbar bleibt
     disc.ringe.forEach(rng => {
         const isSpiegel = rng.r >= 7;
-        strokeRing(rng.radius,
-            isSpiegel ? colOuter : colInner,
-            isSpiegel ? (rng.r >= 9 ? 1.8 : 1.2) : 0.8);
+        const lw = rng.r === 10 ? 3.0 : isSpiegel ? (rng.r >= 9 ? 2.0 : 1.4) : 0.9;
+        strokeRing(rng.radius, isSpiegel ? colOuter : colInner, lw);
     });
-
-    // Äußerer Rahmen-Ring (etwas außerhalb Ring 3 — zeigt aktiven Erkennungsbereich)
-    strokeRing(disc.ringe[disc.ringe.length - 1].radius * 1.05,
-        isGreen ? 'rgba(40,185,80,0.55)' : 'rgba(220,60,50,0.60)', 1.5, [6,4]);
 
     // Zentrum-Kreuz (klein, transparent)
     ctx.save();
@@ -2861,6 +2857,13 @@ function runDetection() {
     }
 
     if (pts.length < 15 || pts.length > 2500) {
+        pendingHit = null;
+        return;
+    }
+
+    // v2.3.135: Kreisförmigkeits-Filter — streifige Artefakte (b/a < 0.25) verwerfen
+    // Einzelnes Einschussloch: b/a ≈ 0.7–1.0; Randtreffer ≥ 0.25; Rauschen / Licht < 0.25
+    if (kreisfoermigkeit(pts) < 0.25) {
         pendingHit = null;
         return;
     }
@@ -3743,10 +3746,14 @@ function applyDiscPresets() {
 document.getElementById('discSel').addEventListener('change', () => {
     updatePreview();
     applyDiscPresets();
+    disc = DISCS[document.getElementById('discSel').value] || null;
+    precomputeSpiegelParams();
 });
 
-// Sensitivity-Preset beim ersten Laden anwenden
+// Sensitivity-Preset + globale disc-Variable beim ersten Laden setzen
 applyDiscPresets();
+// v2.3.135: disc-Global für DevTools-Status und externe Abfragen initialisieren
+disc = DISCS[document.getElementById('discSel').value] || null;
 
 // Vorschau beim Start zeichnen
 updatePreview();
