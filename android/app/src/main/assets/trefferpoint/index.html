@@ -1118,7 +1118,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.136';
+const APP_VERSION = '2.3.137';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1431,16 +1431,18 @@ function runDemo() {
             if (scoreDist <= rng.radius) { ring = rng.r; break; }
         }
 
+        const ringDec = ringMitZehntel(scoreDist, ring, disc);
+        const ringLabel = ring > 0 ? ringDec.toFixed(1) : '0';
         const deg = hitDeg(hx, hy);
-        hits.push({x:hx, y:hy, ring, distMm:distMm.toFixed(1), deg});
+        hits.push({x:hx, y:hy, ring: ringDec, distMm:distMm.toFixed(1), deg});
         updateScore();
-        showPop(ring, distMm.toFixed(1));
-        addHitRow(ring, distMm.toFixed(1), hits.length, deg);
+        showPop(ringLabel, distMm.toFixed(1));
+        addHitRow(ringLabel, distMm.toFixed(1), hits.length, deg);
         redraw();
 
         if (speechEnabled) {
             const clock = clockPos(hx, hy);
-            speak(ring > 0 ? ring + ' auf ' + clock + ' Uhr' : 'Fehlschuss auf ' + clock + ' Uhr');
+            speak(ring > 0 ? `${ringZuSprache(ringDec)} auf ${clock} Uhr` : `Fehlschuss auf ${clock} Uhr`);
         }
 
         shotNum++;
@@ -2907,18 +2909,22 @@ function runDetection() {
     // v2.3.136: Treffer außerhalb Ring 1 (ring===0) verwerfen — kein Fehlschuss-Spam
     if (ring === 0) { pendingHit = null; return; }
 
+    // v2.3.137: Zehntelwertung
+    const ringDec = ringMitZehntel(scoreDist, ring, disc);
+    const ringLabel = ringDec.toFixed(1);
+
     const deg = hitDeg(cx, cy);
-    hits.push({ x: cx, y: cy, ring, distMm: distMm.toFixed(1), deg });
+    hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg });
     refFrame = cur;
     cooldown = Math.round(displayFps * 2.0) || 50;
 
     updateScore();
-    showPop(ring, distMm.toFixed(1));
-    addHitRow(ring, distMm.toFixed(1), hits.length, deg);
+    showPop(ringLabel, distMm.toFixed(1));
+    addHitRow(ringLabel, distMm.toFixed(1), hits.length, deg);
 
     if (speechEnabled) {
         const clock = clockPos(cx, cy);
-        speak(ring > 0 ? `${ring} auf ${clock} Uhr` : `Fehlschuss auf ${clock} Uhr`);
+        speak(`${ringZuSprache(ringDec)} auf ${clock} Uhr`);
     }
 }
 
@@ -2947,12 +2953,13 @@ function drawHit(h, n, isLast = false) {
 // --- UI helpers ---
 function updateScore() {
     const total = hits.reduce((s, h) => s + h.ring, 0);
+    const totalDisplay = total.toFixed(1);
     const avg = hits.length ? (total / hits.length).toFixed(1) : '—';
-    document.getElementById('totalScore').textContent = total;
+    document.getElementById('totalScore').textContent = totalDisplay;
     document.getElementById('scoreMeta').textContent =
         `${hits.length} Treffer · Ø ${avg}`;
     // Treffer-Vollansicht synchronisieren
-    document.getElementById('tvTotal').textContent = total;
+    document.getElementById('tvTotal').textContent = totalDisplay;
     document.getElementById('tvCount').textContent = hits.length;
     document.getElementById('tvAvg').textContent = avg;
 }
@@ -4017,6 +4024,36 @@ function resetCompareReference() {
     setStatus('Vergleichs-Referenz verworfen', 'ok');
 }
 
+// --- Zehntelwertung ---
+// Gibt den Ring als Float mit 1 Nachkommastelle zurück (z.B. 9.3).
+// scoreDist = elliptischer Abstand vom Zentrum in mm minus Kaliber/2
+// ring = ganzzahliger Ring (1–10)
+// disc = DISCS-Eintrag (ringe-Array muss vorhanden sein)
+function ringMitZehntel(scoreDist, ring, disc) {
+    if (!disc || ring <= 0) return ring;
+    const arr = disc.ringe; // [r10, r9, r8, ..., r1]
+    const idx = arr.findIndex(r => r.r === ring);
+    if (idx < 0) return ring;
+    const innerMm = idx === 0 ? 0 : arr[idx - 1].radius;
+    const outerMm = arr[idx].radius;
+    const stepMm = outerMm - innerMm;
+    if (stepMm <= 0) return ring;
+    const t = Math.min(9, Math.max(0,
+        Math.round((1 - (scoreDist - innerMm) / stepMm) * 10)
+    ));
+    return ring + t * 0.1;
+}
+
+// Dezimalring → deutsches TTS-Wort: 9.3 → "Neun Komma Drei"
+function ringZuSprache(v) {
+    const w = ['', 'Ein', 'Zwei', 'Drei', 'Vier', 'Fünf', 'Sechs', 'Sieben', 'Acht', 'Neun', 'Zehn'];
+    const ganz = Math.floor(Math.round(v * 10) / 10);
+    const t = Math.round((v - ganz) * 10);
+    const gW = w[ganz] || String(ganz);
+    if (t === 0) return gW;
+    return `${gW} Komma ${w[t] || t}`;
+}
+
 // Gibt das Verhältnis b/a der Kovarianz-Ellipse zurück (0=Linie, 1=Kreis).
 // Nutzt Array von {x,y}-Objekten.
 function kreisfoermigkeit(clusterPts) {
@@ -4194,8 +4231,9 @@ function compareNow() {
         for (const rng of disc.ringe) {
             if (scoreDist <= rng.radius) { ring = rng.r; break; }
         }
+        const ringDec = ringMitZehntel(scoreDist, ring, disc);
         const deg = hitDeg(cx, cy);
-        hits.push({ x: cx, y: cy, ring, distMm: distMm.toFixed(1), deg });
+        hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg });
     }
     hits.sort((a, b) => b.ring - a.ring);  // Beste zuerst sortieren
 
@@ -4800,9 +4838,10 @@ async function runTest(testId) {
                     const scoreDist = distMm - disc.kaliber / 2;
                     let ring = 0;
                     for (const rng of disc.ringe) { if (scoreDist <= rng.radius) { ring = rng.r; break; } }
-                    hits.push({ x: cx, y: cy, ring, distMm: distMm.toFixed(1), deg: hitDeg(cx, cy) });
+                    const ringDec = ringMitZehntel(scoreDist, ring, disc);
+                    hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg: hitDeg(cx, cy) });
                     if (typeof updateScore === 'function') updateScore();
-                    append(`  → Schuss ${s+1}: Ring ${ring}, ${distMm.toFixed(1)}mm vom Zentrum`);
+                    append(`  → Schuss ${s+1}: Ring ${ringDec.toFixed(1)}, ${distMm.toFixed(1)}mm vom Zentrum`);
                     await new Promise(r => setTimeout(r, 400));
                 }
             } else if (step.type === 'perf15s') {
