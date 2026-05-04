@@ -732,6 +732,8 @@
     <!-- CAMERA AREA -->
     <div class="camera-wrap">
         <canvas id="canvas"></canvas>
+        <canvas id="debugCanvas" style="display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:100%;max-height:100%;pointer-events:none;z-index:3"></canvas>
+        <div id="debugInfo" style="display:none;position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.75);color:#cfd8dc;font:11px/1.6 'Share Tech Mono',monospace;padding:6px 10px;border-radius:5px;z-index:4;pointer-events:none;white-space:pre"></div>
         <div class="overlay-msg" id="overlayMsg"></div>
         <div class="last-hit-pop" id="lastHitPop">
             <div class="last-hit-label">TREFFER</div>
@@ -1067,6 +1069,11 @@
                 <input type="range" id="sens" min="10" max="70" value="28">
                 <span class="sens-val" id="sensVal">28</span>
             </div>
+            <div class="sens-row" id="sensOuterRow" style="display:none">
+              <span class="sens-label">Schwelle Außen</span>
+              <input type="range" id="sensOuter" min="10" max="70" value="35">
+              <span class="sens-val" id="sensOuterVal">35</span>
+            </div>
         </div>
 
         <!-- Score -->
@@ -1111,7 +1118,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.132';
+const APP_VERSION = '2.3.133';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1307,6 +1314,8 @@ let refWarmup = 0;
 let pendingHit = null;
 let speechEnabled = true;
 let debugMode = false;
+let debugCanvas = null, debugCtx = null;
+// Initialized in DOMContentLoaded / after DOM ready
 let camRotation = 0; // 0 | 90 | 180 | 270
 let mediaStream = null;
 let videoEl = document.createElement('video');
@@ -2753,6 +2762,23 @@ function hitDeg(cx, cy) {
     return (angle + 360) % 360;
 }
 
+// Zwei-Zonen: Punkt innerhalb Spiegel-Ellipse?
+// Precomputed cos/sin: call precomputeSpiegelParams() before pixel loop.
+let _sp = null; // cached spiegel params {cosA, sinA, cx, cy, a, b}
+function precomputeSpiegelParams() {
+    if (!calib) { _sp = null; return; }
+    const ang = calib.angle || 0;
+    _sp = { cosA: Math.cos(-ang), sinA: Math.sin(-ang),
+            cx: calib.cx, cy: calib.cy, a: calib.a, b: calib.b };
+}
+function isInsideSpiegel(px, py) {
+    if (!_sp) return true; // no calib → assume inside
+    const dx = px - _sp.cx, dy = py - _sp.cy;
+    const rx = dx*_sp.cosA - dy*_sp.sinA;
+    const ry = dx*_sp.sinA + dy*_sp.cosA;
+    return (rx*rx)/(_sp.a*_sp.a) + (ry*ry)/(_sp.b*_sp.b) <= 1.0;
+}
+
 function runDetection() {
     let cur;
     try {
@@ -2766,6 +2792,8 @@ function runDetection() {
     const next = cur.data;
     const threshold = parseInt(document.getElementById('sens').value);
     const W = canvas.width, H = canvas.height;
+    precomputeSpiegelParams();
+    const thresholdOuter = document.getElementById('sensOuter') ? parseInt(document.getElementById('sensOuter').value) : threshold + 7;
 
     let pts = [], sumX = 0, sumY = 0;
     let minX = W, maxX = 0, minY = H, maxY = 0;
@@ -2775,10 +2803,13 @@ function runDetection() {
             // Timestamp-Maske: kleines Rechteck mittig unten ignorieren (Sekundenwechsel)
             if (isInTsMask(x, y, W, H)) continue;
             const i = (y * W + x) * 4;
-            const d = (Math.abs(next[i]   - prev[i])   +
-                       Math.abs(next[i+1] - prev[i+1]) +
-                       Math.abs(next[i+2] - prev[i+2])) / 3;
-            if (d > threshold) {
+            const inside = isInsideSpiegel(x, y);
+            const thr = inside ? threshold : thresholdOuter;
+            // Direction: inside spiegel → hole appears brighter; outside → hole appears darker
+            const signedD = inside
+                ? (next[i] + next[i+1] + next[i+2] - prev[i] - prev[i+1] - prev[i+2]) / 3
+                : (prev[i] + prev[i+1] + prev[i+2] - next[i] - next[i+1] - next[i+2]) / 3;
+            if (signedD > thr) {
                 pts.push({ x, y });
                 sumX += x; sumY += y;
                 if (x < minX) minX = x; if (x > maxX) maxX = x;
@@ -2787,18 +2818,46 @@ function runDetection() {
         }
     }
 
-    if (debugMode && pts.length > 0) {
-        ctx.save();
-        ctx.strokeStyle = (pts.length >= 15 && pts.length <= 2500) ? '#3ecf8e' : '#e84040';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(minX - 5, minY - 5, maxX - minX + 10, maxY - minY + 10);
-        ctx.setLineDash([]);
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.font = '10px Share Tech Mono, monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText(pts.length + ' px', minX, minY - 8);
-        ctx.restore();
+    if (debugMode) {
+        if (!debugCanvas) { debugCanvas = document.getElementById('debugCanvas'); debugCtx = debugCanvas ? debugCanvas.getContext('2d') : null; }
+        if (debugCtx) {
+            if (debugCanvas.width !== W || debugCanvas.height !== H) { debugCanvas.width = W; debugCanvas.height = H; }
+            debugCtx.clearRect(0, 0, W, H);
+            // Red: candidate pixels
+            debugCtx.fillStyle = 'rgba(255,60,60,0.45)';
+            for (const p of pts) debugCtx.fillRect(p.x - 1, p.y - 1, 3, 3);
+            // Blue dashed: spiegel ellipse boundary
+            if (calib) {
+                debugCtx.save();
+                debugCtx.translate(calib.cx, calib.cy);
+                debugCtx.rotate(calib.angle || 0);
+                debugCtx.beginPath();
+                debugCtx.ellipse(0, 0, calib.a, calib.b, 0, 0, Math.PI * 2);
+                debugCtx.strokeStyle = 'rgba(80,140,255,0.85)';
+                debugCtx.lineWidth = 1.5;
+                debugCtx.setLineDash([6, 4]);
+                debugCtx.stroke();
+                debugCtx.setLineDash([]);
+                debugCtx.restore();
+            }
+            // Yellow: pending hit center
+            if (pendingHit) {
+                debugCtx.fillStyle = 'rgba(255,220,0,0.9)';
+                debugCtx.beginPath();
+                debugCtx.arc(pendingHit.cx, pendingHit.cy, 8, 0, Math.PI * 2);
+                debugCtx.fill();
+            }
+            // Info panel
+            const insideCnt = pts.filter(p => isInsideSpiegel(p.x, p.y)).length;
+            const zone = insideCnt >= pts.length / 2 ? 'schwarz' : 'weiss';
+            const kf = kreisfoermigkeit ? kreisfoermigkeit(pts).toFixed(2) : '—';
+            const el = document.getElementById('debugInfo');
+            if (el) el.textContent =
+                `pxPerMm: ${calib ? calib.pxPerMm.toFixed(2) : '—'} | Kand: ${pts.length} px | b/a: ${kf}\n` +
+                `Schwelle: ${threshold} | Zone: ${zone} | pending: ${pendingHit ? 'ja' : 'nein'}`;
+        }
+    } else if (debugCanvas) {
+        debugCtx.clearRect(0, 0, debugCanvas.width, debugCanvas.height);
     }
 
     if (pts.length < 15 || pts.length > 2500) {
@@ -3934,6 +3993,25 @@ function resetCompareReference() {
     setStatus('Vergleichs-Referenz verworfen', 'ok');
 }
 
+// Gibt das Verhältnis b/a der Kovarianz-Ellipse zurück (0=Linie, 1=Kreis).
+// Nutzt Array von {x,y}-Objekten.
+function kreisfoermigkeit(clusterPts) {
+    const n = clusterPts.length;
+    if (n < 4) return 0;
+    let mx = 0, my = 0;
+    for (const p of clusterPts) { mx += p.x; my += p.y; }
+    mx /= n; my /= n;
+    let cxx = 0, cyy = 0, cxy = 0;
+    for (const p of clusterPts) {
+        cxx += (p.x-mx)**2; cyy += (p.y-my)**2; cxy += (p.x-mx)*(p.y-my);
+    }
+    cxx /= n; cyy /= n; cxy /= n;
+    const d = Math.sqrt(((cxx-cyy)/2)**2 + cxy*cxy);
+    const l1 = (cxx+cyy)/2 + d;
+    const l2 = (cxx+cyy)/2 - d;
+    return l2 > 0 ? Math.sqrt(l2/l1) : 0;
+}
+
 function compareNow() {
     if (!compareReference) { setStatus('Erst Referenz setzen', 'warn'); return; }
     if (!calib) { setStatus('Erst kalibrieren (Auto-Erkennung)', 'warn'); return; }
@@ -3988,6 +4066,8 @@ function compareNow() {
 
     // 1. Differenz-Punkte sammeln (mit Auto-Re-Align Offset auf Reference-Seite)
     const STEP = 3;  // Subsampling — 3 px für Performance
+    precomputeSpiegelParams();
+    const thresholdOuter = document.getElementById('sensOuter') ? parseInt(document.getElementById('sensOuter').value) : threshold + 7;
     const diffPoints = [];
     let skippedPersist = 0;
     for (let y = 1; y < H - 1; y += STEP) {
@@ -4002,10 +4082,12 @@ function compareNow() {
             if (rx < 1 || rx >= W - 1 || ry < 1 || ry >= H - 1) continue;
             const iCur = (y * W + x) * 4;
             const iRef = (ry * W + rx) * 4;
-            const d = (Math.abs(next[iCur]   - prev[iRef])   +
-                       Math.abs(next[iCur+1] - prev[iRef+1]) +
-                       Math.abs(next[iCur+2] - prev[iRef+2])) / 3;
-            if (d > threshold) diffPoints.push({ x, y });
+            const inside = isInsideSpiegel(x, y);
+            const thr = inside ? threshold : thresholdOuter;
+            const signedD = inside
+                ? (next[iCur] + next[iCur+1] + next[iCur+2] - prev[iRef] - prev[iRef+1] - prev[iRef+2]) / 3
+                : (prev[iRef] + prev[iRef+1] + prev[iRef+2] - next[iCur] - next[iCur+1] - next[iCur+2]) / 3;
+            if (signedD > thr) diffPoints.push({ x, y });
         }
     }
 
@@ -4031,6 +4113,7 @@ function compareNow() {
             const cx = c.sumX / c.count, cy = c.sumY / c.count;
             if (Math.hypot(p.x - cx, p.y - cy) < CLUSTER_RADIUS) {
                 c.sumX += p.x; c.sumY += p.y; c.count++;
+                c.pts.push(p);
                 if (p.x < c.minX) c.minX = p.x;
                 if (p.x > c.maxX) c.maxX = p.x;
                 if (p.y < c.minY) c.minY = p.y;
@@ -4042,7 +4125,8 @@ function compareNow() {
         if (!placed) {
             clusters.push({
                 sumX: p.x, sumY: p.y, count: 1,
-                minX: p.x, maxX: p.x, minY: p.y, maxY: p.y
+                minX: p.x, maxX: p.x, minY: p.y, maxY: p.y,
+                pts: [p]  // store all points for kreisförmigkeit
             });
         }
     }
@@ -4063,9 +4147,14 @@ function compareNow() {
     const MAX_PTS = Math.max(1500, Math.round(expectedPerHole * 8));
     const validClusters = clusters.filter(c => c.count >= MIN_PTS && c.count <= MAX_PTS);
 
+    // Kreisförmigkeits-Filter: b/a < 0.25 → streifige Artefakte (kein Loch)
+    // Randtreffer können halbkreisförmig sein → niedrige Schwelle 0.25
+    const MIN_KREISF = 0.25;
+    const validClusters2 = validClusters.filter(c => kreisfoermigkeit(c.pts) >= MIN_KREISF);
+
     // 4. Bestehende hits[] leeren und neue Treffer eintragen mit Ringauswertung
     hits = [];
-    for (const c of validClusters) {
+    for (const c of validClusters2) {
         const cx = c.sumX / c.count;
         const cy = c.sumY / c.count;
         const dx = cx - calib.cx, dy = cy - calib.cy;
@@ -4087,10 +4176,54 @@ function compareNow() {
     hits.sort((a, b) => b.ring - a.ring);  // Beste zuerst sortieren
 
     document.getElementById('compareStatus').textContent =
-        `✓ ${hits.length} Treffer · ${diffPoints.length} Diff-Pixel · ${clusters.length - validClusters.length} verworfen · min-pts=${MIN_PTS} r=${CLUSTER_RADIUS}${alignInfo}`;
+        `✓ ${hits.length} Treffer · ${diffPoints.length} Diff-Pixel · ${clusters.length - validClusters2.length} verworfen · min-pts=${MIN_PTS} r=${CLUSTER_RADIUS}${alignInfo}`;
     setStatus(`Vergleich: ${hits.length} Treffer erkannt${alignInfo}`, 'ok');
     setMsg('');
     if (typeof updateScore === 'function') updateScore();
+
+    if (debugMode) {
+        if (!debugCanvas) { debugCanvas = document.getElementById('debugCanvas'); debugCtx = debugCanvas ? debugCanvas.getContext('2d') : null; }
+        if (debugCtx) {
+            if (debugCanvas.width !== W || debugCanvas.height !== H) { debugCanvas.width = W; debugCanvas.height = H; }
+            debugCtx.clearRect(0, 0, W, H);
+            // Red dots: all diff points
+            debugCtx.fillStyle = 'rgba(255,60,60,0.35)';
+            for (const p of diffPoints) debugCtx.fillRect(p.x - 1, p.y - 1, 3, 3);
+            // Yellow: valid-size clusters (not yet kreisf-filtered)
+            debugCtx.fillStyle = 'rgba(255,210,0,0.7)';
+            for (const c of validClusters) {
+                const ccx = c.sumX/c.count, ccy = c.sumY/c.count;
+                debugCtx.beginPath(); debugCtx.arc(ccx, ccy, 10, 0, Math.PI*2); debugCtx.fill();
+            }
+            // Green: clusters that passed kreisförmigkeit
+            debugCtx.fillStyle = 'rgba(60,220,100,0.85)';
+            for (const c of validClusters2) {
+                const ccx = c.sumX/c.count, ccy = c.sumY/c.count;
+                debugCtx.beginPath(); debugCtx.arc(ccx, ccy, 12, 0, Math.PI*2); debugCtx.fill();
+            }
+            // Blue dashed: spiegel ellipse boundary
+            if (calib) {
+                debugCtx.save();
+                debugCtx.translate(calib.cx, calib.cy);
+                debugCtx.rotate(calib.angle || 0);
+                debugCtx.beginPath();
+                debugCtx.ellipse(0, 0, calib.a, calib.b, 0, 0, Math.PI * 2);
+                debugCtx.strokeStyle = 'rgba(80,140,255,0.85)';
+                debugCtx.lineWidth = 1.5;
+                debugCtx.setLineDash([6, 4]);
+                debugCtx.stroke();
+                debugCtx.setLineDash([]);
+                debugCtx.restore();
+            }
+            // Info panel
+            const kfVals = validClusters.map(c => kreisfoermigkeit(c.pts).toFixed(2)).join(', ');
+            const el = document.getElementById('debugInfo');
+            if (el) el.textContent =
+                `pxPerMm: ${calib ? calib.pxPerMm.toFixed(2) : '—'} | Kand: ${diffPoints.length} px | MIN_PTS: ${MIN_PTS}\n` +
+                `Cluster: ${clusters.length} | valid-size: ${validClusters.length} | pass-kreisf: ${validClusters2.length}\n` +
+                `b/a: [${kfVals || '—'}] | r=${CLUSTER_RADIUS}`;
+        }
+    }
 }
 
 document.getElementById('btnCompareRef').addEventListener('click', setCompareReference);
@@ -4435,7 +4568,14 @@ document.getElementById('btnDebug').addEventListener('click', () => {
     debugMode = !debugMode;
     const btn = document.getElementById('btnDebug');
     btn.className = debugMode ? 'btn btn-active' : 'btn';
-    btn.style.cssText = 'flex:1;padding:5px;font-size:11px';
+    btn.textContent = debugMode ? '🔍 Debug AN' : '⬛ Debug';
+    const dc = document.getElementById('debugCanvas');
+    const di = document.getElementById('debugInfo');
+    const sor = document.getElementById('sensOuterRow');
+    if (dc) dc.style.display = debugMode ? '' : 'none';
+    if (di) di.style.display = debugMode ? '' : 'none';
+    if (sor) sor.style.display = debugMode ? '' : 'none';
+    if (!debugMode && dc) { const c = dc.getContext('2d'); c.clearRect(0,0,dc.width,dc.height); }
 });
 
 document.getElementById('btnReset').addEventListener('click', resetSession);
@@ -4686,6 +4826,12 @@ function showTestModal(title, text) {
 document.getElementById('sens').addEventListener('input', e => {
     document.getElementById('sensVal').textContent = e.target.value;
 });
+
+document.getElementById('sensOuter').addEventListener('input', e => {
+    document.getElementById('sensOuterVal').textContent = e.target.value;
+});
+debugCanvas = document.getElementById('debugCanvas');
+debugCtx = debugCanvas ? debugCanvas.getContext('2d') : null;
 
 // PWA Manifest: siehe manifest.json
 
