@@ -1118,7 +1118,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.135';
+const APP_VERSION = '2.3.136';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2427,11 +2427,16 @@ function drawOverlay() {
     }
 
     // Alle Ringe — Spiegel (Ring ≥ 7) heller, Außenringe dunkler
-    // Ring 10 (innerster): lw=3.0 damit er auf kleinem Radius sichtbar bleibt
+    // Ring 10 (innerster, kleiner Radius): eigene Farbe + lw=5 damit sichtbar auf dunklem Spiegel
+    const colRing10 = isGreen ? 'rgba(120,255,140,0.95)' : 'rgba(255,120,60,0.95)';
     disc.ringe.forEach(rng => {
         const isSpiegel = rng.r >= 7;
-        const lw = rng.r === 10 ? 3.0 : isSpiegel ? (rng.r >= 9 ? 2.0 : 1.4) : 0.9;
-        strokeRing(rng.radius, isSpiegel ? colOuter : colInner, lw);
+        if (rng.r === 10) {
+            strokeRing(rng.radius, colRing10, 5.0);
+        } else {
+            const lw = isSpiegel ? (rng.r >= 9 ? 2.0 : 1.4) : 0.9;
+            strokeRing(rng.radius, isSpiegel ? colOuter : colInner, lw);
+        }
     });
 
     // Zentrum-Kreuz (klein, transparent)
@@ -2898,6 +2903,9 @@ function runDetection() {
     for (const rng of disc.ringe) {
         if (scoreDist <= rng.radius) { ring = rng.r; break; }
     }
+
+    // v2.3.136: Treffer außerhalb Ring 1 (ring===0) verwerfen — kein Fehlschuss-Spam
+    if (ring === 0) { pendingHit = null; return; }
 
     const deg = hitDeg(cx, cy);
     hits.push({ x: cx, y: cy, ring, distMm: distMm.toFixed(1), deg });
