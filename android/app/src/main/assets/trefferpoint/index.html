@@ -1118,7 +1118,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.137';
+const APP_VERSION = '2.3.138';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2909,14 +2909,25 @@ function runDetection() {
     // v2.3.136: Treffer außerhalb Ring 1 (ring===0) verwerfen — kein Fehlschuss-Spam
     if (ring === 0) { pendingHit = null; return; }
 
+    // v2.3.138: Spatial Exclusion — Loch das bereits erkannt wurde nicht nochmal zählen.
+    // Exclusion-Zone = 2× Kaliber-Durchmesser (z.B. 11.2mm bei .22, 18mm bei 9mm).
+    const exclPx = calib.pxPerMm * disc.kaliber * 2;
+    const alreadyDetected = hits.some(h => {
+        const dx = h.x - cx, dy = h.y - cy;
+        return dx*dx + dy*dy < exclPx*exclPx;
+    });
+    if (alreadyDetected) { pendingHit = null; return; }
+
     // v2.3.137: Zehntelwertung
     const ringDec = ringMitZehntel(scoreDist, ring, disc);
     const ringLabel = ringDec.toFixed(1);
 
     const deg = hitDeg(cx, cy);
     hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg });
-    refFrame = cur;
-    cooldown = Math.round(displayFps * 2.0) || 50;
+    // v2.3.138: refWarmup statt sofortigem refFrame=cur → Bild stabilisiert sich
+    // über ~1.5s bevor nächste Erkennung möglich ist. Verhindert JPEG-Rauschen-Drift.
+    refWarmup = Math.round(displayFps * 1.5) || 40;
+    cooldown  = Math.round(displayFps * 3.0) || 75;
 
     updateScore();
     showPop(ringLabel, distMm.toFixed(1));
