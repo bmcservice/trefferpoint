@@ -1118,7 +1118,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.133';
+const APP_VERSION = '2.3.134';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3706,7 +3706,16 @@ function applyDiscPresets() {
         sensEl.value = disc.sensDefault;
         document.getElementById('sensVal').textContent = disc.sensDefault;
     }
-    // Gespeicherte Kalibrierung laden (Spektiv steht fest → einmal kalibriert, immer wieder nutzbar)
+    // Gespeicherte Kalibrierung laden — aber nur wenn gerade KEINE aktive Kalibrierung vorhanden.
+    // Ist bereits kalibriert (z.B. nach manuellem 3-Klick), bleibt die aktive Kalibrierung erhalten
+    // und nur die Anzeige wird auf den neuen Disziplin-Namen aktualisiert.
+    // Hintergrund: KK25 und GK25 nutzen dieselbe physische Scheibe — cx/cy/a/b bleiben gleich.
+    if (calib) {
+        // Aktive Kalibrierung behalten, nur Label aktualisieren
+        document.getElementById('calibStatus').textContent =
+            `✓ Aktiv · ${disc.name} · r=${(calib.a||0).toFixed(0)}px · ${(calib.pxPerMm||0).toFixed(2)} px/mm`;
+        return;
+    }
     const saved = localStorage.getItem('tp_calib_' + disc.id);
     if (saved) {
         try {
