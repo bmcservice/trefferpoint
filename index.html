@@ -687,6 +687,29 @@
             <button onclick="closeTestOverlay()" style="background:none;border:1px solid var(--accent);color:var(--accent);padding:4px 10px;cursor:pointer">✕</button>
         </div>
         <div id="testList" style="display:flex;flex-direction:column;gap:10px"></div>
+
+        <!-- Trainingsaufnahme (kein PC nötig, läuft direkt in der App) -->
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">TRAININGSAUFNAHME · Leer ↔ Besc direkt aus Kamera-Stream</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+                <button id="btnTrainLeer" class="btn" onclick="trainCaptureLeer()"
+                    style="padding:6px 14px;font-size:12px">🎯 Leer aufnehmen</button>
+                <span id="trainLeerInfo" style="font-size:11px;color:var(--text-dim)">–</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+                <button id="btnTrainBesc" class="btn" onclick="trainCaptureBesc()"
+                    style="padding:6px 14px;font-size:12px">🔫 Besc aufnehmen + auswerten</button>
+                <span id="trainBescInfo" style="font-size:11px;color:var(--text-dim)">–</span>
+            </div>
+            <div id="trainResult" style="font-size:11px;background:#0a0d12;padding:8px;min-height:32px;
+                margin-bottom:8px;line-height:1.6;display:none"></div>
+            <button id="btnTrainSave" onclick="trainSavePackage()" disabled
+                style="background:none;border:1px solid var(--border);color:var(--text-dim);
+                       padding:5px 12px;font-size:11px;cursor:pointer;font-family:inherit">
+                💾 Paket speichern (leer.jpg · besc.jpg · testcase.json)
+            </button>
+        </div>
+
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
             <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">EXTERNE TOOLS</div>
             <a href="http://localhost:8765/offline_test.html" target="_blank" rel="noopener"
@@ -1132,7 +1155,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.141';
+const APP_VERSION = '2.3.142';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -4808,6 +4831,184 @@ function openTestOverlay() {
 function closeTestOverlay() {
     document.getElementById('testOverlay').style.display = 'none';
     if (currentTestRun) currentTestRun.aborted = true;
+}
+
+// ── Trainingsaufnahme (direkt aus App-Canvas, kein Server nötig) ───────────
+let trainLeerData = null, trainBescData = null;
+
+function trainCaptureFrame() {
+    try {
+        const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        return id;
+    } catch(e) {
+        setStatus('Canvas-Zugriff blockiert: ' + e.message, 'warn');
+        return null;
+    }
+}
+
+function trainCaptureLeer() {
+    const id = trainCaptureFrame();
+    if (!id) return;
+    trainLeerData = id;
+    trainBescData = null;
+    document.getElementById('trainLeerInfo').textContent =
+        `✓ ${id.width}×${id.height} · ${new Date().toLocaleTimeString()}`;
+    document.getElementById('trainLeerInfo').style.color = '#4caf50';
+    document.getElementById('trainBescInfo').textContent = '–';
+    document.getElementById('trainBescInfo').style.color = '';
+    document.getElementById('trainResult').style.display = 'none';
+    document.getElementById('btnTrainSave').disabled = true;
+    setStatus('Leer-Frame gespeichert.', 'ok');
+}
+
+function trainCaptureBesc() {
+    if (!trainLeerData) { setStatus('Erst Leer aufnehmen!', 'warn'); return; }
+    const id = trainCaptureFrame();
+    if (!id) return;
+    trainBescData = id;
+    document.getElementById('trainBescInfo').textContent =
+        `✓ ${id.width}×${id.height} · ${new Date().toLocaleTimeString()}`;
+    document.getElementById('trainBescInfo').style.color = '#ff9800';
+    setStatus('Besc-Frame gespeichert — werte aus…', 'ok');
+    setTimeout(trainRunDetection, 20);
+}
+
+function trainRunDetection() {
+    if (!trainLeerData || !trainBescData || !calib) return;
+    const disc = currentDisc || DISCS['gk25'];
+    const sens = parseInt(document.getElementById('sens').value);
+    const sensOuter = document.getElementById('sensOuter')
+        ? parseInt(document.getElementById('sensOuter').value) : sens + 6;
+
+    const prev = trainLeerData.data, next = trainBescData.data;
+    const W = trainLeerData.width, H = trainLeerData.height;
+    const STEP = 3;
+    const bulletPx = disc.kaliber * calib.pxPerMm;
+    const CLUSTER_R = Math.max(15, Math.round(bulletPx * 2.0));
+    const ring1Px = 250 * calib.pxPerMm * 1.2;
+
+    // Diff-Punkte
+    const diffPts = [];
+    for (let y = 1; y < H-1; y += STEP) {
+        for (let x = 1; x < W-1; x += STEP) {
+            if (isInTsMask && isInTsMask(x, y, W, H)) continue;
+            if (Math.hypot(x - calib.cx, y - calib.cy) > ring1Px) continue;
+            const ins = isInsideSpiegel ? isInsideSpiegel(x, y, calib) : true;
+            const thr = ins ? sens : sensOuter;
+            const i = (y * W + x) * 4;
+            const sd = ins
+                ? (next[i]+next[i+1]+next[i+2] - prev[i]-prev[i+1]-prev[i+2]) / 3
+                : (prev[i]+prev[i+1]+prev[i+2] - next[i]-next[i+1]-next[i+2]) / 3;
+            if (sd > thr) diffPts.push({x, y});
+        }
+    }
+
+    // Clustering
+    const clusters = [];
+    for (const p of diffPts) {
+        let placed = false;
+        for (const c of clusters) {
+            if (Math.hypot(p.x - c.sx/c.n, p.y - c.sy/c.n) < CLUSTER_R) {
+                c.sx+=p.x; c.sy+=p.y; c.n++; c.pts.push(p); placed=true; break;
+            }
+        }
+        if (!placed) clusters.push({sx:p.x, sy:p.y, n:1, pts:[p]});
+    }
+
+    // MIN_PTS
+    const exp = Math.PI * bulletPx * bulletPx / (4 * STEP * STEP);
+    const mpf = disc.minPtsFactor || 1.0;
+    const calcPts = Math.max(3, Math.round(exp * mpf));
+    const MIN_PTS = disc.minPtsAbsolute ? Math.max(disc.minPtsAbsolute, calcPts) : calcPts;
+    const MAX_PTS = Math.max(1500, Math.round(exp * 8));
+
+    const valid = clusters.filter(c => c.n >= MIN_PTS && c.n <= MAX_PTS && (() => {
+        const pts = c.pts, n = pts.length;
+        if (n < 4) return false;
+        let mx=0, my=0;
+        for (const p of pts) { mx+=p.x; my+=p.y; }
+        mx/=n; my/=n;
+        let cxx=0, cyy=0, cxy=0;
+        for (const p of pts) { cxx+=(p.x-mx)**2; cyy+=(p.y-my)**2; cxy+=(p.x-mx)*(p.y-my); }
+        cxx/=n; cyy/=n; cxy/=n;
+        const d = Math.sqrt(((cxx-cyy)/2)**2+cxy*cxy);
+        const l2 = (cxx+cyy)/2-d;
+        const l1 = (cxx+cyy)/2+d;
+        return l1>0 && Math.sqrt(Math.max(0,l2)/l1) >= 0.25;
+    })());
+
+    // Ring-Auswertung
+    const hits = valid.map(c => {
+        const cx = c.sx/c.n, cy = c.sy/c.n;
+        const dx=cx-calib.cx, dy=cy-calib.cy;
+        const ang=calib.angle||0;
+        const cosA=Math.cos(-ang), sinA=Math.sin(-ang);
+        const rx=cosA*dx-sinA*dy, ry=sinA*dx+cosA*dy;
+        const norm = Math.sqrt((rx/calib.a)**2+(ry/calib.b)**2);
+        const distMm = norm * Math.sqrt(calib.a*calib.b) / calib.pxPerMm;
+        const sd2 = distMm - disc.kaliber/2;
+        let ring = 0;
+        for (const rng of disc.ringe) { if (sd2 <= rng.radius) { ring=rng.r; break; } }
+        const deg = (Math.atan2(dy, dx)*180/Math.PI+360)%360;
+        const h = Math.round(deg/30)%12 || 12;
+        return {cx, cy, ring, distMm: distMm.toFixed(1), uhr: h, n: c.n};
+    }).sort((a,b) => b.ring - a.ring);
+
+    const resEl = document.getElementById('trainResult');
+    resEl.style.display = 'block';
+    if (hits.length === 0) {
+        resEl.innerHTML = `<span style="color:#ff9800">0 Treffer · diff_pts=${diffPts.length} · MIN_PTS=${MIN_PTS} · CR=${CLUSTER_R}</span>`;
+    } else {
+        const avg = (hits.reduce((s,h)=>s+h.ring,0)/hits.length).toFixed(1);
+        resEl.innerHTML = `<span style="color:#4caf50">✓ ${hits.length} Treffer · Ø${avg} · diff_pts=${diffPts.length} · MIN_PTS=${MIN_PTS}</span><br>` +
+            hits.slice(0,8).map((h,i) =>
+                `<span style="color:#ccc">#${i+1}: R${h.ring} · ${h.distMm}mm · ${h.uhr}Uhr · n=${h.n}</span>`
+            ).join('<br>');
+    }
+    document.getElementById('btnTrainSave').disabled = false;
+    setStatus(`Trainings-Auswertung: ${hits.length} Treffer`, hits.length > 0 ? 'ok' : 'warn');
+}
+
+function trainSavePackage() {
+    if (!trainLeerData || !trainBescData) return;
+    const ts = new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,15);
+    const discId = currentDisc ? currentDisc.id : 'gk25';
+
+    function saveImageData(id, filename) {
+        const c = document.createElement('canvas');
+        c.width = id.width; c.height = id.height;
+        c.getContext('2d').putImageData(id, 0, 0);
+        c.toBlob(blob => {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a); a.click();
+            setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+        }, 'image/jpeg', 0.93);
+    }
+
+    saveImageData(trainLeerData, `leer_${ts}.jpg`);
+    setTimeout(() => saveImageData(trainBescData, `besc_${ts}.jpg`), 400);
+    setTimeout(() => {
+        const meta = {
+            id: `${discId}_train_${ts}`,
+            desc: `App-Aufnahme ${ts}`,
+            disc: discId,
+            leer: `leer_${ts}.jpg`,
+            besc: `besc_${ts}.jpg`,
+            soll: null,
+            calib: calib,
+            sens: parseInt(document.getElementById('sens').value),
+            notes: 'Aufgenommen via TrefferPoint App Trainings-Modus'
+        };
+        const blob = new Blob([JSON.stringify(meta, null, 2)], {type:'application/json'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `testcase_${ts}.json`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    }, 800);
+    setStatus(`Trainings-Paket gespeichert: ${ts}`, 'ok');
 }
 
 async function runTest(testId) {
