@@ -687,6 +687,20 @@
             <button onclick="closeTestOverlay()" style="background:none;border:1px solid var(--accent);color:var(--accent);padding:4px 10px;cursor:pointer">✕</button>
         </div>
         <div id="testList" style="display:flex;flex-direction:column;gap:10px"></div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">EXTERNE TOOLS</div>
+            <a href="http://localhost:8765/offline_test.html" target="_blank" rel="noopener"
+               style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;
+                      font-family:'Share Tech Mono',monospace;font-size:11px;
+                      color:var(--accent);border:1px solid var(--accent);border-radius:3px;
+                      text-decoration:none;opacity:0.75"
+               title="adb reverse tcp:8765 tcp:8765 + python -m http.server 8765">
+               🔬 Offline-Testharness (localhost:8765)
+            </a>
+            <div style="margin-top:4px;font-size:10px;color:var(--text-dim)">
+                adb reverse tcp:8765 tcp:8765 · python -m http.server 8765 --directory training_data
+            </div>
+        </div>
         <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
             <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">FORTSCHRITT</div>
             <div id="testProgress" style="font-size:11px;background:#0a0d12;padding:8px;min-height:60px;max-height:35vh;overflow:auto"></div>
@@ -1063,15 +1077,6 @@
                 <button class="btn btn-active" id="btnSpeech" style="flex:1;padding:5px;font-size:11px">🔊 Ansage</button>
                 <button class="btn" id="btnDebug" style="flex:1;padding:5px;font-size:11px">⬛ Debug</button>
             <button class="btn" id="btnDemo">▶ Demo (10 Schuss)</button>
-            </div>
-            <div style="margin-bottom:7px">
-                <a href="http://localhost:8765/offline_test.html" target="_blank" rel="noopener"
-                   style="display:inline-block;padding:5px 12px;font-size:10px;font-family:'Share Tech Mono',monospace;
-                          color:var(--text-dim);border:1px solid var(--text-dim);border-radius:3px;
-                          text-decoration:none;opacity:0.6"
-                   title="Offline-Testharness (adb reverse tcp:8765 tcp:8765 + python -m http.server 8765)">
-                   🔬 Offline-Test (localhost:8765)
-                </a>
             </div>
             <div class="sens-row">
                 <span class="sens-label">Empfindlichkeit</span>
