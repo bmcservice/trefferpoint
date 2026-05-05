@@ -1064,6 +1064,15 @@
                 <button class="btn" id="btnDebug" style="flex:1;padding:5px;font-size:11px">⬛ Debug</button>
             <button class="btn" id="btnDemo">▶ Demo (10 Schuss)</button>
             </div>
+            <div style="margin-bottom:7px">
+                <a href="http://localhost:8765/offline_test.html" target="_blank" rel="noopener"
+                   style="display:inline-block;padding:5px 12px;font-size:10px;font-family:'Share Tech Mono',monospace;
+                          color:var(--text-dim);border:1px solid var(--text-dim);border-radius:3px;
+                          text-decoration:none;opacity:0.6"
+                   title="Offline-Testharness (adb reverse tcp:8765 tcp:8765 + python -m http.server 8765)">
+                   🔬 Offline-Test (localhost:8765)
+                </a>
+            </div>
             <div class="sens-row">
                 <span class="sens-label">Empfindlichkeit</span>
                 <input type="range" id="sens" min="10" max="70" value="28">
@@ -1118,7 +1127,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.140';
+const APP_VERSION = '2.3.141';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);

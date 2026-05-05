@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>TrefferPoint — Offline Erkennungstest</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a2e; color: #eee; font-family: monospace; font-size: 13px; }
+h1 { padding: 10px 16px; background: #16213e; font-size: 15px; color: #7ec8e3; border-bottom: 1px solid #333; }
+.row { display: flex; gap: 12px; padding: 10px 16px; flex-wrap: wrap; align-items: flex-start; }
+.card { background: #16213e; border: 1px solid #2a2a4a; border-radius: 6px; padding: 10px 14px; min-width: 220px; }
+.card h2 { font-size: 12px; color: #7ec8e3; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+label { display: block; margin-bottom: 5px; color: #aaa; }
+input[type=file] { color: #eee; font-size: 12px; width: 100%; }
+input[type=number], input[type=range], select { background: #0f3460; color: #eee; border: 1px solid #444; padding: 3px 6px; border-radius: 3px; width: 80px; }
+select { width: 140px; }
+.btn { background: #0f3460; color: #7ec8e3; border: 1px solid #7ec8e3; padding: 5px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; margin-right: 6px; margin-top: 4px; }
+.btn:hover { background: #7ec8e3; color: #0f3460; }
+.btn.primary { background: #e94560; border-color: #e94560; color: #fff; }
+.btn.primary:hover { background: #ff6b6b; }
+.btn.green { background: #1b5e20; border-color: #4caf50; color: #4caf50; }
+.btn.green:hover { background: #4caf50; color: #0f3460; }
+.btn.orange { background: #4a2900; border-color: #ff9800; color: #ff9800; }
+.btn.orange:hover { background: #ff9800; color: #1a1a2e; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#status { padding: 6px 16px; background: #0f3460; font-size: 12px; min-height: 26px; }
+#status.ok { color: #4caf50; }
+#status.warn { color: #ff9800; }
+#status.err { color: #f44336; }
+.canvas-wrap { position: relative; display: inline-block; }
+canvas { display: block; }
+#results { padding: 10px 16px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { background: #0f3460; color: #7ec8e3; padding: 4px 8px; text-align: left; }
+td { padding: 3px 8px; border-bottom: 1px solid #2a2a4a; }
+tr.match td { color: #4caf50; }
+tr.miss td { color: #ff9800; }
+tr.fp td { color: #f44336; }
+.metrics { display: flex; gap: 20px; padding: 8px 0; }
+.metric { text-align: center; }
+.metric .val { font-size: 22px; font-weight: bold; color: #7ec8e3; }
+.metric .lbl { font-size: 11px; color: #aaa; }
+.calib-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.calib-row label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: #aaa; }
+.calib-row input { width: 65px; }
+/* Tabs */
+.tabs { display: flex; gap: 0; padding: 8px 16px 0; border-bottom: 1px solid #2a2a4a; }
+.tab-btn { background: none; border: 1px solid #2a2a4a; border-bottom: none; color: #aaa; padding: 5px 16px; cursor: pointer; font-size: 12px; border-radius: 4px 4px 0 0; font-family: monospace; }
+.tab-btn.active { background: #16213e; color: #7ec8e3; border-color: #7ec8e3; }
+.tab-btn:hover:not(.active) { background: #16213e; color: #eee; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+/* Camera */
+#camPreview { width: 480px; height: 270px; background: #000; border: 1px solid #333; display: block; object-fit: cover; }
+.cap-status { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; margin-left: 6px; }
+.cap-status.ready { background: #1b5e20; color: #4caf50; }
+.cap-status.none  { background: #333; color: #888; }
+.cam-controls { display: flex; flex-direction: column; gap: 8px; min-width: 200px; justify-content: flex-start; }
+</style>
+</head>
+<body>
+<h1>TrefferPoint — Offline Erkennungstest (Produktion-compareNow in JS)</h1>
+<div id="status" class="ok">Bilder laden und Auswerten klicken.</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('files')">📂 Dateien</button>
+  <button class="tab-btn" onclick="showTab('camera')">📷 Kamera</button>
+</div>
+
+<!-- Tab: Dateien -->
+<div id="tab-files" class="tab-content active">
+  <div class="row">
+    <div class="card">
+      <h2>Bilder</h2>
+      <label>Leer-Bild (Referenz)<input type="file" id="fileLeer" accept="image/*"></label>
+      <label style="margin-top:6px">Beschossen-Bild<input type="file" id="fileBesc" accept="image/*"></label>
+      <label style="margin-top:6px">SOLL-JSON (optional)<input type="file" id="fileSoll" accept=".json"></label>
+      <div style="margin-top:8px">
+        <strong>Presets:</strong><br>
+        <button class="btn" onclick="loadPreset('gk25')">GK25 leer_9mm/besc2</button>
+        <button class="btn" onclick="loadPreset('kk25')">KK25 snap_clean/besc .22</button>
+      </div>
+    </div>
+
+    <!-- Kalibrierung -->
+    <div class="card">
+      <h2>Kalibrierung</h2>
+      <div class="calib-row">
+        <label>cx<input type="number" id="cx" value="520"></label>
+        <label>cy<input type="number" id="cy" value="238"></label>
+        <label>a<input type="number" id="ca" value="156"></label>
+        <label>b<input type="number" id="cb" value="168"></label>
+        <label>angle<input type="number" id="cangle" value="0" step="0.01"></label>
+        <label>pxPerMm<input type="number" id="pxPerMm" value="1.616" step="0.001"></label>
+      </div>
+    </div>
+
+    <!-- Parameter -->
+    <div class="card">
+      <h2>Parameter</h2>
+      <div class="calib-row">
+        <label>Disziplin<br><select id="discSel">
+          <option value="gk25">GK25 9mm</option>
+          <option value="kk25">KK25 .22</option>
+        </select></label>
+        <label>Sens (innen)<input type="number" id="sens" value="22" min="5" max="80"></label>
+        <label>SensOuter<input type="number" id="sensOuter" value="28" min="5" max="80"></label>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn primary" onclick="runTest()">▶ Auswerten</button>
+        <button class="btn" onclick="clearAll()">✕ Reset</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Kamera -->
+<div id="tab-camera" class="tab-content">
+  <div class="row">
+    <!-- Video Preview -->
+    <div class="card" style="min-width:unset">
+      <h2>Kamera-Vorschau</h2>
+      <video id="camPreview" autoplay muted playsinline></video>
+      <div style="margin-top:6px; font-size:11px; color:#888">
+        <span id="camResLabel">–</span>
+      </div>
+    </div>
+
+    <!-- Camera Controls -->
+    <div class="card" style="min-width:240px">
+      <h2>Aufnahme</h2>
+      <div style="margin-bottom:8px">
+        <label style="margin-bottom:4px">Kamera<br>
+          <select id="camSelect" style="width:200px">
+            <option value="">– Kamera wählen –</option>
+          </select>
+        </label>
+        <button class="btn" onclick="startCamera()">▶ Starten</button>
+        <button class="btn" onclick="stopCamera()">■ Stopp</button>
+      </div>
+      <hr style="border-color:#2a2a4a; margin:8px 0">
+      <div style="margin-bottom:6px">
+        <button class="btn green" onclick="captureLeer()">🎯 Leer aufnehmen</button>
+        <span id="leerStatus" class="cap-status none">–</span>
+      </div>
+      <div style="margin-bottom:6px">
+        <button class="btn orange" onclick="captureBesc()">🔫 Besc aufnehmen + auswerten</button>
+        <span id="bescStatus" class="cap-status none">–</span>
+      </div>
+      <hr style="border-color:#2a2a4a; margin:8px 0">
+      <div style="font-size:11px;color:#888;margin-bottom:6px">
+        Beide Frames aufgenommen → Paket speichern
+      </div>
+      <button class="btn" id="btnSave" onclick="saveTestCase()" disabled>💾 Testfall-Paket speichern</button>
+      <div style="font-size:10px;color:#666;margin-top:4px">leer.jpg · besc.jpg · testcase.json</div>
+    </div>
+
+    <!-- Same Calib/Params (shared with file tab) -->
+    <div class="card">
+      <h2>Kalibrierung</h2>
+      <div class="calib-row">
+        <label>cx<input type="number" id="cx2" value="520"></label>
+        <label>cy<input type="number" id="cy2" value="238"></label>
+        <label>a<input type="number" id="ca2" value="156"></label>
+        <label>b<input type="number" id="cb2" value="168"></label>
+        <label>angle<input type="number" id="cangle2" value="0" step="0.01"></label>
+        <label>pxPerMm<input type="number" id="pxPerMm2" value="1.616" step="0.001"></label>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Parameter</h2>
+      <div class="calib-row">
+        <label>Disziplin<br><select id="discSel2">
+          <option value="gk25">GK25 9mm</option>
+          <option value="kk25">KK25 .22</option>
+        </select></label>
+        <label>Sens<input type="number" id="sens2" value="22" min="5" max="80"></label>
+        <label>SensO<input type="number" id="sensOuter2" value="28" min="5" max="80"></label>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn" onclick="loadPreset('gk25', true)">GK25</button>
+        <button class="btn" onclick="loadPreset('kk25', true)">KK25</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Canvas (always visible) -->
+<div class="row">
+  <div class="canvas-wrap">
+    <canvas id="mainCanvas" width="960" height="540" style="border:1px solid #333; max-width:100%;"></canvas>
+  </div>
+  <div style="flex:1; min-width:280px;">
+    <div id="metricsDiv" style="display:none">
+      <div class="metrics">
+        <div class="metric"><div class="val" id="mHits">-</div><div class="lbl">Erkannt</div></div>
+        <div class="metric"><div class="val" id="mRecall">-</div><div class="lbl">Recall</div></div>
+        <div class="metric"><div class="val" id="mFP">-</div><div class="lbl">FP</div></div>
+        <div class="metric"><div class="val" id="mAvg">-</div><div class="lbl">Ø Ring</div></div>
+      </div>
+      <div id="diffInfo" style="font-size:11px;color:#aaa;margin-bottom:6px;"></div>
+    </div>
+    <div id="results"></div>
+  </div>
+</div>
+
+<script>
+// ==================== PRODUCTION DISCS (v2.3.140) ====================
+const DISCS = {
+  kk25: {
+    id:'kk25', name:'Sportpistole 25m · KK .22', kaliber:5.6,
+    sensDefault:25, minPtsFactor:0.75,
+    outer_mm:100.0,
+    ringe:[
+      {r:10,radius:25.0},{r:9,radius:50.0},{r:8,radius:75.0},{r:7,radius:100.0},
+      {r:6,radius:125.0},{r:5,radius:150.0},{r:4,radius:175.0},{r:3,radius:200.0},
+      {r:2,radius:225.0},{r:1,radius:250.0}
+    ]
+  },
+  gk25: {
+    id:'gk25', name:'Pistole 25m · 9mm (GK)', kaliber:9.0,
+    sensDefault:28, minPtsFactor:0.65, minPtsAbsolute:12,
+    outer_mm:100.0,
+    ringe:[
+      {r:10,radius:25.0},{r:9,radius:50.0},{r:8,radius:75.0},{r:7,radius:100.0},
+      {r:6,radius:125.0},{r:5,radius:150.0},{r:4,radius:175.0},{r:3,radius:200.0},
+      {r:2,radius:225.0},{r:1,radius:250.0}
+    ]
+  }
+};
+
+// ==================== ALGORITHM FUNCTIONS (production) ====================
+const TS_MASK = {cx:0.40, cy:0.975, w:0.55, h:0.055};
+function isInTsMask(x, y, W, H) {
+  const mw = TS_MASK.w * W, mh = TS_MASK.h * H;
+  const x0 = TS_MASK.cx * W - mw/2, y0 = TS_MASK.cy * H - mh/2;
+  return x >= x0 && x <= x0+mw && y >= y0 && y <= y0+mh;
+}
+
+let _sp = null;
+function precomputeSpiegelParams(calib) {
+  const ang = calib.angle || 0;
+  _sp = { cosA:Math.cos(-ang), sinA:Math.sin(-ang), cx:calib.cx, cy:calib.cy, a:calib.a, b:calib.b };
+}
+function isInsideSpiegel(px, py) {
+  if (!_sp) return true;
+  const dx = px-_sp.cx, dy = py-_sp.cy;
+  const rx = dx*_sp.cosA - dy*_sp.sinA;
+  const ry = dx*_sp.sinA + dy*_sp.cosA;
+  return (rx*rx)/(_sp.a*_sp.a) + (ry*ry)/(_sp.b*_sp.b) <= 1.0;
+}
+function kreisfoermigkeit(pts) {
+  const n = pts.length;
+  if (n < 4) return 0;
+  let mx=0, my=0;
+  for (const p of pts) { mx+=p.x; my+=p.y; }
+  mx/=n; my/=n;
+  let cxx=0, cyy=0, cxy=0;
+  for (const p of pts) {
+    cxx+=(p.x-mx)**2; cyy+=(p.y-my)**2; cxy+=(p.x-mx)*(p.y-my);
+  }
+  cxx/=n; cyy/=n; cxy/=n;
+  const d = Math.sqrt(((cxx-cyy)/2)**2 + cxy*cxy);
+  const l1=(cxx+cyy)/2+d, l2=(cxx+cyy)/2-d;
+  return l2>0 ? Math.sqrt(l2/l1) : 0;
+}
+function ringMitZehntel(scoreDist, ring, disc) {
+  if (!disc || ring<=0) return ring;
+  const arr = disc.ringe;
+  const idx = arr.findIndex(r => r.r===ring);
+  if (idx<0) return ring;
+  const innerMm = idx===0 ? 0 : arr[idx-1].radius;
+  const outerMm = arr[idx].radius;
+  const stepMm = outerMm-innerMm;
+  if (stepMm<=0) return ring;
+  const t = Math.min(9, Math.max(0, Math.round((1-(scoreDist-innerMm)/stepMm)*10)));
+  return ring + t*0.1;
+}
+function hitDeg(cx, cy, calib) {
+  const angle = Math.atan2(cx-calib.cx, -(cy-calib.cy))*180/Math.PI;
+  return (angle+360)%360;
+}
+function clockPos(deg) {
+  const h = Math.round(deg/30) % 12;
+  return h===0 ? 12 : h;
+}
+
+// ==================== CORE DETECTION ====================
+function runDetection(leerData, bescData, calib, disc, sens, sensOuter) {
+  const W = leerData.width, H = leerData.height;
+  const prev = leerData.data, next = bescData.data;
+  precomputeSpiegelParams(calib);
+
+  const ringe = disc.ringe || [];
+  const ring1Mm = ringe.length > 0 ? ringe[ringe.length-1].radius : 250;
+  const ring1Px = ring1Mm * (calib.pxPerMm || 1) * 1.2;
+  const spCx = calib.cx, spCy = calib.cy;
+  const STEP = 3;
+
+  const diffPoints = [];
+  for (let y=1; y<H-1; y+=STEP) {
+    for (let x=1; x<W-1; x+=STEP) {
+      if (isInTsMask(x, y, W, H)) continue;
+      if (Math.hypot(x-spCx, y-spCy) > ring1Px) continue;
+      const inside = isInsideSpiegel(x, y);
+      const thr = inside ? sens : sensOuter;
+      const iCur = (y*W+x)*4;
+      const iRef = (y*W+x)*4;
+      const signedD = inside
+        ? (next[iCur]+next[iCur+1]+next[iCur+2] - prev[iRef]-prev[iRef+1]-prev[iRef+2]) / 3
+        : (prev[iRef]+prev[iRef+1]+prev[iRef+2] - next[iCur]-next[iCur+1]-next[iCur+2]) / 3;
+      if (signedD > thr) diffPoints.push({x, y});
+    }
+  }
+
+  const bulletPx = (disc.kaliber||5) * (calib.pxPerMm||1);
+  const CLUSTER_RADIUS = Math.max(15, Math.round(bulletPx * 2.0));
+  const clusters = [];
+  for (const p of diffPoints) {
+    let placed = false;
+    for (const c of clusters) {
+      if (Math.hypot(p.x - c.sumX/c.count, p.y - c.sumY/c.count) < CLUSTER_RADIUS) {
+        c.sumX+=p.x; c.sumY+=p.y; c.count++; c.pts.push(p); placed=true; break;
+      }
+    }
+    if (!placed) clusters.push({sumX:p.x,sumY:p.y,count:1,pts:[p]});
+  }
+
+  const expectedPerHole = Math.PI * bulletPx * bulletPx / (4*STEP*STEP);
+  const mpf = (typeof disc.minPtsFactor==='number') ? disc.minPtsFactor : 1.0;
+  const calcPts = Math.max(3, Math.round(expectedPerHole * mpf));
+  const MIN_PTS = (typeof disc.minPtsAbsolute==='number') ? Math.max(disc.minPtsAbsolute, calcPts) : calcPts;
+  const MAX_PTS = Math.max(1500, Math.round(expectedPerHole*8));
+  const valid1 = clusters.filter(c => c.count>=MIN_PTS && c.count<=MAX_PTS);
+  const valid2 = valid1.filter(c => kreisfoermigkeit(c.pts) >= 0.25);
+
+  const hits = [];
+  for (const c of valid2) {
+    const cx = c.sumX/c.count, cy = c.sumY/c.count;
+    const dx=cx-calib.cx, dy=cy-calib.cy;
+    const aH=calib.a||100, bH=calib.b||100;
+    const ang=calib.angle||0;
+    const cosA=Math.cos(-ang), sinA=Math.sin(-ang);
+    const rx=cosA*dx-sinA*dy, ry=sinA*dx+cosA*dy;
+    const normDist = Math.sqrt((rx/aH)**2+(ry/bH)**2);
+    const distMm = normDist * Math.sqrt(aH*bH) / calib.pxPerMm;
+    const scoreDist = distMm - disc.kaliber/2;
+    let ring=0;
+    for (const rng of disc.ringe) { if (scoreDist<=rng.radius) { ring=rng.r; break; } }
+    const ringDec = ringMitZehntel(scoreDist, ring, disc);
+    const deg = hitDeg(cx, cy, calib);
+    hits.push({x:cx, y:cy, ring:ringDec, distMm:distMm.toFixed(1), deg:deg.toFixed(0), n:c.count});
+  }
+  hits.sort((a,b) => b.ring-a.ring);
+
+  return { hits, diffPoints, clusters, MIN_PTS, CLUSTER_RADIUS,
+           kept:valid2.length, rejected:clusters.length-valid2.length };
+}
+
+// ==================== STATE ====================
+let leerImg=null, bescImg=null, sollData=null;
+let camStream=null;
+const mainCanvas = document.getElementById('mainCanvas');
+const mainCtx = mainCanvas.getContext('2d');
+
+function setStatus(msg, cls='ok') {
+  const el = document.getElementById('status');
+  el.textContent = msg; el.className = cls;
+}
+
+function getCalib(suffix='') {
+  return {
+    cx: parseFloat(document.getElementById('cx'+suffix).value),
+    cy: parseFloat(document.getElementById('cy'+suffix).value),
+    a:  parseFloat(document.getElementById('ca'+suffix).value),
+    b:  parseFloat(document.getElementById('cb'+suffix).value),
+    angle: parseFloat(document.getElementById('cangle'+suffix).value),
+    pxPerMm: parseFloat(document.getElementById('pxPerMm'+suffix).value)
+  };
+}
+
+// ==================== TABS ====================
+function showTab(id) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    if (btn.textContent.toLowerCase().includes(id==='files'?'datei':'kamera')) btn.classList.add('active');
+  });
+  if (id === 'camera') enumerateCameras();
+}
+
+// ==================== CAMERA ====================
+async function enumerateCameras() {
+  try {
+    // Need permission first to get labels
+    const sel = document.getElementById('camSelect');
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    sel.innerHTML = '<option value="">– Kamera wählen –</option>';
+    cams.forEach(cam => {
+      const opt = document.createElement('option');
+      opt.value = cam.deviceId;
+      opt.textContent = cam.label || `Kamera ${cam.deviceId.slice(0,8)}`;
+      sel.appendChild(opt);
+    });
+    if (cams.length === 0) {
+      sel.innerHTML = '<option value="">Keine Kamera gefunden</option>';
+    }
+  } catch(e) {
+    setStatus('Kamera-Enumeration: ' + e.message, 'warn');
+  }
+}
+
+async function startCamera() {
+  const deviceId = document.getElementById('camSelect').value;
+  const constraints = {
+    video: deviceId
+      ? { deviceId: { exact: deviceId }, width:{ideal:1920}, height:{ideal:1080} }
+      : { width:{ideal:1920}, height:{ideal:1080} }
+  };
+  try {
+    if (camStream) stopCamera();
+    camStream = await navigator.mediaDevices.getUserMedia(constraints);
+    const vid = document.getElementById('camPreview');
+    vid.srcObject = camStream;
+    vid.onloadedmetadata = () => {
+      document.getElementById('camResLabel').textContent =
+        `${vid.videoWidth}×${vid.videoHeight}`;
+    };
+    setStatus('Kamera läuft.', 'ok');
+    // Re-enumerate now we have permission (gets labels)
+    enumerateCameras();
+  } catch(e) {
+    setStatus('Kamera-Fehler: ' + e.message, 'err');
+  }
+}
+
+function stopCamera() {
+  if (camStream) {
+    camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+    document.getElementById('camPreview').srcObject = null;
+    document.getElementById('camResLabel').textContent = '–';
+  }
+}
+
+function captureVideoFrame() {
+  const vid = document.getElementById('camPreview');
+  if (!vid.srcObject || vid.readyState < 2) {
+    setStatus('Kamera noch nicht bereit.', 'warn');
+    return null;
+  }
+  const W = 960, H = 540;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  // Preserve aspect ratio, crop center
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  const scale = Math.max(W/vw, H/vh);
+  const sw = W/scale, sh = H/scale;
+  const sx = (vw-sw)/2, sy = (vh-sh)/2;
+  ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, W, H);
+  return { canvas: c, imageData: ctx.getImageData(0,0,W,H) };
+}
+
+function imgFromCanvas(c) {
+  // Create an HTMLImageElement from a canvas (for the draw step)
+  const img = new Image();
+  img.src = c.toDataURL('image/jpeg', 0.92);
+  img._canvas = c; // keep canvas for ImageData
+  return img;
+}
+
+function captureLeer() {
+  const frame = captureVideoFrame();
+  if (!frame) return;
+  leerImg = imgFromCanvas(frame.canvas);
+  leerImg._imageData = frame.imageData;
+  const st = document.getElementById('leerStatus');
+  st.textContent = new Date().toLocaleTimeString();
+  st.className = 'cap-status ready';
+  setStatus('Leer-Frame aufgenommen.', 'ok');
+  updateSaveBtn();
+}
+
+function captureBesc() {
+  const frame = captureVideoFrame();
+  if (!frame) return;
+  bescImg = imgFromCanvas(frame.canvas);
+  bescImg._imageData = frame.imageData;
+  const st = document.getElementById('bescStatus');
+  st.textContent = new Date().toLocaleTimeString();
+  st.className = 'cap-status ready';
+  setStatus('Besc-Frame aufgenommen — starte Auswertung…', 'ok');
+  updateSaveBtn();
+  // Show besc on canvas immediately
+  mainCtx.drawImage(bescImg._canvas, 0, 0, 960, 540);
+  // Run detection
+  if (leerImg) setTimeout(runTest, 30);
+  else setStatus('Besc aufgenommen — erst Leer aufnehmen!', 'warn');
+}
+
+function updateSaveBtn() {
+  document.getElementById('btnSave').disabled = !(leerImg && bescImg);
+}
+
+// ==================== SAVE TEST CASE ====================
+function saveTestCase() {
+  if (!leerImg || !bescImg) { setStatus('Erst Leer + Besc aufnehmen.', 'warn'); return; }
+  const ts = new Date().toISOString().replace(/[-:.TZ]/g,'').slice(0,15);
+  const discId = document.getElementById('discSel2').value || document.getElementById('discSel').value;
+  const calib = getCalib('2');
+
+  function dlCanvas(canvas, filename) {
+    canvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    }, 'image/jpeg', 0.93);
+  }
+
+  // Download leer
+  dlCanvas(leerImg._canvas, `leer_${ts}.jpg`);
+
+  // Download besc with delay
+  setTimeout(() => dlCanvas(bescImg._canvas, `besc_${ts}.jpg`), 400);
+
+  // Download metadata
+  setTimeout(() => {
+    const meta = {
+      id: `${discId}_capture_${ts}`,
+      desc: `Kamera-Aufnahme ${ts}`,
+      disc: discId,
+      leer: `leer_${ts}.jpg`,
+      besc: `besc_${ts}.jpg`,
+      soll: null,
+      calib: calib,
+      sens: parseInt(document.getElementById('sens2').value || document.getElementById('sens').value),
+      sens_o: parseInt(document.getElementById('sensOuter2').value || document.getElementById('sensOuter').value),
+      notes: 'Aufgenommen mit offline_test.html Kamera-Tab'
+    };
+    const blob = new Blob([JSON.stringify(meta, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `testcase_${ts}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  }, 800);
+
+  setStatus(`Testfall-Paket gespeichert: leer_${ts}.jpg · besc_${ts}.jpg · testcase_${ts}.json`, 'ok');
+}
+
+// ==================== FILE LOADING ====================
+function loadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+function imgToImageData(img, W=960, H=540) {
+  if (img._imageData) return img._imageData; // captured from camera
+  const c = document.createElement('canvas');
+  c.width=W; c.height=H;
+  const ctx2 = c.getContext('2d');
+  ctx2.drawImage(img, 0, 0, W, H);
+  return ctx2.getImageData(0, 0, W, H);
+}
+
+document.getElementById('fileLeer').addEventListener('change', async e => {
+  if (!e.target.files[0]) return;
+  leerImg = await loadImageFile(e.target.files[0]);
+  setStatus(`Leer geladen: ${e.target.files[0].name}`);
+  showBesc();
+});
+document.getElementById('fileBesc').addEventListener('change', async e => {
+  if (!e.target.files[0]) return;
+  bescImg = await loadImageFile(e.target.files[0]);
+  setStatus(`Besc geladen: ${e.target.files[0].name}`);
+  showBesc();
+});
+document.getElementById('fileSoll').addEventListener('change', async e => {
+  if (!e.target.files[0]) return;
+  const txt = await e.target.files[0].text();
+  sollData = JSON.parse(txt);
+  setStatus(`SOLL geladen: ${sollData.length} Einschüsse`);
+});
+
+function showBesc() {
+  if (!bescImg) return;
+  if (bescImg._canvas) mainCtx.drawImage(bescImg._canvas, 0, 0, 960, 540);
+  else mainCtx.drawImage(bescImg, 0, 0, 960, 540);
+}
+
+// ==================== PRESETS ====================
+function loadPreset(id, camTab=false) {
+  const sfx = camTab ? '2' : '';
+  if (id === 'gk25') {
+    document.getElementById('cx'+sfx).value = 520;
+    document.getElementById('cy'+sfx).value = 238;
+    document.getElementById('ca'+sfx).value = 156;
+    document.getElementById('cb'+sfx).value = 168;
+    document.getElementById('cangle'+sfx).value = 0;
+    document.getElementById('pxPerMm'+sfx).value = 1.616;
+    document.getElementById('discSel'+sfx).value = 'gk25';
+    document.getElementById('sens'+sfx).value = 22;
+    document.getElementById('sensOuter'+sfx).value = 28;
+    if (!camTab) setStatus('Preset GK25: leer_9mm + besc2_9mm — Bilder laden und Auswerten klicken', 'ok');
+  } else if (id === 'kk25') {
+    document.getElementById('cx'+sfx).value = 458;
+    document.getElementById('cy'+sfx).value = 333;
+    document.getElementById('ca'+sfx).value = 220;
+    document.getElementById('cb'+sfx).value = 220;
+    document.getElementById('cangle'+sfx).value = 0;
+    document.getElementById('pxPerMm'+sfx).value = 2.195;
+    document.getElementById('discSel'+sfx).value = 'kk25';
+    document.getElementById('sens'+sfx).value = 20;
+    document.getElementById('sensOuter'+sfx).value = 26;
+    if (!camTab) setStatus('Preset KK25: snap_clean_22 + snap_beschossen_22 — Bilder laden und Auswerten klicken', 'ok');
+  }
+}
+
+// ==================== RUN TEST ====================
+function runTest() {
+  if (!leerImg || !bescImg) { setStatus('Leer + Besc laden!', 'warn'); return; }
+
+  // Determine which tab is active for calib/params
+  const camActive = document.getElementById('tab-camera').classList.contains('active');
+  const sfx = camActive ? '2' : '';
+  const calib = getCalib(sfx);
+  const discId = document.getElementById('discSel'+sfx).value;
+  const disc = DISCS[discId];
+  const sens = parseInt(document.getElementById('sens'+sfx).value);
+  const sensOuter = parseInt(document.getElementById('sensOuter'+sfx).value);
+
+  setStatus('Läuft...', 'ok');
+  setTimeout(() => {
+    try {
+      const leerData = imgToImageData(leerImg);
+      const bescData = imgToImageData(bescImg);
+
+      const t0 = performance.now();
+      const res = runDetection(leerData, bescData, calib, disc, sens, sensOuter);
+      const dt = (performance.now()-t0).toFixed(0);
+
+      // Draw besc image
+      if (bescImg._canvas) mainCtx.drawImage(bescImg._canvas, 0, 0, 960, 540);
+      else mainCtx.drawImage(bescImg, 0, 0, 960, 540);
+
+      // Draw spiegel ellipse
+      mainCtx.save();
+      mainCtx.strokeStyle = 'rgba(100,150,255,0.5)';
+      mainCtx.lineWidth = 1;
+      mainCtx.beginPath();
+      mainCtx.ellipse(calib.cx, calib.cy, calib.a, calib.b, calib.angle||0, 0, 2*Math.PI);
+      mainCtx.stroke();
+      mainCtx.restore();
+
+      // Draw diff points
+      mainCtx.fillStyle = 'rgba(255,60,60,0.25)';
+      for (const p of res.diffPoints) mainCtx.fillRect(p.x-1, p.y-1, 3, 3);
+
+      // Draw SOLL circles (yellow)
+      if (sollData) {
+        mainCtx.save();
+        mainCtx.strokeStyle = '#ffe082';
+        mainCtx.lineWidth = 1.5;
+        mainCtx.setLineDash([3,3]);
+        for (const s of sollData) {
+          const r = (disc.kaliber/2)*calib.pxPerMm;
+          mainCtx.beginPath();
+          mainCtx.arc(s.x, s.y, r, 0, 2*Math.PI);
+          mainCtx.stroke();
+        }
+        mainCtx.restore();
+      }
+
+      // Draw detected hits (green)
+      const hitR = (disc.kaliber/2)*calib.pxPerMm;
+      for (let i=0; i<res.hits.length; i++) {
+        const h = res.hits[i];
+        mainCtx.save();
+        mainCtx.strokeStyle = '#4caf50';
+        mainCtx.lineWidth = 2;
+        mainCtx.beginPath();
+        mainCtx.arc(h.x, h.y, hitR, 0, 2*Math.PI);
+        mainCtx.stroke();
+        mainCtx.fillStyle = '#4caf50';
+        mainCtx.font = '11px monospace';
+        mainCtx.fillText(`R${h.ring.toFixed(1)}`, h.x+hitR+2, h.y-2);
+        mainCtx.fillStyle = '#fff';
+        mainCtx.font = '10px monospace';
+        mainCtx.fillText(`#${i+1}`, h.x-5, h.y+4);
+        mainCtx.restore();
+      }
+
+      // Metrics & table
+      const avgRing = res.hits.length ? (res.hits.reduce((s,h)=>s+h.ring,0)/res.hits.length).toFixed(2) : '-';
+      document.getElementById('mHits').textContent = res.hits.length;
+      document.getElementById('mAvg').textContent = avgRing;
+      document.getElementById('diffInfo').textContent =
+        `diff_pts=${res.diffPoints.length}  clusters=${res.clusters.length}  verworfen=${res.rejected}  MIN_PTS=${res.MIN_PTS}  r=${res.CLUSTER_RADIUS}  ${dt}ms`;
+
+      let tableHTML = '';
+      if (sollData) {
+        const MATCH_R = (disc.kaliber*1.5)*calib.pxPerMm;
+        const matched = new Set();
+        const hitMatches = res.hits.map(h => {
+          let best=null, bestD=Infinity;
+          sollData.forEach((s,si) => {
+            const d = Math.hypot(h.x-s.x, h.y-s.y);
+            if (d<MATCH_R && d<bestD && !matched.has(si)) { bestD=d; best=si; }
+          });
+          if (best!==null) matched.add(best);
+          return best;
+        });
+        const tp = hitMatches.filter(m=>m!==null).length;
+        const fpCount = res.hits.length - tp;
+        document.getElementById('mRecall').textContent = `${tp}/${sollData.length}`;
+        document.getElementById('mFP').textContent = fpCount;
+
+        tableHTML += `<table><tr><th>#</th><th>x</th><th>y</th><th>Ring</th><th>n</th><th>Uhr</th><th>Match</th></tr>`;
+        res.hits.forEach((h,i) => {
+          const si = hitMatches[i];
+          const cls = si!==null ? 'match' : 'fp';
+          const matchTxt = si!==null ? `SOLL#${si+1} R${sollData[si].ringDec}` : 'FP';
+          tableHTML += `<tr class="${cls}"><td>${i+1}</td><td>${h.x.toFixed(0)}</td><td>${h.y.toFixed(0)}</td><td>${h.ring.toFixed(1)}</td><td>${h.n}</td><td>${clockPos(parseFloat(h.deg))}Uhr</td><td>${matchTxt}</td></tr>`;
+        });
+        sollData.forEach((s,si) => {
+          if (!matched.has(si)) {
+            tableHTML += `<tr class="miss"><td>-</td><td>${s.x.toFixed(0)}</td><td>${s.y.toFixed(0)}</td><td>${s.ringDec}</td><td>-</td><td>-</td><td>MISS #${si+1}</td></tr>`;
+          }
+        });
+        tableHTML += `</table>`;
+        tableHTML += `<div style="margin-top:6px;font-size:11px;color:#aaa">✓ Grün=Match · 🟡 Gelb=SOLL · 🔴 Rot=FP/Miss</div>`;
+      } else {
+        document.getElementById('mRecall').textContent = '-';
+        document.getElementById('mFP').textContent = '-';
+        tableHTML = `<table><tr><th>#</th><th>x</th><th>y</th><th>Ring</th><th>n</th><th>Uhr</th><th>dist mm</th></tr>`;
+        res.hits.forEach((h,i) => {
+          tableHTML += `<tr class="match"><td>${i+1}</td><td>${h.x.toFixed(0)}</td><td>${h.y.toFixed(0)}</td><td>${h.ring.toFixed(1)}</td><td>${h.n}</td><td>${clockPos(parseFloat(h.deg))}Uhr</td><td>${h.distMm}</td></tr>`;
+        });
+        tableHTML += `</table>`;
+      }
+      document.getElementById('results').innerHTML = tableHTML;
+      document.getElementById('metricsDiv').style.display = 'block';
+
+      setStatus(`✓ ${res.hits.length} Treffer · ${res.diffPoints.length} diff_pts · ${dt}ms`, 'ok');
+    } catch(e) {
+      setStatus('Fehler: ' + e.message, 'err');
+      console.error(e);
+    }
+  }, 10);
+}
+
+function clearAll() {
+  leerImg=null; bescImg=null; sollData=null;
+  mainCtx.clearRect(0,0,960,540);
+  document.getElementById('results').innerHTML='';
+  document.getElementById('metricsDiv').style.display='none';
+  setStatus('Reset.', 'ok');
+  document.getElementById('fileLeer').value='';
+  document.getElementById('fileBesc').value='';
+  document.getElementById('fileSoll').value='';
+  document.getElementById('leerStatus').textContent='–';
+  document.getElementById('leerStatus').className='cap-status none';
+  document.getElementById('bescStatus').textContent='–';
+  document.getElementById('bescStatus').className='cap-status none';
+  updateSaveBtn();
+}
+</script>
+</body>
+</html>
