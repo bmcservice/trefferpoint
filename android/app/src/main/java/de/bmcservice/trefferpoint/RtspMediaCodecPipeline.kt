@@ -88,6 +88,13 @@ class RtspMediaCodecPipeline(
 
     @Volatile private var running = false
     @Volatile private var currentUrl: String = ""
+    // v2.3.156: Watchdog gegen MediaCodec-Decoder-Stall.
+    // Symptom (heute am Stand reproduziert): nach 1000-2000 Frames spammt der Decoder
+    // `IllegalStateException` aus `dequeueInputBuffer` ("queueNal Fehler: null"),
+    // frameCount stagniert, Bild friert. Self-Recycle bei DECODING_FAILED greift
+    // dabei nicht (Fehler ist input-side, nicht output-side).
+    // Watchdog: prüft alle 2 s, ob frameCount steigt. Bei >4 s Stall → komplett-restart.
+    private var watchdogThread: Thread? = null
 
     // Kamera-spezifische Pfade (für interne Proxy-Verbindung)
     private var sdpProxy: RtspSdpProxy? = null
@@ -269,6 +276,8 @@ class RtspMediaCodecPipeline(
         sock.soTimeout = 0  // RTP-Stream ist persistent
         AppLog.i(TAG, "PLAY OK — RTSP-Handshake abgeschlossen")
         onStatus("RTSP: Stream verbunden")
+
+        startWatchdog()
 
         // 3. ImageReader + Decoder konfigurieren
         // v2.3.148: Bei ETF150 (kein SDP-CSD) werden ImageReader UND Decoder erst nach
@@ -499,6 +508,49 @@ class RtspMediaCodecPipeline(
 
         // Annex-B Format mit Start-Code (0x00000001) prepend
         queueNalToDecoder(nal, ptsBaseUs, isIdr)
+    }
+
+    /**
+     * v2.3.156: Frame-Stall-Watchdog. Läuft als Daemon-Thread während running=true.
+     * Prüft alle 2 s ob frameCount steigt. 4 s ohne neuen Frame → restart der Pipeline.
+     * Aufgerufen am Ende von startInternal() nach erfolgreichem PLAY.
+     */
+    private fun startWatchdog() {
+        watchdogThread?.interrupt()
+        watchdogThread = thread(start = true, name = "rtsp-watchdog", isDaemon = true) {
+            var lastFrameCount = frameCount
+            var lastFrameTime = SystemClock.elapsedRealtime()
+            while (running) {
+                try { Thread.sleep(2000) } catch (_: InterruptedException) { break }
+                if (!running) break
+                val now = SystemClock.elapsedRealtime()
+                val current = frameCount
+                if (current != lastFrameCount) {
+                    lastFrameCount = current
+                    lastFrameTime = now
+                    continue
+                }
+                val stallMs = now - lastFrameTime
+                if (stallMs >= 4000L) {
+                    AppLog.w(TAG, "Watchdog: kein Frame seit ${stallMs}ms (frameCount=$current) — Auto-Restart")
+                    onStatus("RTSP: Pipeline-Stall — Auto-Restart …")
+                    val url = currentUrl
+                    // Restart in eigenem Thread weil stop() den Watchdog (=this thread) beendet
+                    if (url.isNotEmpty()) {
+                        thread(start = true, name = "rtsp-restart", isDaemon = true) {
+                            try {
+                                stop()
+                                Thread.sleep(800)
+                                start(url)
+                            } catch (e: Exception) {
+                                AppLog.e(TAG, "Watchdog-Restart fehlgeschlagen", e)
+                            }
+                        }
+                    }
+                    break  // Watchdog endet, neuer wird beim erfolgreichen Restart gestartet
+                }
+            }
+        }
     }
 
     private fun queueNalToDecoder(nal: ByteArray, ptsUs: Long, isKeyframe: Boolean) {
