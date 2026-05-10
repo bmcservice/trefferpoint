@@ -347,7 +347,10 @@ class RtspMediaCodecPipeline(
                     } else if (frameCount <= 5L || frameCount % 30L == 0L) {
                         AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG (skip ratio 1:1)")
                     }
-                    onJpegFrame(jpeg)
+                    // v2.3.159: kein onJpegFrame-Callback mehr — Display geht direkt
+                    // via SurfaceView, Detection holt Pixel via PixelCopy on-demand.
+                    // setupImageReader() wird in startInternal nicht mehr aufgerufen,
+                    // diese Methode ist Dead Code (Cleanup in einem späteren Commit).
                 } finally {
                     image.close()
                 }

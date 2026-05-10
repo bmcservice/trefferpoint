@@ -4237,7 +4237,7 @@ async function setCompareReference() {
         setStatus('Kein Bild verfügbar', 'warn');
         return;
     }
-    let W = canvas.width, H = canvas.height;
+    const W = canvas.width, H = canvas.height;
     const SAMPLE_INTERVAL_MS = 700;
     const samples = [];
     const btnRef = document.getElementById('btnCompareRef');
