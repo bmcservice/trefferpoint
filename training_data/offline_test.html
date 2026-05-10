@@ -156,6 +156,41 @@ tr.fp td { color: #f44336; }
       <div style="font-size:10px;color:#666;margin-top:4px">leer.jpg · besc.jpg · testcase.json</div>
     </div>
 
+    <!-- WiFi-Cam -->
+    <div class="card" style="min-width:260px">
+      <h2>📡 WiFi-Cam (Viidure / ETF150 / MJPEG)</h2>
+      <div style="margin-bottom:8px">
+        <label style="margin-bottom:4px">Kamera-IP<br>
+          <input type="text" id="wifiCamHost" value="192.168.0.1"
+            style="width:160px;background:#0f3460;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-family:monospace">
+        </label>
+        <label style="margin-bottom:4px;margin-top:4px">Typ<br>
+          <select id="wifiCamType" style="width:160px">
+            <option value="viidure">Viidure SGK (3-Schritt)</option>
+            <option value="etf150">Apexel ETF150 (ADB)</option>
+            <option value="mjpeg">MJPEG-Stream</option>
+            <option value="jpeg">Direkt JPEG-URL</option>
+          </select>
+        </label>
+        <div id="wifiCamUrlRow" style="display:none;margin-top:4px">
+          <label style="margin-bottom:2px">Stream-URL<br>
+            <input type="text" id="wifiCamUrl" placeholder="http://192.168.1.1/stream"
+              style="width:200px;background:#0f3460;color:#eee;border:1px solid #444;padding:3px 6px;border-radius:3px;font-family:monospace;font-size:11px">
+          </label>
+        </div>
+      </div>
+      <hr style="border-color:#2a2a4a; margin:8px 0">
+      <div style="margin-bottom:6px">
+        <button class="btn green" onclick="wifiCaptureLeer()">🎯 Leer aufnehmen</button>
+        <span id="wifiLeerStatus" class="cap-status none">–</span>
+      </div>
+      <div>
+        <button class="btn orange" onclick="wifiCaptureBesc()">🔫 Besc aufnehmen + auswerten</button>
+        <span id="wifiBescStatus" class="cap-status none">–</span>
+      </div>
+      <div id="wifiSnapStatus" style="font-size:10px;color:#888;margin-top:6px"></div>
+    </div>
+
     <!-- Same Calib/Params (shared with file tab) -->
     <div class="card">
       <h2>Kalibrierung</h2>
@@ -505,6 +540,86 @@ function captureBesc() {
 function updateSaveBtn() {
   document.getElementById('btnSave').disabled = !(leerImg && bescImg);
 }
+
+// ==================== WIFI-CAM ====================
+document.getElementById('wifiCamType').addEventListener('change', () => {
+  const t = document.getElementById('wifiCamType').value;
+  // URL-Zeile nur für MJPEG/JPEG; Viidure+ETF150 nutzen nur Host-IP
+  document.getElementById('wifiCamUrlRow').style.display =
+    (t !== 'viidure' && t !== 'etf150') ? 'block' : 'none';
+  // ETF150: Host-IP auf 192.168.10.1 setzen
+  if (t === 'etf150') document.getElementById('wifiCamHost').value = '192.168.10.1';
+  if (t === 'viidure') document.getElementById('wifiCamHost').value = '192.168.0.1';
+});
+
+async function wifiSnapFetch() {
+  const host = document.getElementById('wifiCamHost').value.trim();
+  const type = document.getElementById('wifiCamType').value;
+  const stEl = document.getElementById('wifiSnapStatus');
+  stEl.textContent = 'Snapshot anfordern…';
+
+  let proxyUrl;
+  if (type === 'viidure') {
+    proxyUrl = `http://localhost:8765/cam/snap?host=${encodeURIComponent(host)}`;
+  } else if (type === 'etf150') {
+    proxyUrl = `http://localhost:8765/cam/snap?host=${encodeURIComponent(host)}&type=etf150`;
+  } else {
+    const streamUrl = document.getElementById('wifiCamUrl').value.trim()
+      || (type === 'mjpeg' ? `http://${host}/stream` : `http://${host}/snapshot.jpg`);
+    proxyUrl = type === 'mjpeg'
+      ? `http://localhost:8765/cam/mjpeg?url=${encodeURIComponent(streamUrl)}`
+      : `http://localhost:8765/proxy?url=${encodeURIComponent(streamUrl)}`;
+  }
+
+  const resp = await fetch(proxyUrl);
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`${resp.status}: ${txt.slice(0,120)}`);
+  }
+  const blob = await resp.blob();
+  stEl.textContent = `${(blob.size/1024).toFixed(0)} KB empfangen`;
+  return blob;
+}
+
+async function wifiCapture(isLeer) {
+  try {
+    const blob = await wifiSnapFetch();
+    const url = URL.createObjectURL(blob);
+    const img = await new Promise((res, rej) => {
+      const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url;
+    });
+    // Draw to offscreen canvas to get ImageData
+    const c = document.createElement('canvas'); c.width=960; c.height=540;
+    c.getContext('2d').drawImage(img, 0, 0, 960, 540);
+    URL.revokeObjectURL(url);
+    const imgObj = new Image(); imgObj.src = c.toDataURL('image/jpeg', 0.93);
+    imgObj._canvas = c;
+    imgObj._imageData = c.getContext('2d').getImageData(0,0,960,540);
+
+    const ts = new Date().toLocaleTimeString();
+    if (isLeer) {
+      leerImg = imgObj;
+      document.getElementById('wifiLeerStatus').textContent = ts;
+      document.getElementById('wifiLeerStatus').className = 'cap-status ready';
+      setStatus('WiFi-Leer aufgenommen.', 'ok');
+    } else {
+      bescImg = imgObj;
+      document.getElementById('wifiBescStatus').textContent = ts;
+      document.getElementById('wifiBescStatus').className = 'cap-status ready';
+      mainCtx.drawImage(c, 0, 0, 960, 540);
+      setStatus('WiFi-Besc aufgenommen — starte Auswertung…', 'ok');
+      if (leerImg) setTimeout(runTest, 30);
+      else setStatus('WiFi-Besc aufgenommen — erst Leer aufnehmen!', 'warn');
+    }
+    updateSaveBtn();
+  } catch(e) {
+    setStatus('WiFi-Cam Fehler: ' + e.message, 'err');
+    document.getElementById('wifiSnapStatus').textContent = '⚠ ' + e.message;
+  }
+}
+
+function wifiCaptureLeer() { wifiCapture(true); }
+function wifiCaptureBesc() { wifiCapture(false); }
 
 // ==================== SAVE TEST CASE ====================
 function saveTestCase() {
