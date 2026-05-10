@@ -1170,7 +1170,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.154';
+const APP_VERSION = '2.3.155';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3352,18 +3352,30 @@ function setupBridgeFrameReceiver() {
         setMsg('Auto-Erkennung \u2192 Button klicken');
         if (!rafId) startLoop();
     };
+    // v2.3.155: MJPEG-Stream via localhost — kein evaluateJavascript pro Frame mehr.
+    // imgEl empfängt den Multipart-Stream direkt; loop() zeichnet es weiterhin ins Canvas.
+    imgEl.src = 'http://127.0.0.1:8090/stream';
+    imgEl.onload = () => {
+        if (firstFrameDone) return;
+        firstFrameDone = true;
+        appState = 'READY';
+        document.getElementById('btnRotateCam').style.display = '';
+        document.getElementById('btnCalib').disabled = false;
+        document.getElementById('btnAutoCalib').disabled = false;
+        document.getElementById('btnRef').disabled = false;
+        document.getElementById('btnDetect').disabled = false;
+        document.getElementById('camControlsSection').style.display = '';
+        initShutterPresets();
+        buildCamControls();
+        setStatus('Stream aktiv · localhost MJPEG', 'ok');
+        setMsg('Auto-Erkennung → Button klicken');
+        if (!rafId) startLoop();
+    };
     imgLoading.onload = onFrameLoaded;
 
     window.tpReceiveFrame = function(b64) {
-        try {
-            // v2.3.154: data:-URI statt atob+Loop+Blob+createObjectURL.
-            // Vorher: atob() + 100k-Iterationen-JS-Loop + Blob-Konstruktion + createObjectURL
-            // pro Frame — bei 15 fps × ~107k bytes blockierte das den JS-Thread mehrere
-            // Sekunden auf der ETF150 (1920×1080, beobachtet 3-5s Live-Lag).
-            // Jetzt: WebView decodiert Base64 nativ in C++. Kein JS-Loop, kein Blob,
-            // kein revokeObjectURL nötig (data: hat keinen GC-relevanten Resource-Holder).
-            imgLoading.src = 'data:image/jpeg;base64,' + b64;
-        } catch (e) { console.error('tpReceiveFrame Fehler', e); }
+        // v2.3.155: Display läuft via MJPEG-Stream (imgEl.src), kein data-URI nötig.
+        void b64;
     };
 
     // Diagnose: nach 30s ohne Frame → Log zeigen
@@ -3373,6 +3385,9 @@ function setupBridgeFrameReceiver() {
         if (firstFrameDone) { clearInterval(checkTimer); return; }
         try {
             const st = JSON.parse(window.tpBridge.getStatus());
+            if (st && typeof st.frameCount === 'number' && st.frameCount > 0) {
+                clearInterval(checkTimer); return;
+            }
             let line = 'Warte auf Kamera\u2026\nmode=' + st.mode + ', frames=' + st.frameCount;
             if (st.rtspFrameCount > 0) line += ', rtsp=' + st.rtspFrameCount;
             if (st.rtspError) line += '\n' + st.rtspError;

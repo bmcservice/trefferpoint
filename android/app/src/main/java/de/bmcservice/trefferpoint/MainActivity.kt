@@ -131,32 +131,23 @@ class MainActivity : AppCompatActivity() {
         initCamera()
         handleUsbIntent(intent)
 
-        // ── Developer-only: MJPEG-Server auf Port 8090 starten ──
+        // ── MJPEG-Server auf Port 8090 (immer aktiv — localhost-Display) ──
         // PC-Browser-Zugriff via USB:  adb forward tcp:8090 tcp:8090
-        // → http://localhost:8090/ zeigt Live-Sicht der gerade aktiven Pipeline.
-        if (BuildConfig.DEBUG) {
-            val server = DevHttpServer(
-                getCurrentJpeg = {
-                    // Priorität: aktiver Modus → entsprechende Pipeline.
-                    when (activeMode) {
-                        "rtsp" -> rtspPipeline?.lastFrameJpeg
-                        "mjpeg" -> mjpegPipeline?.lastFrameJpeg
-                        // USB hat keinen lastFrameJpeg-Speicher; fallback frei.
-                        else -> rtspPipeline?.lastFrameJpeg ?: mjpegPipeline?.lastFrameJpeg
-                    }
-                },
-                getStatusJson = {
-                    val rtspFC = rtspPipeline?.frameCount ?: 0
-                    val mjpegFC = mjpegPipeline?.frameCount ?: 0
-                    val rtspErr = rtspPipeline?.lastError?.let { ",\"rtspError\":\"${it.replace("\"","'")}\"" } ?: ""
-                    """{"mode":"$activeMode","rtspFrames":$rtspFC,"mjpegFrames":$mjpegFC,""" +
-                            """"frameCount":$frameCount,"lastFrameBytes":$lastFrameSize,""" +
-                            """"version":"${BuildConfig.VERSION_NAME}"$rtspErr}"""
-                }
-            )
-            server.start(8090)
-            devHttpServer = server
-        }
+        val server = DevHttpServer(
+            getCurrentJpeg = {
+                rtspPipeline?.lastFrameJpeg ?: mjpegPipeline?.lastFrameJpeg ?: lastUvcFrameJpeg
+            },
+            getStatusJson = {
+                val rtspFC = rtspPipeline?.frameCount ?: 0
+                val mjpegFC = mjpegPipeline?.frameCount ?: 0
+                val rtspErr = rtspPipeline?.lastError?.let { ",\"rtspError\":\"${it.replace("\"","'")}\"" } ?: ""
+                """{"mode":"$activeMode","rtspFrames":$rtspFC,"mjpegFrames":$mjpegFC,""" +
+                        """"frameCount":$frameCount,"lastFrameBytes":$lastFrameSize,""" +
+                        """"version":"${BuildConfig.VERSION_NAME}"$rtspErr}"""
+            }
+        )
+        server.start(8090)
+        devHttpServer = server
         initTts()
     }
 
@@ -417,7 +408,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 } catch (_: Exception) {}
             }
-            if (webViewLoopRunning) webViewPushHandler.postDelayed(this, 67)
+            if (webViewLoopRunning) webViewPushHandler.postDelayed(this, 200)
         }
     }
 
@@ -426,8 +417,8 @@ class MainActivity : AppCompatActivity() {
         webViewLoopRunning = true
         webViewDropped = 0L
         webViewPushCount = 0L
-        webViewPushHandler.postDelayed(webViewPushRunnable, 67)
-        AppLog.i(TAG, "WebView-Push-Loop gestartet (67ms/15fps)")
+        webViewPushHandler.postDelayed(webViewPushRunnable, 200)
+        AppLog.i(TAG, "WebView-Push-Loop gestartet (200ms/5fps)")
     }
 
     private fun stopWebViewPushLoop() {
