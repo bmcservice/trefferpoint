@@ -1170,7 +1170,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.153';
+const APP_VERSION = '2.3.154';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3356,16 +3356,13 @@ function setupBridgeFrameReceiver() {
 
     window.tpReceiveFrame = function(b64) {
         try {
-            const bin = atob(b64);
-            const arr = new Uint8Array(bin.length);
-            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-            const blob = new Blob([arr], { type: 'image/jpeg' });
-            // BACK-Buffer mit neuem Frame befüllen (= imgLoading, nicht imgEl).
-            // imgEl bleibt unangetastet bis onload feuert + swap macht.
-            const old = imgLoading.src;
-            const url = URL.createObjectURL(blob);
-            if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
-            imgLoading.src = url;
+            // v2.3.154: data:-URI statt atob+Loop+Blob+createObjectURL.
+            // Vorher: atob() + 100k-Iterationen-JS-Loop + Blob-Konstruktion + createObjectURL
+            // pro Frame — bei 15 fps × ~107k bytes blockierte das den JS-Thread mehrere
+            // Sekunden auf der ETF150 (1920×1080, beobachtet 3-5s Live-Lag).
+            // Jetzt: WebView decodiert Base64 nativ in C++. Kein JS-Loop, kein Blob,
+            // kein revokeObjectURL nötig (data: hat keinen GC-relevanten Resource-Holder).
+            imgLoading.src = 'data:image/jpeg;base64,' + b64;
         } catch (e) { console.error('tpReceiveFrame Fehler', e); }
     };
 
