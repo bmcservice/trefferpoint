@@ -312,13 +312,21 @@ class RtspMediaCodecPipeline(
         } else {
             ImageReader.newInstance(imageWidth, imageHeight, ImageFormat.YUV_420_888, MAX_IMAGES)
         }
-        // Synchroner Encoder-Pfad: war in v2.3.89 stabil. Async-Variante destabilisierte
-        // den Decoder (dequeueOutputBuffer-Exception nach Frame 5). YUV→JPEG ist ~30ms,
-        // bei 30fps-Budget knapp aber tragbar; Frame-Rate fällt ggf. auf 20fps was OK ist.
+        // v2.3.157: JPEG-Encode-Throttling. Bei 1080p kostet YuvImage→JPEG ~30-40 ms,
+        // ImageReader-Listener läuft synchron auf imageHandler. Mit jedem Frame
+        // einzeln war die Pipeline bei 30 fps-Eingang nur 22 fps-Output → ~8 fps
+        // Frames pro Sekunde Backlog → wachsendes Lag (am Stand: 5+ Sekunden).
+        // Skip jeden 2. Frame: image.close() sofort, kein JPEG-Encode. So kann der
+        // Decoder seine Output-Buffer schneller recyclen → kein Backlog.
+        // 15 fps JPEG für DevHttpServer/MJPEG ist mehr als genug fürs Display.
+        var encodeCounter = 0L
         imageReader!!.setOnImageAvailableListener({ reader ->
             try {
                 val image = reader.acquireNextImage() ?: return@setOnImageAvailableListener
                 try {
+                    encodeCounter++
+                    val skip = (encodeCounter and 1L) == 0L  // jeden 2. Frame skippen
+                    if (skip) return@setOnImageAvailableListener
                     val w = image.width
                     val h = image.height
                     val nv21 = yuv420ToNv21(image)
@@ -329,7 +337,7 @@ class RtspMediaCodecPipeline(
                         AppLog.i(TAG, "Erster RTSP-Frame: ${jpeg.size}B JPEG @ ${w}x${h}")
                         onStatus("RTSP-Stream aktiv")
                     } else if (frameCount <= 5L || frameCount % 30L == 0L) {
-                        AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG")
+                        AppLog.i(TAG, "Frame #$frameCount: ${jpeg.size}B JPEG (skip ratio 1:1)")
                     }
                     onJpegFrame(jpeg)
                 } finally {
@@ -348,6 +356,16 @@ class RtspMediaCodecPipeline(
         // CSD: SPS und PPS in Annex-B-Format (mit Start-Code 0x00000001)
         format.setByteBuffer("csd-0", ByteBuffer.wrap(toAnnexB(spsBytes!!)))
         format.setByteBuffer("csd-1", ByteBuffer.wrap(toAnnexB(ppsBytes!!)))
+        // v2.3.157: Low-Latency-Hint (Android R+). Sagt dem Decoder: kein
+        // B-Frame-Reorder-Puffer, sofort Output liefern statt mehrere Frames
+        // im Decoder-internen Reorder-Buffer zwischenzulagern.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+        }
+        // Operating-Rate-Hint: Decoder soll 60 fps schaffen können → mehr CPU-Budget.
+        format.setInteger(MediaFormat.KEY_OPERATING_RATE, 60)
+        // Realtime-Priorität (0=realtime, 1=non-realtime).
+        format.setInteger(MediaFormat.KEY_PRIORITY, 0)
 
         // SW-Decoder explizit wählen — HW-Decoder schreibt nicht in CPU-lesbare Surfaces
         // (Adreno HW-Overlay-Bypass — bewiesen in v2.3.71-76).

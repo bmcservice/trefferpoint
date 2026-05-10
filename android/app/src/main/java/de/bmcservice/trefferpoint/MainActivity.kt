@@ -429,11 +429,13 @@ class MainActivity : AppCompatActivity() {
         AppLog.i(TAG, "WebView-Push-Loop gestoppt — ${webViewPushCount} Frames geliefert, ${webViewDropped} überschrieben")
     }
 
+    // v2.3.157: No-op seit der MJPEG-localhost-Architektur (v2.3.155). tpReceiveFrame
+    // ist im JS no-op, latestFrameB64 wird nicht mehr ausgewertet → Base64-Encode
+    // (~5-10 ms / 1080p-Frame) war reine CPU-Last die zum Frame-Backlog beitrug.
+    // Funktion bleibt als Stub, damit Decoder-Callbacks nichts ändern müssen.
+    @Suppress("UNUSED_PARAMETER")
     private fun pushFrameToWebView(jpeg: ByteArray) {
-        val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
-        val prev = latestFrameB64.getAndSet(b64)
-        if (prev != null) webViewDropped++  // Vorheriger Frame wurde überschrieben (kein Verlust)
-        if (!webViewLoopRunning) startWebViewPushLoop()
+        // intentionally empty — display path runs through DevHttpServer:8090/stream
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
