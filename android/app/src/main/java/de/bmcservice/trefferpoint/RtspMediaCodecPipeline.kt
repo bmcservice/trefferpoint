@@ -193,25 +193,31 @@ class RtspMediaCodecPipeline(
         send(rOut, "OPTIONS $streamUrl RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: TrefferPoint-MC\r\n\r\n")
         readMsg(rIn) ?: error("OPTIONS keine Antwort")
 
-        // DESCRIBE → SDP für SPS/PPS extrahieren
+        // DESCRIBE → SDP für SPS/PPS extrahieren (optional)
         send(rOut, "DESCRIBE $streamUrl RTSP/1.0\r\nCSeq: 2\r\nUser-Agent: TrefferPoint-MC\r\nAccept: application/sdp\r\n\r\n")
         val describeResp = readMsg(rIn) ?: error("DESCRIBE keine Antwort")
         parseSpropParameterSets(describeResp)
-        if (spsBytes == null || ppsBytes == null) {
-            error("Konnte SPS/PPS nicht aus SDP extrahieren")
-        }
-        // Auflösung aus SPS extrahieren — wir konfigurieren ImageReader und MediaCodec
-        // mit den echten Stream-Maßen. Bei ch1 typisch 960×540, bei ch0 evtl. 1920×1080
-        // oder 2560×1440 (HD-Stream).
-        val res = H264SpsParser.parseFromNal(spsBytes!!)
-        if (res != null) {
-            imageWidth = res.width
-            imageHeight = res.height
-            AppLog.i(TAG, "Stream-Auflösung aus SPS: $res")
+        // v2.3.148: ETF150 sendet keine sprop-parameter-sets im SDP — SPS/PPS kommen
+        // inline im Stream als NAL-Type 7/8 (oder STAP-A). Wir starten dann mit
+        // Fallback-Auflösung und konfigurieren den Decoder erst NACH dem Empfang von
+        // SPS+PPS aus dem Stream (siehe maybeConfigureDecoderFromStreamCsd).
+        val hasInlineCsd = (spsBytes != null && ppsBytes != null)
+        if (hasInlineCsd) {
+            val res = H264SpsParser.parseFromNal(spsBytes!!)
+            if (res != null) {
+                imageWidth = res.width
+                imageHeight = res.height
+                AppLog.i(TAG, "Stream-Auflösung aus SDP-SPS: $res")
+            } else {
+                imageWidth = FALLBACK_WIDTH
+                imageHeight = FALLBACK_HEIGHT
+                AppLog.w(TAG, "SDP-SPS-Parse fehlgeschlagen — Fallback ${imageWidth}x${imageHeight}")
+            }
         } else {
             imageWidth = FALLBACK_WIDTH
             imageHeight = FALLBACK_HEIGHT
-            AppLog.w(TAG, "SPS-Parse fehlgeschlagen — Fallback ${imageWidth}x${imageHeight}")
+            AppLog.i(TAG, "SDP ohne sprop-parameter-sets (ETF150-Style) — sammle SPS/PPS aus Stream, " +
+                "Default-Maße ${imageWidth}x${imageHeight}")
         }
 
         // SETUP nur Video (Track 0), Audio ignorieren um Decoder-Stabilität zu sichern
@@ -234,8 +240,15 @@ class RtspMediaCodecPipeline(
         onStatus("RTSP: Stream verbunden")
 
         // 3. ImageReader + Decoder konfigurieren
-        setupImageReader()
-        configureDecoder()
+        // v2.3.148: Bei ETF150 (kein SDP-CSD) werden ImageReader UND Decoder erst nach
+        // Empfang von SPS+PPS aus dem Stream konfiguriert (lazy in captureCsdNal),
+        // damit die echte Stream-Auflösung verwendet wird.
+        if (hasInlineCsd) {
+            setupImageReader()
+            configureDecoder()
+        } else {
+            AppLog.i(TAG, "ImageReader + Decoder warten auf erstes SPS+PPS aus dem Stream")
+        }
 
         // 4. RTP-Reader-Thread starten
         decoderInputThread = thread(name = "rtsp-mc-reader", start = true) {
@@ -413,11 +426,10 @@ class RtspMediaCodecPipeline(
                     }
                 }
                 24 -> {
-                    // STAP-A: mehrere NALs in einem Paket — selten von Kameras genutzt, ignorieren
-                    if (frameCount == 0L) AppLog.i(TAG, "STAP-A NAL-Type — übersprungen")
-                }
-                7, 8 -> {
-                    // SPS/PPS Single-NAL — ignorieren, wir haben sie aus SDP
+                    // STAP-A: Aggregat mehrerer NAL-Units. Format:
+                    // [STAP-A header | nal1_size:2byte | nal1_bytes | nal2_size:2byte | nal2_bytes ...]
+                    // Bei ETF150 kommen SPS+PPS oft als STAP-A am Stream-Anfang.
+                    parseStapAForCsd(pktBuf, payloadOff + 1, len - payloadOff - 1, rtpTs)
                 }
                 else -> {
                     if (frameCount < 5L) AppLog.i(TAG, "Unbekannter NAL-Type: $nalType")
@@ -429,8 +441,15 @@ class RtspMediaCodecPipeline(
 
     private fun handleNalUnit(nal: ByteArray, rtpTs: Long) {
         val type = nal[0].toInt() and 0x1F
-        // SPS/PPS aus dem Stream ignorieren (kommt nur am Anfang, wir haben sie aus SDP)
-        if (type == 7 || type == 8) return
+        // v2.3.148: SPS (7) / PPS (8) NICHT mehr verwerfen — bei ETF150 (kein SDP-CSD)
+        // werden sie hier aufgefangen und Decoder lazy-konfiguriert.
+        if (type == 7 || type == 8) {
+            captureCsdNal(type, nal)
+            return
+        }
+
+        // Wenn Decoder noch nicht konfiguriert ist (warte auf SPS+PPS), Frame verwerfen.
+        if (decoder == null) return
 
         // Kein präventives flush() bei IDR mehr (war Auslöser des "Pulsierens" alle 3s).
         // Der direkte MediaCodec sollte IDRs spec-konform handhaben (wir füttern komplette
@@ -471,6 +490,68 @@ class RtspMediaCodecPipeline(
             codec.queueInputBuffer(idx, 0, 4 + nal.size, ptsUs, flags)
         } catch (e: Exception) {
             AppLog.w(TAG, "queueNal Fehler: ${e.message}")
+        }
+    }
+
+    /**
+     * v2.3.148: SPS (Type 7) oder PPS (Type 8) aus dem Stream auffangen.
+     * Wird ausschließlich für den ETF150-Pfad (kein SDP-CSD) genutzt — bei SGK
+     * sind die Werte schon vor dem Reader-Loop gesetzt.
+     * Beim ersten kompletten SPS+PPS-Paar wird configureDecoder() aufgerufen.
+     */
+    private fun captureCsdNal(type: Int, nal: ByteArray) {
+        if (decoder != null) return  // Decoder bereits konfiguriert, neues SPS/PPS ignorieren
+        when (type) {
+            7 -> if (spsBytes == null) {
+                spsBytes = nal
+                AppLog.i(TAG, "Stream-SPS aufgefangen (${nal.size}B)")
+            }
+            8 -> if (ppsBytes == null) {
+                ppsBytes = nal
+                AppLog.i(TAG, "Stream-PPS aufgefangen (${nal.size}B)")
+            }
+        }
+        if (spsBytes != null && ppsBytes != null && decoder == null) {
+            // Auflösung neu aus SPS extrahieren (überschreibt Fallback-Werte)
+            try {
+                val res = H264SpsParser.parseFromNal(spsBytes!!)
+                if (res != null) {
+                    if (res.width != imageWidth || res.height != imageHeight) {
+                        AppLog.i(TAG, "Stream-Auflösung aus SPS: $res (war ${imageWidth}x${imageHeight})")
+                        imageWidth = res.width
+                        imageHeight = res.height
+                    }
+                }
+            } catch (e: Exception) {
+                AppLog.w(TAG, "SPS-Parse Fehler: ${e.message}")
+            }
+            try {
+                if (imageReader == null) setupImageReader()
+                configureDecoder()
+            } catch (e: Exception) {
+                AppLog.e(TAG, "Lazy ImageReader/Decoder-Konfig fehlgeschlagen", e)
+            }
+        }
+    }
+
+    /**
+     * v2.3.148: STAP-A Aggregat-Paket parsen, einzelne NALs einzeln durch handleNalUnit.
+     * Format ab off: [size_hi, size_lo, nal_bytes(size), size_hi, size_lo, nal_bytes(size), ...]
+     */
+    private fun parseStapAForCsd(buf: ByteArray, off: Int, length: Int, rtpTs: Long) {
+        var p = off
+        val end = off + length
+        while (p + 2 <= end) {
+            val size = ((buf[p].toInt() and 0xFF) shl 8) or (buf[p + 1].toInt() and 0xFF)
+            p += 2
+            if (size <= 0 || p + size > end) break
+            val nal = buf.copyOfRange(p, p + size)
+            p += size
+            if (frameCount == 0L) {
+                val t = nal[0].toInt() and 0x1F
+                AppLog.i(TAG, "STAP-A NAL extrahiert: type=$t size=$size")
+            }
+            handleNalUnit(nal, rtpTs)
         }
     }
 
