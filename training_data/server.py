@@ -82,33 +82,45 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def handle_etf150_snap(self, host='192.168.10.1'):
         """
         ETF150 ist nur über Tablet-WiFi erreichbar → ADB als Relay.
-        1. HTTP-Trigger: adb shell curl POST /roc/photo/capture (kein Auth nötig)
-        2. Auf neue Datei warten: /sdcard/DCIM/GSWiFiPhoto/
-        3. Neueste JPEG via adb pull zurückgeben.
+        Mit eingesetzter SD-Karte:
+        1. POST /roc/photo/capture → JSON mit "origin":"/roc/file/<datum>/IMGxxxxx.jpg"
+        2. GET /roc/file/<path> → JPEG-Bytes
+        Beide via adb shell curl, Datei auf Tablet, dann adb pull.
         """
+        TABLET_TMP = '/sdcard/.tp_etf150_snap.jpg'
         try:
-            # Schritt 1: Capture auslösen (kein Auth, ETF150 akzeptiert direkt)
-            subprocess.run(
-                ['adb', 'shell', f'curl -s --max-time 3 -X POST http://{host}/roc/photo/capture'],
-                capture_output=True, timeout=6
-            )
-            time.sleep(2.0)  # Kamera braucht ~1–2s zum Speichern
-
-            # Schritt 2: Neueste JPEG-Datei im Gallery-Ordner finden
+            # Schritt 1: Capture auslösen, JSON-Antwort lesen
             r = subprocess.run(
-                ['adb', 'shell', 'ls -t /sdcard/DCIM/GSWiFiPhoto/*.jpg 2>/dev/null | head -1'],
-                capture_output=True, text=True, timeout=5
+                ['adb', 'shell', f'curl -s --max-time 5 -X POST http://{host}/roc/photo/capture'],
+                capture_output=True, text=True, timeout=8
             )
-            path = r.stdout.strip()
-            if not path:
-                self.send_error(404, 'Kein ETF150-Foto gefunden — Apexel-App verbunden?'); return
+            try:
+                resp = json.loads(r.stdout.strip())
+            except json.JSONDecodeError:
+                self.send_error(502, f'ETF150-Antwort kein JSON: {r.stdout[:200]}'); return
 
-            # Schritt 3: Datei per adb pull holen
+            files = resp.get('filelist') or []
+            if not files:
+                self.send_error(502, 'ETF150: Capture ohne Datei (SD-Karte?)'); return
+            origin = files[0].get('origin') or files[0].get('name')
+            if not origin:
+                self.send_error(502, f'ETF150: Kein file-path: {resp}'); return
+            if not origin.startswith('/'):
+                origin = '/roc/file/' + origin.lstrip('/')
+
+            # Schritt 2: Datei vom Kamera-HTTP via adb-curl holen, auf Tablet zwischenlagern
+            subprocess.run(
+                ['adb', 'shell',
+                 f'curl -s --max-time 10 -o {TABLET_TMP} http://{host}{origin}'],
+                capture_output=True, timeout=15, check=True
+            )
+
+            # Schritt 3: adb pull
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
                 tmpfile = f.name
             try:
                 subprocess.run(
-                    ['adb', 'pull', path, tmpfile],
+                    ['adb', 'pull', TABLET_TMP, tmpfile],
                     capture_output=True, timeout=10, check=True
                 )
                 with open(tmpfile, 'rb') as f:
@@ -117,18 +129,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 try: os.unlink(tmpfile)
                 except: pass
 
+            if len(data) < 1000 or data[:2] != b'\xff\xd8':
+                self.send_error(502, f'ETF150: Datei korrupt ({len(data)}B, magic={data[:4].hex()})'); return
+
             self.send_response(200)
             self.send_header('Content-Type', 'image/jpeg')
             self.send_header('Content-Length', str(len(data)))
             self.add_cors()
             self.end_headers()
             self.wfile.write(data)
-            print(f'[cam/snap/etf150] {host} → {len(data)//1024}KB ({path.split("/")[-1]})')
+            print(f'[cam/snap/etf150] {host}{origin} → {len(data)//1024}KB')
 
         except subprocess.TimeoutExpired:
             self.send_error(504, 'ADB-Timeout — Tablet verbunden?')
         except subprocess.CalledProcessError as e:
-            self.send_error(502, f'adb pull fehlgeschlagen: {e}')
+            self.send_error(502, f'ADB-Befehl fehlgeschlagen: {e}')
         except Exception as e:
             self.send_error(502, str(e))
 

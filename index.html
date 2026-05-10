@@ -1155,7 +1155,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.143';
+const APP_VERSION = '2.3.144';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -4635,7 +4635,7 @@ function initWlanCamButtons() {
     const status = document.getElementById('camWlanStatus');
 
     if (isEtf150) {
-        // ETF150: Snapshot → POST /roc/photo/capture; kein REC-Support
+        // ETF150: Snapshot → POST /roc/photo/capture (mit SD-Karte); kein REC-Support
         document.getElementById('btnCamRecOn').style.display = 'none';
         document.getElementById('btnCamRecOff').style.display = 'none';
         document.getElementById('btnCamSnapshot').addEventListener('click', async () => {
@@ -4644,8 +4644,15 @@ function initWlanCamButtons() {
                 const r = await fetch('http://' + gwIp + '/roc/photo/capture',
                     { method: 'POST', cache: 'no-store' });
                 const j = await r.json();
-                // {"filelist":[]} = ausgelöst (kein SD-Card-Feedback)
-                status.textContent = r.ok ? '✓ Foto ausgelöst' : '⚠ ' + JSON.stringify(j);
+                const files = j.filelist || [];
+                if (!r.ok || !files.length) {
+                    status.textContent = '⚠ ' + (files.length ? 'OK' : 'Keine Datei (SD?)');
+                    return;
+                }
+                const f = files[0];
+                const name = (f.name || f.origin || '').split('/').pop();
+                const sz = f.sizeKB ? ` · ${f.sizeKB}KB` : '';
+                status.textContent = `✓ ${name}${sz}`;
             } catch(e) { status.textContent = '✗ ' + e.message; }
         });
     } else {
