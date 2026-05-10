@@ -9,6 +9,11 @@
          YUV_420_888 → NV21 → YuvImage.compressToJpeg → WebView.
          Layout enthält daher nur noch die WebView; kein Display-Surface
          für RTSP nötig (User sieht Video als JPEG im WebView). -->
+    <SurfaceView
+        android:id="@+id/rtspSurfaceView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <WebView
         android:id="@+id/webview"
         android:layout_width="match_parent"

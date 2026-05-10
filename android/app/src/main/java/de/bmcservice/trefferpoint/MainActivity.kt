@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -12,13 +14,18 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.HandlerThread
 import java.net.Inet4Address
 import android.speech.tts.TextToSpeech
 import java.util.Locale
 import android.util.Base64
 import android.content.ContentValues
 import android.net.Uri
+import android.view.PixelCopy
 import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
@@ -59,6 +66,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
+    private lateinit var surfaceView: SurfaceView
 
     private var cameraHelper: ICameraHelper? = null
     private var cameraOpened = false
@@ -72,6 +80,10 @@ class MainActivity : AppCompatActivity() {
 
     private var rtspPipeline: RtspMediaCodecPipeline? = null
     private var mjpegPipeline: MjpegHttpPipeline? = null
+    @Volatile private var rtspSurfaceReady = false
+    @Volatile private var rtspVideoWidth: Int = 0
+    @Volatile private var rtspVideoHeight: Int = 0
+    private var pendingRtspUrl: String? = null
 
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
@@ -92,7 +104,9 @@ class MainActivity : AppCompatActivity() {
         AppLog.i(TAG, "=== onCreate — TrefferPoint startet ===")
         AppLog.i(TAG, "Launch intent: ${intent?.action}")
 
+        surfaceView = findViewById(R.id.rtspSurfaceView)
         webView = findViewById(R.id.webview)
+        webView.setBackgroundColor(Color.TRANSPARENT)
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -115,6 +129,26 @@ class MainActivity : AppCompatActivity() {
             }
         }
         WebView.setWebContentsDebuggingEnabled(true)
+        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                rtspSurfaceReady = true
+                AppLog.i(TAG, "RTSP-Surface erstellt")
+                val url = pendingRtspUrl
+                if (!url.isNullOrBlank()) {
+                    pendingRtspUrl = null
+                    startRtspPipeline(url)
+                }
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                rtspSurfaceReady = holder.surface?.isValid == true
+            }
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {
+                rtspSurfaceReady = false
+                AppLog.i(TAG, "RTSP-Surface zerstÃ¶rt")
+            }
+        })
 
         // JavaScript-Bridge: JS greift via window.tpBridge auf App-Infos zu
         webView.addJavascriptInterface(TrefferPointBridge(), "tpBridge")
@@ -440,6 +474,75 @@ class MainActivity : AppCompatActivity() {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private fun isRtspSurfaceUsable(): Boolean =
+        this::surfaceView.isInitialized && rtspSurfaceReady && surfaceView.holder.surface?.isValid == true
+
+    private fun captureRtspSurfaceJpeg(): ByteArray? {
+        if (!isRtspSurfaceUsable()) return null
+        val width = rtspVideoWidth.takeIf { it > 0 } ?: surfaceView.width
+        val height = rtspVideoHeight.takeIf { it > 0 } ?: surfaceView.height
+        if (width <= 0 || height <= 0) return null
+
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val thread = HandlerThread("tp-pixelcopy").apply { start() }
+        return try {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var resultCode = PixelCopy.ERROR_UNKNOWN
+            PixelCopy.request(surfaceView, bitmap, { copyResult ->
+                resultCode = copyResult
+                latch.countDown()
+            }, Handler(thread.looper))
+            latch.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (resultCode != PixelCopy.SUCCESS) {
+                AppLog.w(TAG, "PixelCopy fehlgeschlagen: code=$resultCode")
+                null
+            } else {
+                val out = java.io.ByteArrayOutputStream(width * height / 4)
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                out.toByteArray()
+            }
+        } catch (e: Exception) {
+            AppLog.e(TAG, "captureRtspSurfaceJpeg fehlgeschlagen", e)
+            null
+        } finally {
+            thread.quitSafely()
+            bitmap.recycle()
+        }
+    }
+
+    private fun startRtspPipeline(url: String) {
+        if (!isRtspSurfaceUsable()) {
+            pendingRtspUrl = url
+            AppLog.w(TAG, "RTSP-Surface noch nicht bereit â€” Start aufgeschoben")
+            return
+        }
+        val p = RtspMediaCodecPipeline(
+            applicationContext,
+            surfaceView.holder.surface,
+            onStatus = { status -> AppLog.i(TAG, "Stream: $status") },
+            onFrameRendered = { width, height ->
+                frameCount++
+                rtspVideoWidth = width
+                rtspVideoHeight = height
+            }
+        )
+        p.onMailMessage = { msg ->
+            val escaped = msg
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "")
+            runOnUiThread {
+                webView.evaluateJavascript(
+                    "window.tpOnSgkMail && window.tpOnSgkMail('$escaped')",
+                    null
+                )
+            }
+        }
+        rtspPipeline = p
+        p.start(url)
+    }
+
     private fun isJpeg(data: ByteArray): Boolean =
         data.size > 3 && data[0] == 0xFF.toByte() && data[1] == 0xD8.toByte()
 
@@ -478,7 +581,7 @@ class MainActivity : AppCompatActivity() {
             val rtspErr = rtspPipeline?.lastError?.let { ",\"rtspError\":\"${it.replace("\"","'")}\"" } ?: ""
             val mjpegErr = mjpegPipeline?.lastError?.let { ",\"mjpegError\":\"${it.replace("\"","'")}\"" } ?: ""
             val connected = cameraOpened || activeMode == "rtsp" || activeMode == "mjpeg"
-            return """{"mode":"$activeMode","cameraConnected":$connected,"frameCount":$frameCount,"rtspFrameCount":$rtspFC,"mjpegFrameCount":$mjpegFC,"lastFrameBytes":$lastFrameSize$rtspErr$mjpegErr}"""
+            return """{"mode":"$activeMode","cameraConnected":$connected,"surfaceReady":$rtspSurfaceReady,"frameCount":$frameCount,"rtspFrameCount":$rtspFC,"mjpegFrameCount":$mjpegFC,"rtspVideoWidth":$rtspVideoWidth,"rtspVideoHeight":$rtspVideoHeight,"lastFrameBytes":$lastFrameSize$rtspErr$mjpegErr}"""
         }
 
         @JavascriptInterface
@@ -486,6 +589,12 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun isAndroidApp(): Boolean = true
+
+        @JavascriptInterface
+        fun captureCurrentFrame(): String {
+            val jpeg = captureRtspSurfaceJpeg() ?: return ""
+            return Base64.encodeToString(jpeg, Base64.NO_WRAP)
+        }
 
         /**
          * Liefert die Gateway-IP des aktuell verbundenen WLAN-Netzes.
@@ -545,10 +654,13 @@ class MainActivity : AppCompatActivity() {
                     // Bestehende Pipelines stoppen
                     rtspPipeline?.stop()
                     rtspPipeline = null
+                    pendingRtspUrl = null
                     mjpegPipeline?.stop()
                     mjpegPipeline = null
                     try { cameraHelper?.closeCamera() } catch (_: Exception) {}
                     cameraOpened = false
+                    rtspVideoWidth = 0
+                    rtspVideoHeight = 0
 
                     val finalUrl = if (url.isNotBlank()) url else {
                         // Default: MJPEG auf Gateway:8080 (SGK-Standard)
@@ -573,24 +685,9 @@ class MainActivity : AppCompatActivity() {
                         p.start(finalUrl)
                     } else {
                         AppLog.i(TAG, "startStream (RTSP): $finalUrl — direkter MediaCodec-Pfad")
-                        val p = RtspMediaCodecPipeline(applicationContext, onJpeg, onStatus)
-                        // Mail-Socket-Nachrichten der Kamera an JS weiterleiten (REC-Status etc.)
-                        p.onMailMessage = { msg ->
-                            val escaped = msg
-                                .replace("\\", "\\\\")
-                                .replace("'", "\\'")
-                                .replace("\n", "\\n")
-                                .replace("\r", "")
-                            runOnUiThread {
-                                webView.evaluateJavascript(
-                                    "window.tpOnSgkMail && window.tpOnSgkMail('$escaped')",
-                                    null
-                                )
-                            }
-                        }
-                        rtspPipeline = p
+                        AppLog.i(TAG, "startStream (RTSP): $finalUrl â€” HW-Decoder direkt auf SurfaceView")
                         activeMode = "rtsp"
-                        p.start(finalUrl)
+                        startRtspPipeline(finalUrl)
                     }
                 } catch (e: Exception) {
                     AppLog.e(TAG, "startRtsp Exception", e)
@@ -775,10 +872,13 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 try {
                     stopWebViewPushLoop()
+                    pendingRtspUrl = null
                     rtspPipeline?.stop()
                     rtspPipeline = null
                     mjpegPipeline?.stop()
                     mjpegPipeline = null
+                    rtspVideoWidth = 0
+                    rtspVideoHeight = 0
                     if (activeMode == "rtsp" || activeMode == "mjpeg") activeMode = "none"
                     AppLog.i(TAG, "stopRtsp")
                 } catch (e: Exception) { AppLog.e(TAG, "stopRtsp Exception", e) }
@@ -792,7 +892,10 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun sgkSaveFrame(): String {
             // v2.3.118: lastUvcFrameJpeg als Fallback für USB-C-Kamera-Modus
-            val jpeg = rtspPipeline?.lastFrameJpeg ?: mjpegPipeline?.lastFrameJpeg ?: lastUvcFrameJpeg
+            val jpeg = rtspPipeline?.lastFrameJpeg
+                ?: captureRtspSurfaceJpeg()
+                ?: mjpegPipeline?.lastFrameJpeg
+                ?: lastUvcFrameJpeg
                 ?: return "Fehler: kein Frame verfügbar"
             val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault())
                 .format(java.util.Date())

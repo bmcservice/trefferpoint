@@ -141,6 +141,7 @@
             max-height: 100%;
             display: block;
             cursor: crosshair;
+            background: transparent;
         }
 
         .overlay-msg {
@@ -1170,7 +1171,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.158';
+const APP_VERSION = '2.3.159';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1413,6 +1414,8 @@ let inputMode = 'usb';     // 'usb' | 'stream'
 let canvas = document.getElementById('canvas');
 let ctx = canvas.getContext('2d');
 let rafId = null;
+const processingCanvas = document.createElement('canvas');
+const processingCtx = processingCanvas.getContext('2d', { willReadFrequently: true });
 
 let softwareZoom = 1.0;    // Software-Zoom: <1.0 = rauszoomen, >1.0 = reinzoomen
 let calib = null;          // { cx, cy, outerPx, pxPerMm }
@@ -2344,6 +2347,63 @@ function startLoop() {
     loop();
 }
 
+function isNativeSurfaceRtspMode() {
+    return inputMode === 'rtsp' &&
+        typeof window.tpBridge !== 'undefined' &&
+        window.tpBridge.isAndroidApp &&
+        window.tpBridge.isAndroidApp();
+}
+
+function syncCanvasSize(width, height) {
+    if (!width || !height) return;
+    if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+    }
+}
+
+function syncRtspCanvasFromStatus() {
+    if (!isNativeSurfaceRtspMode()) return false;
+    try {
+        const st = JSON.parse(window.tpBridge.getStatus() || '{}');
+        if (st.rtspVideoWidth > 0 && st.rtspVideoHeight > 0) {
+            syncCanvasSize(st.rtspVideoWidth, st.rtspVideoHeight);
+            return true;
+        }
+    } catch(e) {}
+    return false;
+}
+
+async function captureNativeRtspFrame() {
+    if (!isNativeSurfaceRtspMode() || !window.tpBridge.captureCurrentFrame) {
+        throw new Error('Native RTSP-Snapshot nicht verfügbar');
+    }
+    const b64 = window.tpBridge.captureCurrentFrame();
+    if (!b64) throw new Error('Kein RTSP-Frame verfügbar');
+    return await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            syncCanvasSize(img.naturalWidth, img.naturalHeight);
+            processingCanvas.width = img.naturalWidth;
+            processingCanvas.height = img.naturalHeight;
+            processingCtx.clearRect(0, 0, processingCanvas.width, processingCanvas.height);
+            processingCtx.drawImage(img, 0, 0);
+            try {
+                resolve(processingCtx.getImageData(0, 0, processingCanvas.width, processingCanvas.height));
+            } catch(e) {
+                reject(e);
+            }
+        };
+        img.onerror = () => reject(new Error('Snapshot-Decoding fehlgeschlagen'));
+        img.src = 'data:image/jpeg;base64,' + b64;
+    });
+}
+
+async function getCurrentProcessingFrame() {
+    if (isNativeSurfaceRtspMode()) return await captureNativeRtspFrame();
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+}
+
 function loop() {
     // 'stream' = MJPEG-URL, 'rtsp' = RTSP via Native-Bridge — beide nutzen imgEl statt mediaStream
     if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
@@ -2360,20 +2420,23 @@ function loop() {
 
     // Software-Zoom + optionale Kamera-Rotation
     ctx.save();
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const src = ((inputMode === 'stream' || inputMode === 'rtsp') && imgEl) ? imgEl : videoEl;
-    if (camRotation === 0) {
-        const sw = canvas.width * softwareZoom;
-        const sh = canvas.height * softwareZoom;
-        try { ctx.drawImage(src, (canvas.width - sw) / 2, (canvas.height - sh) / 2, sw, sh); } catch(e) {}
-    } else {
-        const isOdd = camRotation === 90 || camRotation === 270;
-        const sw = (isOdd ? canvas.height : canvas.width) * softwareZoom;
-        const sh = (isOdd ? canvas.width : canvas.height) * softwareZoom;
-        ctx.translate(canvas.width / 2, canvas.height / 2);
-        ctx.rotate(camRotation * Math.PI / 180);
-        try { ctx.drawImage(src, -sw / 2, -sh / 2, sw, sh); } catch(e) {}
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!isNativeSurfaceRtspMode()) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const src = ((inputMode === 'stream' || inputMode === 'rtsp') && imgEl) ? imgEl : videoEl;
+        if (camRotation === 0) {
+            const sw = canvas.width * softwareZoom;
+            const sh = canvas.height * softwareZoom;
+            try { ctx.drawImage(src, (canvas.width - sw) / 2, (canvas.height - sh) / 2, sw, sh); } catch(e) {}
+        } else {
+            const isOdd = camRotation === 90 || camRotation === 270;
+            const sw = (isOdd ? canvas.height : canvas.width) * softwareZoom;
+            const sh = (isOdd ? canvas.width : canvas.height) * softwareZoom;
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(camRotation * Math.PI / 180);
+            try { ctx.drawImage(src, -sw / 2, -sh / 2, sw, sh); } catch(e) {}
+        }
     }
     ctx.restore();
 
@@ -2651,7 +2714,7 @@ function _refineEllipse(pts, cx_est, cy_est) {
     return { cx: cx_est, cy: cy_est, a: semiA, b: semiB, angle };
 }
 
-function autoCalib() {
+async function autoCalib() {
     // Falls manuelle Kalibrierung aktiv: zurücksetzen + D-Pad ausblenden.
     // Sonst bleibt der Manuell-Modus stuck wenn der User zwischendurch Auto-Erkennung klickt.
     manualPointer = null;
@@ -2661,10 +2724,11 @@ function autoCalib() {
     setMsg('🔍 Scheibe wird erkannt...');
     setStatus('Auto-Kalibrierung läuft', 'warn');
 
-    setTimeout(() => {
+    setTimeout(async () => {
         try {
-            const W = canvas.width, H = canvas.height;
-            const data = ctx.getImageData(0, 0, W, H).data;
+            const frame = await getCurrentProcessingFrame();
+            const W = frame.width, H = frame.height;
+            const data = frame.data;
 
             // Adaptive Schwelle: schwarz/weiß-Mitte
             let brightnessSum = 0, sampleCount = 0;
@@ -2814,6 +2878,11 @@ canvas.addEventListener('click', e => {
 // --- Hit Detection ---
 function setRef() {
     if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
+    if (isNativeSurfaceRtspMode()) {
+        setStatus('RTSP-SurfaceView: Live-Erkennung pausiert — nutze Vergleich unten', 'warn');
+        setMsg('Referenz/Vergleich arbeitet im RTSP-Modus per Snapshot');
+        return;
+    }
     try {
         ctx.getImageData(0, 0, 1, 1);
         refFrame = null;
@@ -2883,7 +2952,7 @@ function runDetection() {
     const prev = refFrame.data;
     const next = cur.data;
     const threshold = parseInt(document.getElementById('sens').value);
-    const W = canvas.width, H = canvas.height;
+    let W = canvas.width, H = canvas.height;
     precomputeSpiegelParams();
     const thresholdOuter = document.getElementById('sensOuter') ? parseInt(document.getElementById('sensOuter').value) : threshold + 7;
 
@@ -3314,6 +3383,7 @@ let bridgeReceiverReady = false;
 let imgLoading = null;  // Back-Buffer: lädt gerade
 function setupBridgeFrameReceiver() {
     bridgeReceiverReady = true;
+    const nativeSurfaceMode = isNativeSurfaceRtspMode();
 
     imgEl = new Image();        // Front-Buffer (im Loop gezeichnet)
     imgLoading = new Image();    // Back-Buffer
@@ -3352,30 +3422,38 @@ function setupBridgeFrameReceiver() {
         setMsg('Auto-Erkennung \u2192 Button klicken');
         if (!rafId) startLoop();
     };
-    // v2.3.155: MJPEG-Stream via localhost — kein evaluateJavascript pro Frame mehr.
-    // imgEl empfängt den Multipart-Stream direkt; loop() zeichnet es weiterhin ins Canvas.
-    imgEl.src = 'http://127.0.0.1:8090/stream';
-    imgEl.onload = () => {
-        if (firstFrameDone) return;
-        firstFrameDone = true;
-        appState = 'READY';
-        document.getElementById('btnRotateCam').style.display = '';
-        document.getElementById('btnCalib').disabled = false;
-        document.getElementById('btnAutoCalib').disabled = false;
-        document.getElementById('btnRef').disabled = false;
-        document.getElementById('btnDetect').disabled = false;
-        document.getElementById('camControlsSection').style.display = '';
-        initShutterPresets();
-        buildCamControls();
-        setStatus('Stream aktiv · localhost MJPEG', 'ok');
-        setMsg('Auto-Erkennung → Button klicken');
-        if (!rafId) startLoop();
-    };
+    if (!nativeSurfaceMode) {
+        // v2.3.155: MJPEG-Stream via localhost — kein evaluateJavascript pro Frame mehr.
+        // imgEl empfängt den Multipart-Stream direkt; loop() zeichnet es weiterhin ins Canvas.
+        imgEl.src = 'http://127.0.0.1:8090/stream';
+        imgEl.onload = () => {
+            if (firstFrameDone) return;
+            firstFrameDone = true;
+            appState = 'READY';
+            document.getElementById('btnRotateCam').style.display = '';
+            document.getElementById('btnCalib').disabled = false;
+            document.getElementById('btnAutoCalib').disabled = false;
+            document.getElementById('btnRef').disabled = false;
+            document.getElementById('btnDetect').disabled = false;
+            document.getElementById('camControlsSection').style.display = '';
+            initShutterPresets();
+            buildCamControls();
+            setStatus('Stream aktiv · localhost MJPEG', 'ok');
+            setMsg('Auto-Erkennung → Button klicken');
+            if (!rafId) startLoop();
+        };
+    } else {
+        syncRtspCanvasFromStatus();
+    }
     imgLoading.onload = onFrameLoaded;
 
     window.tpReceiveFrame = function(b64) {
-        // v2.3.155: Display läuft via MJPEG-Stream (imgEl.src), kein data-URI nötig.
-        void b64;
+        if (nativeSurfaceMode) {
+            void b64;
+            return;
+        }
+        if (!imgLoading) return;
+        imgLoading.src = 'data:image/jpeg;base64,' + b64;
     };
 
     // Diagnose: nach 30s ohne Frame → Log zeigen
@@ -3385,7 +3463,25 @@ function setupBridgeFrameReceiver() {
         if (firstFrameDone) { clearInterval(checkTimer); return; }
         try {
             const st = JSON.parse(window.tpBridge.getStatus());
+            if (nativeSurfaceMode && st.rtspVideoWidth > 0 && st.rtspVideoHeight > 0) {
+                syncCanvasSize(st.rtspVideoWidth, st.rtspVideoHeight);
+            }
             if (st && typeof st.frameCount === 'number' && st.frameCount > 0) {
+                if (!firstFrameDone && nativeSurfaceMode) {
+                    firstFrameDone = true;
+                    appState = 'READY';
+                    document.getElementById('btnRotateCam').style.display = '';
+                    document.getElementById('btnCalib').disabled = false;
+                    document.getElementById('btnAutoCalib').disabled = false;
+                    document.getElementById('btnRef').disabled = false;
+                    document.getElementById('btnDetect').disabled = false;
+                    document.getElementById('camControlsSection').style.display = '';
+                    initShutterPresets();
+                    buildCamControls();
+                    setStatus('Stream aktiv · SurfaceView', 'ok');
+                    setMsg('Live-Bild läuft direkt · Vergleich arbeitet per Snapshot');
+                    if (!rafId) startLoop();
+                }
                 clearInterval(checkTimer); return;
             }
             let line = 'Warte auf Kamera\u2026\nmode=' + st.mode + ', frames=' + st.frameCount;
@@ -4039,11 +4135,16 @@ document.getElementById('swZoomQ').addEventListener('input', e => applySwZoom(pa
 document.getElementById('btnCam').addEventListener('click', startCamera);
 document.getElementById('btnEnumCam').addEventListener('click', enumCameras);
 
-document.getElementById('btnAutoCalib').addEventListener('click', autoCalib);
+document.getElementById('btnAutoCalib').addEventListener('click', () => { void autoCalib(); });
 document.getElementById('btnCalib').addEventListener('click', startCalib);
 document.getElementById('btnRef').addEventListener('click', setRef);
 
 document.getElementById('btnDetect').addEventListener('click', () => {
+    if (isNativeSurfaceRtspMode()) {
+        setStatus('RTSP-SurfaceView: kontinuierliche Erkennung aus — nutze Vergleich unten', 'warn');
+        setMsg('Plan B aktiv: Live-Bild direkt, Detection nur on-demand per Snapshot');
+        return;
+    }
     if (!refFrame && refWarmup === 0) setRef();
     detecting = !detecting;
     const btn = document.getElementById('btnDetect');
@@ -4131,12 +4232,12 @@ function detectSpiegelCenter(imageData, W, H, hint) {
 // werden bei späterem Compare ignoriert. Das fängt Timestamp-Sekunden,
 // blinkende LEDs, sich bewegende Schatten und ähnliches automatisch ein,
 // ohne dass User Position/Größe einer Maske händisch konfigurieren muss.
-function setCompareReference() {
-    if (!ctx || !canvas.width) {
+async function setCompareReference() {
+    if (!ctx || (!canvas.width && !isNativeSurfaceRtspMode())) {
         setStatus('Kein Bild verfügbar', 'warn');
         return;
     }
-    const W = canvas.width, H = canvas.height;
+    let W = canvas.width, H = canvas.height;
     const SAMPLE_INTERVAL_MS = 700;
     const samples = [];
     const btnRef = document.getElementById('btnCompareRef');
@@ -4146,9 +4247,14 @@ function setCompareReference() {
     if (btnCmp) btnCmp.disabled = true;
     if (btnRst) btnRst.disabled = true;
 
-    function captureNext() {
+    async function captureNext() {
         try {
-            samples.push(ctx.getImageData(0, 0, W, H));
+            const frame = await getCurrentProcessingFrame();
+            samples.push(frame);
+            if (!W || !H) {
+                W = frame.width;
+                H = frame.height;
+            }
         } catch(e) {
             setStatus('Pixel-Zugriff blockiert: ' + e.message, 'warn');
             if (btnRef) btnRef.disabled = false;
@@ -4159,7 +4265,7 @@ function setCompareReference() {
             setStatus(`🟠 Sammle Hintergrund-Drift… ${n}/3`, 'warn');
             document.getElementById('compareStatus').textContent =
                 `🟠 Sample ${n}/3 — ${(SAMPLE_INTERVAL_MS * (3 - n) / 1000).toFixed(1)}s verbleibend`;
-            setTimeout(captureNext, SAMPLE_INTERVAL_MS);
+            setTimeout(() => { void captureNext(); }, SAMPLE_INTERVAL_MS);
             return;
         }
         // 3 Frames gesammelt → Persistenz-Maske bauen
@@ -4201,7 +4307,7 @@ function setCompareReference() {
     }
     setStatus('🟠 Sammle Hintergrund-Drift… 1/3', 'warn');
     document.getElementById('compareStatus').textContent = '🟠 Sample 1/3 — 1.4s verbleibend';
-    captureNext();
+    void captureNext();
 }
 
 function resetCompareReference() {
@@ -4261,11 +4367,11 @@ function kreisfoermigkeit(clusterPts) {
     return l2 > 0 ? Math.sqrt(l2/l1) : 0;
 }
 
-function compareNow() {
+async function compareNow() {
     if (!compareReference) { setStatus('Erst Referenz setzen', 'warn'); return; }
     if (!calib) { setStatus('Erst kalibrieren (Auto-Erkennung)', 'warn'); return; }
     let cur;
-    try { cur = ctx.getImageData(0, 0, canvas.width, canvas.height); }
+    try { cur = await getCurrentProcessingFrame(); }
     catch(e) { setStatus('Pixel-Zugriff blockiert', 'warn'); return; }
 
     const refImg = compareReference.imageData;
@@ -4478,8 +4584,8 @@ function compareNow() {
     }
 }
 
-document.getElementById('btnCompareRef').addEventListener('click', setCompareReference);
-document.getElementById('btnCompareNow').addEventListener('click', compareNow);
+document.getElementById('btnCompareRef').addEventListener('click', () => { void setCompareReference(); });
+document.getElementById('btnCompareNow').addEventListener('click', () => { void compareNow(); });
 document.getElementById('btnCompareReset').addEventListener('click', () => {
     resetCompareReference();
     hits = [];

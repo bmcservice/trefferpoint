@@ -15,6 +15,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Base64
+import android.view.Surface
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -55,8 +56,9 @@ import kotlin.concurrent.thread
  */
 class RtspMediaCodecPipeline(
     private val context: Context,
-    private val onJpegFrame: (ByteArray) -> Unit,
-    private val onStatus: (String) -> Unit
+    private val outputSurface: Surface,
+    private val onStatus: (String) -> Unit,
+    private val onFrameRendered: (width: Int, height: Int) -> Unit
 ) {
     companion object {
         private const val TAG = "RtspMediaCodec"
@@ -85,6 +87,8 @@ class RtspMediaCodecPipeline(
     @Volatile var frameCount: Long = 0; private set
     @Volatile var lastError: String? = null; private set
     @Volatile var lastFrameJpeg: ByteArray? = null; private set
+    val videoWidth: Int get() = imageWidth
+    val videoHeight: Int get() = imageHeight
 
     @Volatile private var running = false
     @Volatile private var currentUrl: String = ""
@@ -284,10 +288,9 @@ class RtspMediaCodecPipeline(
         // Empfang von SPS+PPS aus dem Stream konfiguriert (lazy in captureCsdNal),
         // damit die echte Stream-Auflösung verwendet wird.
         if (hasInlineCsd) {
-            setupImageReader()
             configureDecoder()
         } else {
-            AppLog.i(TAG, "ImageReader + Decoder warten auf erstes SPS+PPS aus dem Stream")
+            AppLog.i(TAG, "Decoder wartet auf erstes SPS+PPS aus dem Stream")
         }
 
         // 4. RTP-Reader-Thread starten
@@ -356,8 +359,6 @@ class RtspMediaCodecPipeline(
 
     private fun configureDecoder() {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, imageWidth, imageHeight)
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
-            android.media.MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
         // CSD: SPS und PPS in Annex-B-Format (mit Start-Code 0x00000001)
         format.setByteBuffer("csd-0", ByteBuffer.wrap(toAnnexB(spsBytes!!)))
         format.setByteBuffer("csd-1", ByteBuffer.wrap(toAnnexB(ppsBytes!!)))
@@ -374,12 +375,12 @@ class RtspMediaCodecPipeline(
 
         // SW-Decoder explizit wählen — HW-Decoder schreibt nicht in CPU-lesbare Surfaces
         // (Adreno HW-Overlay-Bypass — bewiesen in v2.3.71-76).
-        decoder = MediaCodec.createByCodecName("c2.android.avc.decoder")
-        decoder!!.configure(format, imageReader!!.surface, null, 0)
+        decoder = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        decoder!!.configure(format, outputSurface, null, 0)
         decoder!!.start()
-        AppLog.i(TAG, "MediaCodec gestartet: c2.android.avc.decoder, ${imageWidth}x${imageHeight}")
+        AppLog.i(TAG, "MediaCodec gestartet: ${decoder!!.name}, ${imageWidth}x${imageHeight}")
 
-        // Output-Buffer-Loop in eigenem Thread (releases zu ImageReader)
+        // Output-Buffer-Loop in eigenem Thread (release direkt auf die SurfaceView)
         decoderOutputThread = thread(name = "rtsp-mc-output", start = true) {
             try {
                 outputBufferLoop()
@@ -405,8 +406,14 @@ class RtspMediaCodecPipeline(
             }
             when {
                 idx >= 0 -> {
-                    // Render in ImageReader-Surface (releaseOutputBuffer mit render=true).
+                    // Render direkt in die SurfaceView.
                     try { codec.releaseOutputBuffer(idx, true) } catch (_: Exception) {}
+                    frameCount++
+                    onFrameRendered(imageWidth, imageHeight)
+                    if (frameCount == 1L) {
+                        AppLog.i(TAG, "Erster RTSP-Frame direkt auf SurfaceView @ ${imageWidth}x${imageHeight}")
+                        onStatus("RTSP-Stream aktiv")
+                    }
                 }
                 idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     AppLog.i(TAG, "Decoder Output-Format-Wechsel: ${codec.outputFormat}")
@@ -632,10 +639,9 @@ class RtspMediaCodecPipeline(
                 AppLog.w(TAG, "SPS-Parse Fehler: ${e.message}")
             }
             try {
-                if (imageReader == null) setupImageReader()
                 configureDecoder()
             } catch (e: Exception) {
-                AppLog.e(TAG, "Lazy ImageReader/Decoder-Konfig fehlgeschlagen", e)
+                AppLog.e(TAG, "Lazy Decoder-Konfig fehlgeschlagen", e)
             }
         }
     }
