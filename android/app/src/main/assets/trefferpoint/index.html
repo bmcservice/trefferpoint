@@ -1170,7 +1170,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.151';
+const APP_VERSION = '2.3.152';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1359,13 +1359,15 @@ function applyEtfMode(active, gwIp) {
     if (tsBtn) tsBtn.style.display = active ? 'none' : '';
     if (tsSliders) tsSliders.style.display = active ? 'none' : '';
     if (active && gwIp) {
-        // Wasserzeichen abschalten (kein Auth, freundlich gegenüber Power-Cycles).
-        // Schema reverse-engineered aus Apexel-App-DEX (OSDStatus.OSDWATER).
+        // Wasserzeichen abschalten — Body-Schema reverse-engineered aus Apexel-App
+        // ETFClient.setOSDStatus(int) → JSONObject{"time":{"visible":<0|1>}}
+        // Der Server akzeptiert es auch über plain HTTP-PUT (Apexel selbst nutzt
+        // einen WebSocket-Wrapper mit method/uri/body, der Body ist identisch).
         fetch('http://' + gwIp + '/roc/osd/param', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             cache: 'no-store',
-            body: JSON.stringify({ OSDStatus: { OSDWATER: 0 } })
+            body: JSON.stringify({ time: { visible: 0 } })
         }).catch(() => {});
     }
 }
