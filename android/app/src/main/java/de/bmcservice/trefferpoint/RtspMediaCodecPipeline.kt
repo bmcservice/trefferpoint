@@ -160,13 +160,28 @@ class RtspMediaCodecPipeline(
         // 1. Kamera-Discovery via HTTP-Wakeup (wie in alter Pipeline)
         val hostMatch = Regex("rtsp://([^:/]+)").find(url)
         val host = hostMatch?.groupValues?.get(1) ?: error("Ungültige RTSP-URL: $url")
+
+        // v2.3.150: Multi-Cam-Pfad. Der SGK-Proxy enthält 7 SGK/Viidure-spezifische
+        // Firmware-Workarounds (Sequenz-Rewrite, Segment-Reconnect, IDR-Inject,
+        // recvonly-Patch, /tcp/ch1-Pfad-Hartkodierung u.a.) und ist NICHT generisch.
+        // Andere RTSP-Cams (Apexel ETF150, künftige Modelle) verbinden direkt zur
+        // Kamera:554 mit der vom User gegebenen URL.
+        // Heuristik: SGK-URLs enthalten den Pfad-Marker /tcp/ch<N>; andere nicht.
+        val useSgkProxy = url.contains(Regex("/tcp/ch[0-9]"))
+
+        sdpProxy?.stop()
+        sdpProxy = null
+        try { mailSocket?.close() } catch (_: Exception) {}
+        mailSocket = null
+
         if (host.startsWith("192.168.")) {
             wakeupCameraHttp(host)
-            sdpProxy?.stop()
-            sdpProxy = RtspSdpProxy(host)
-            sdpProxy!!.start()
-            // Achtung: Smoother bleibt im Proxy implementiert aber deaktiviert (Flag).
-            openMailSocket(host, 6035)
+            if (useSgkProxy) {
+                sdpProxy = RtspSdpProxy(host)
+                sdpProxy!!.start()
+                // Achtung: Smoother bleibt im Proxy implementiert aber deaktiviert (Flag).
+                openMailSocket(host, 6035)
+            }
         }
 
         running = true
@@ -177,15 +192,22 @@ class RtspMediaCodecPipeline(
         ptsBaseUs = 0L
         nalAccu.reset()
 
-        // 2. RTSP-Handshake mit Proxy (DESCRIBE, SETUP Video, PLAY)
-        AppLog.i(TAG, "Starte eigenen RTSP-Handshake auf 127.0.0.1:15554")
-        onStatus("RTSP: Verbinde via Proxy …")
+        // 2. RTSP-Handshake (DESCRIBE, SETUP Video, PLAY)
+        // SGK: über lokalen Proxy auf 127.0.0.1:15554 mit hartkodiertem /live/tcp/ch1.
+        // Andere Cams (ETF150 etc.): direkt an Cam:554 mit User-URL als Aggregate.
+        val (sockHost, sockPort) = if (useSgkProxy) "127.0.0.1" to 15554 else host to 554
+        AppLog.i(TAG, if (useSgkProxy)
+            "Starte RTSP-Handshake via SGK-Proxy auf 127.0.0.1:15554"
+        else
+            "Starte RTSP-Handshake direkt an $sockHost:$sockPort (kein SGK-Proxy)"
+        )
+        onStatus(if (useSgkProxy) "RTSP: Verbinde via Proxy …" else "RTSP: Verbinde direkt …")
         val sock = Socket()
-        sock.connect(InetSocketAddress("127.0.0.1", 15554), 5000)
+        sock.connect(InetSocketAddress(sockHost, sockPort), 5000)
         sock.soTimeout = 15000
         rtspSocket = sock
 
-        val streamUrl = "rtsp://127.0.0.1:15554/live/tcp/ch1"
+        val streamUrl = if (useSgkProxy) "rtsp://127.0.0.1:15554/live/tcp/ch1" else url
         val rIn = sock.getInputStream()
         val rOut = sock.getOutputStream()
 
