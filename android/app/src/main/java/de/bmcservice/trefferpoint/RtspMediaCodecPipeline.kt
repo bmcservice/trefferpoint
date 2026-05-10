@@ -220,10 +220,14 @@ class RtspMediaCodecPipeline(
                 "Default-Maße ${imageWidth}x${imageHeight}")
         }
 
-        // SETUP nur Video (Track 0), Audio ignorieren um Decoder-Stabilität zu sichern
-        // ExoPlayer's Audio-Decoder destabilisierte den Video-Decoder → wir füttern hier
-        // nur Video-NAL-Units in unseren MediaCodec.
-        send(rOut, "SETUP $streamUrl/video/track0 RTSP/1.0\r\nCSeq: 3\r\nUser-Agent: TrefferPoint-MC\r\n" +
+        // SETUP nur Video, Audio ignorieren um Decoder-Stabilität zu sichern
+        // (ExoPlayer's Audio-Decoder destabilisierte früher den Video-Decoder).
+        // v2.3.149: SETUP-URL aus SDP `a=control:` parsen statt hartkodierten `/video/track0`.
+        // SGK liefert relativ wie `video/track0`, ETF150 liefert query-style `?ctype=video`.
+        // java.net.URI.resolve() handhabt beide RFC-3986-konform.
+        val setupUrl = resolveVideoControlUrl(describeResp, streamUrl)
+        AppLog.i(TAG, "SETUP-URL: $setupUrl")
+        send(rOut, "SETUP $setupUrl RTSP/1.0\r\nCSeq: 3\r\nUser-Agent: TrefferPoint-MC\r\n" +
                 "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n")
         val setupResp = readMsg(rIn) ?: error("SETUP keine Antwort")
         val sid = Regex("Session:\\s*([^\r\n;]+)").find(setupResp)?.groupValues?.get(1)
@@ -552,6 +556,53 @@ class RtspMediaCodecPipeline(
                 AppLog.i(TAG, "STAP-A NAL extrahiert: type=$t size=$size")
             }
             handleNalUnit(nal, rtpTs)
+        }
+    }
+
+    /**
+     * v2.3.149: Video-Track-Control-URL aus DESCRIBE-Antwort extrahieren.
+     * Quelle ist `a=control:` im m=video-Block; wird relativ zur `Content-Base:` aufgelöst.
+     * Fallback auf `<streamUrl>/video/track0` (SGK-Default) wenn nichts parsbar ist.
+     *
+     * Beispiele:
+     *   ETF150:  Content-Base: rtsp://192.168.10.1/live/  +  a=control:?ctype=video
+     *            → rtsp://192.168.10.1/live/?ctype=video
+     *   SGK:     Content-Base: rtsp://192.168.0.1:554/live/tcp/ch1/  +  a=control:video/track0
+     *            → rtsp://192.168.0.1:554/live/tcp/ch1/video/track0
+     */
+    private fun resolveVideoControlUrl(describeResp: String, streamUrl: String): String {
+        try {
+            // 1. Content-Base aus Header
+            val contentBase = Regex("Content-Base:\\s*([^\r\n]+)", RegexOption.IGNORE_CASE)
+                .find(describeResp)?.groupValues?.get(1)?.trim()
+
+            // 2. SDP-Body finden (nach Header-Trenner \r\n\r\n)
+            val sdpStart = describeResp.indexOf("\r\n\r\n").let { if (it >= 0) it + 4 else 0 }
+            val sdp = describeResp.substring(sdpStart)
+
+            // 3. m=video-Section isolieren (alles bis zum nächsten m= oder Ende)
+            val videoIdx = sdp.indexOf("m=video")
+            if (videoIdx < 0) return "$streamUrl/video/track0"
+            val nextMediaIdx = sdp.indexOf("\nm=", videoIdx + 1).let { if (it < 0) sdp.length else it }
+            val videoSection = sdp.substring(videoIdx, nextMediaIdx)
+
+            // 4. a=control: in der Video-Section
+            val control = Regex("a=control:([^\r\n]+)").find(videoSection)
+                ?.groupValues?.get(1)?.trim()
+                ?: return "$streamUrl/video/track0"
+
+            // 5. Resolve relativ zu Content-Base (oder streamUrl als Fallback)
+            val baseStr = contentBase ?: streamUrl
+            return when {
+                control.startsWith("rtsp://", ignoreCase = true) -> control
+                else -> {
+                    // RFC-3986 URI-Resolution via java.net.URI
+                    java.net.URI(baseStr).resolve(control).toString()
+                }
+            }
+        } catch (e: Exception) {
+            AppLog.w(TAG, "resolveVideoControlUrl Fehler: ${e.message} — Fallback /video/track0")
+            return "$streamUrl/video/track0"
         }
     }
 

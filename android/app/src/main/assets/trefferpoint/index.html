@@ -1170,7 +1170,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.148';
+const APP_VERSION = '2.3.149';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3622,9 +3622,11 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
                 localStorage.setItem('tp_rtsp_url', rtspInput.value);
             }
             if (isEtf150) {
-                // ETF150-Netz erkannt: URL ÜBERSCHREIBEN wenn aktuell nicht auf 192.168.10.x
-                const isEtfUrl = /192\.168\.10\.\d+/.test(rtspInput.value);
-                if (!isEtfUrl) {
+                // ETF150-Netz erkannt: URL überschreiben wenn nicht EXAKT die saubere
+                // ETF-URL ist. Verhindert dass alter Code (z.B. setRtspChannel) Suffixe
+                // angehängt hat, die ETF150 nicht kennt (`/live/tcp/chN`).
+                const isCleanEtfUrl = /^rtsp:\/\/192\.168\.10\.1\/live\/?$/.test(rtspInput.value);
+                if (!isCleanEtfUrl) {
                     rtspInput.value = 'rtsp://192.168.10.1/live';
                     localStorage.setItem('tp_rtsp_url', rtspInput.value);
                 }
@@ -3645,6 +3647,9 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     function setRtspChannel(channel) {
         const rtspInput = document.getElementById('rtspUrl');
         let url = rtspInput.value.trim();
+        // v2.3.149: ETF150 hat keine Channels — Aufruf ignorieren um zu verhindern
+        // dass `/live/tcp/chN` an die ETF-URL gehängt wird (Bug aus v2.3.143–148).
+        if (/192\.168\.10\.1/.test(url)) return;
         if (!url) {
             try {
                 const gw = window.tpBridge.getWifiGateway() || '192.168.0.1';
@@ -3694,13 +3699,19 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         setStatus('RTSP gestoppt', 'warn');
     });
 
-    // Gespeicherte RTSP-URL wiederherstellen — mit Komma-Sanitize (Locale-Tastatur-Bug)
+    // Gespeicherte RTSP-URL wiederherstellen — mit Sanitize:
+    //  - Locale-Tastatur-Komma in IP → Punkt
+    //  - ETF150-URL mit fehlerhaftem /tcp/chN-Suffix → auf /live kürzen
     let savedRtsp = localStorage.getItem('tp_rtsp_url');
     if (savedRtsp) {
         if (/\d,\d/.test(savedRtsp)) {
             savedRtsp = savedRtsp.replace(/(\d+),(\d+)/g, '$1.$2');
-            localStorage.setItem('tp_rtsp_url', savedRtsp);
         }
+        // ETF150-Heuristik: 192.168.10.x mit Channel-Suffix → kürzen
+        if (/192\.168\.10\.\d+/.test(savedRtsp) && /\/live\/tcp\/ch[01]/.test(savedRtsp)) {
+            savedRtsp = 'rtsp://192.168.10.1/live';
+        }
+        localStorage.setItem('tp_rtsp_url', savedRtsp);
         document.getElementById('rtspUrl').value = savedRtsp;
     }
 
