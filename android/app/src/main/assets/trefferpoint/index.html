@@ -1155,7 +1155,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.144';
+const APP_VERSION = '2.3.145';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -4635,9 +4635,8 @@ function initWlanCamButtons() {
     const status = document.getElementById('camWlanStatus');
 
     if (isEtf150) {
-        // ETF150: Snapshot → POST /roc/photo/capture (mit SD-Karte); kein REC-Support
-        document.getElementById('btnCamRecOn').style.display = 'none';
-        document.getElementById('btnCamRecOff').style.display = 'none';
+        // ETF150: Snapshot → POST /roc/photo/capture (kein Auth, mit SD-Karte)
+        // REC → POST /roc/record/start | /roc/record/stop (kein Auth, plain HTTP)
         document.getElementById('btnCamSnapshot').addEventListener('click', async () => {
             status.textContent = 'Foto…';
             try {
@@ -4653,6 +4652,40 @@ function initWlanCamButtons() {
                 const name = (f.name || f.origin || '').split('/').pop();
                 const sz = f.sizeKB ? ` · ${f.sizeKB}KB` : '';
                 status.textContent = `✓ ${name}${sz}`;
+            } catch(e) { status.textContent = '✗ ' + e.message; }
+        });
+        document.getElementById('btnCamRecOn').addEventListener('click', async () => {
+            status.textContent = 'REC start…';
+            try {
+                const r = await fetch('http://' + gwIp + '/roc/record/start',
+                    { method: 'POST', cache: 'no-store' });
+                const j = await r.json();
+                if (j.ResponseStatus && j.ResponseStatus.statusCode === 0) {
+                    status.textContent = '⏺ REC läuft';
+                    document.getElementById('btnCamRecOn').style.background  = 'var(--accent)';
+                    document.getElementById('btnCamRecOn').style.color       = '#000';
+                    document.getElementById('btnCamRecOff').style.background = '';
+                    document.getElementById('btnCamRecOff').style.color      = '';
+                } else {
+                    status.textContent = '⚠ ' + JSON.stringify(j);
+                }
+            } catch(e) { status.textContent = '✗ ' + e.message; }
+        });
+        document.getElementById('btnCamRecOff').addEventListener('click', async () => {
+            status.textContent = 'REC stop…';
+            try {
+                const r = await fetch('http://' + gwIp + '/roc/record/stop',
+                    { method: 'POST', cache: 'no-store' });
+                const j = await r.json();
+                if (j.ResponseStatus && j.ResponseStatus.statusCode === 0) {
+                    status.textContent = '⏹ Aufnahme beendet (VID00xx.mp4 auf SD)';
+                    document.getElementById('btnCamRecOff').style.background = 'var(--accent)';
+                    document.getElementById('btnCamRecOff').style.color      = '#000';
+                    document.getElementById('btnCamRecOn').style.background  = '';
+                    document.getElementById('btnCamRecOn').style.color       = '';
+                } else {
+                    status.textContent = '⚠ ' + JSON.stringify(j);
+                }
             } catch(e) { status.textContent = '✗ ' + e.message; }
         });
     } else {
