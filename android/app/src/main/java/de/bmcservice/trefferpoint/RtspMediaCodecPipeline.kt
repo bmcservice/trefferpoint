@@ -63,9 +63,14 @@ class RtspMediaCodecPipeline(
         // Fallback-Auflösung wenn SPS-Parse fehlschlägt (= ch1-Default)
         private const val FALLBACK_WIDTH = 960
         private const val FALLBACK_HEIGHT = 540
-        // JPEG_QUALITY: 80 statt 90 → ~25% schneller, Bildqualität für Treffererkennung
-        // völlig ausreichend (Treffer-Detection braucht keine fotografische Schärfe).
-        private const val JPEG_QUALITY = 80
+        // JPEG_QUALITY: v2.3.153 50 (vorher 80). Bei 1920×1080 erzeugt Quality 80
+        // ~85 KB/Frame; nach Base64 ~113 KB Argument an webView.evaluateJavascript().
+        // Auf der ETF150-Cam beobachtet (v2.3.152): 3-5 s Lag im Live-Bild,
+        // wiederholte Stream-Freezes → WebView-IPC ist der Bottleneck.
+        // Quality 50 → ~30-40 KB/Frame (~3× weniger Bridge-Last), für Aiming optisch
+        // unverändert wahrnehmbar, für Differenz-Detection völlig ausreichend
+        // (Frame-Diff wird nach Schwellwert binärisiert).
+        private const val JPEG_QUALITY = 50
         private const val MAX_IMAGES = 6
         private const val NAL_BUFFER_SIZE = 256 * 1024  // max 256 KB pro NAL-Unit
         // PTS-Konversion: RTP-Timestamp ist in 90kHz, MediaCodec PTS in µs

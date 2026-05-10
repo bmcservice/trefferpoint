@@ -400,6 +400,11 @@ class MainActivity : AppCompatActivity() {
     private val webViewPushHandler = android.os.Handler(android.os.Looper.getMainLooper())
     @Volatile private var webViewLoopRunning = false
 
+    // v2.3.153: Push-Intervall 40 → 67 ms (25 → 15 fps).
+    // ETF150 mit 1920×1080 sättigte WebView-IPC bei 25 fps → 3-5 s Lag, Stream-Freezes.
+    // 15 fps reicht für Aiming (Auge nimmt das nicht als Ruckeln wahr) und für
+    // Treffer-Detection mehr als genug — Geschoss bleibt 33-50 ms im Bild,
+    // also 0.5-0.75 Frames bei 15 fps = sicher mindestens 1 Frame mit dem Hit.
     private val webViewPushRunnable = object : Runnable {
         override fun run() {
             val b64 = latestFrameB64.getAndSet(null)
@@ -412,7 +417,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 } catch (_: Exception) {}
             }
-            if (webViewLoopRunning) webViewPushHandler.postDelayed(this, 40)
+            if (webViewLoopRunning) webViewPushHandler.postDelayed(this, 67)
         }
     }
 
@@ -421,8 +426,8 @@ class MainActivity : AppCompatActivity() {
         webViewLoopRunning = true
         webViewDropped = 0L
         webViewPushCount = 0L
-        webViewPushHandler.postDelayed(webViewPushRunnable, 40)
-        AppLog.i(TAG, "WebView-Push-Loop gestartet (40ms/25fps)")
+        webViewPushHandler.postDelayed(webViewPushRunnable, 67)
+        AppLog.i(TAG, "WebView-Push-Loop gestartet (67ms/15fps)")
     }
 
     private fun stopWebViewPushLoop() {
