@@ -827,7 +827,7 @@
             <!-- Auto-Optimieren -->
             <button class="btn btn-primary" id="btnAutoOptQ"
                 style="margin-top:8px;width:100%;font-size:12px">⚙ Auto-Optimieren</button>
-            <!-- v2.3.119: WLAN-Kamera HTTP-Befehle (SGK GK720X) -->
+            <!-- v2.3.119: WLAN-Kamera HTTP-Befehle (SGK GK720X / Apexel ETF150) -->
             <div id="camQuickWlan" style="display:none">
                 <hr class="cqp-sep">
                 <div style="font-size:10px;color:var(--text-dim);margin-bottom:5px;
@@ -842,6 +842,21 @@
                 </div>
                 <div id="camWlanStatus" style="font-size:10px;color:var(--text-dim);
                     font-family:'Share Tech Mono',monospace"></div>
+                <!-- v2.3.146: Session-Recorder (nur ETF150) — Auto-REC + Hit-Timestamps -->
+                <div id="camSessionRec" style="display:none;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)">
+                    <label style="font-size:10px;color:var(--text-dim);
+                        font-family:'Share Tech Mono',monospace;display:flex;align-items:center;gap:5px">
+                        <input type="checkbox" id="chkAutoRec" style="margin:0">
+                        🎬 Auto-REC bei Erkennung
+                    </label>
+                    <button class="btn" id="btnSaveSession" disabled
+                        style="width:100%;font-size:11px;padding:5px;margin-top:5px"
+                        title="Hit-Liste mit Video-Timestamps als JSON speichern">
+                        💾 Session-Log speichern
+                    </button>
+                    <div id="sessionRecStatus" style="font-size:10px;color:var(--text-dim);
+                        font-family:'Share Tech Mono',monospace;margin-top:4px"></div>
+                </div>
             </div>
             <!-- Android: Shutter + Gain -->
             <div id="camQuickShutter" style="display:none">
@@ -1155,7 +1170,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.145';
+const APP_VERSION = '2.3.146';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1376,6 +1391,9 @@ let calibPt1 = null;       // temp center point during calibration
 let calibPt2 = null;       // temp X-axis edge point (3 Uhr) during 3-click calibration
 let refFrame = null;       // ImageData reference
 let hits = [];
+// v2.3.146: Session-Recorder State (ETF150 Auto-REC mit Hit-Timestamps)
+// {startMs, endMs?, prevMaxVid, dateStr, vidPath?, hits[], discipline, calib}
+let recSession = null;
 let detecting = false;
 let cooldown = 0;
 let frameCount = 0;
@@ -2964,6 +2982,17 @@ function runDetection() {
 
     const deg = hitDeg(cx, cy);
     hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg });
+    // v2.3.146: bei aktiver Session-Aufnahme den Hit auch dort mit Timestamp loggen
+    if (recSession) {
+        recSession.hits.push({
+            n: recSession.hits.length + 1,
+            t_ms: Date.now() - recSession.startMs,
+            x: Math.round(cx), y: Math.round(cy),
+            ring: ringDec,
+            distMm: parseFloat(distMm.toFixed(1)),
+            deg: Math.round(deg)
+        });
+    }
     // v2.3.138: refWarmup statt sofortigem refFrame=cur → Bild stabilisiert sich
     // über ~1.5s bevor nächste Erkennung möglich ist. Verhindert JPEG-Rauschen-Drift.
     refWarmup = Math.round(displayFps * 1.5) || 40;
@@ -3215,6 +3244,15 @@ function setMsg(msg) {
 }
 
 function resetSession() {
+    // v2.3.146: laufende Aufnahme stoppen bevor Session-State weggeworfen wird
+    if (recSession && !recSession.endMs) {
+        try { sessionRecMaybeStop(); } catch(e) {}
+    }
+    recSession = null;
+    const btnSave = document.getElementById('btnSaveSession');
+    if (btnSave) btnSave.disabled = true;
+    const stEl = document.getElementById('sessionRecStatus');
+    if (stEl) stEl.textContent = '';
     hits = [];
     refFrame = null;
     refWarmup = 0;
@@ -3935,12 +3973,16 @@ document.getElementById('btnDetect').addEventListener('click', () => {
         setStatus(refWarmup > 0 ? 'Referenz stabilisiert sich…' : 'Erkennung aktiv', refWarmup > 0 ? 'warn' : 'hot');
         setMsg('');
         spiegelBtn.disabled = false;
+        // v2.3.146: Auto-REC starten falls aktiv und ETF150 verbunden
+        try { sessionRecMaybeStart(); } catch(e) { console.warn(e); }
     } else {
         btn.textContent = '⚡ Erkennung starten';
         btn.className = 'btn';
         pendingHit = null;
         setStatus('Erkennung pausiert', 'ok');
         spiegelBtn.disabled = true;
+        // v2.3.146: Auto-REC stoppen falls aktiv
+        try { sessionRecMaybeStop(); } catch(e) { console.warn(e); }
     }
 });
 
@@ -4635,6 +4677,15 @@ function initWlanCamButtons() {
     const status = document.getElementById('camWlanStatus');
 
     if (isEtf150) {
+        // v2.3.146: Session-Recorder-Panel sichtbar machen + Save-Button-Handler
+        document.getElementById('camSessionRec').style.display = '';
+        document.getElementById('btnSaveSession').addEventListener('click', saveSessionJson);
+        // Auto-REC-Toggle aus localStorage wiederherstellen
+        const chk = document.getElementById('chkAutoRec');
+        chk.checked = localStorage.getItem('tp_auto_rec') === '1';
+        chk.addEventListener('change', () => {
+            localStorage.setItem('tp_auto_rec', chk.checked ? '1' : '0');
+        });
         // ETF150: Snapshot → POST /roc/photo/capture (kein Auth, mit SD-Karte)
         // REC → POST /roc/record/start | /roc/record/stop (kein Auth, plain HTTP)
         document.getElementById('btnCamSnapshot').addEventListener('click', async () => {
@@ -4718,6 +4769,161 @@ function initWlanCamButtons() {
             document.getElementById('btnCamRecOn').style.color       = '';
         });
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// v2.3.146: Session-Recorder — Auto-REC + Hit-Timestamps für ETF150
+//
+// Workflow:
+//   1. User aktiviert "🎬 Auto-REC bei Erkennung" Checkbox
+//   2. Klick auf "Erkennung starten" → /roc/record/start, recSession aktiv
+//   3. Jeder erkannte Treffer wird mit relativem Timestamp in recSession.hits
+//      gespiegelt (zusätzlich zur normalen hits[]-Liste)
+//   4. Klick auf "Erkennung pausieren" → /roc/record/stop, VID-Pfad ermitteln
+//   5. "Session-Log speichern" → JSON-Download mit Hit-Timestamps + VID-URL
+//
+// Offline-Auswertung: Skript in training_data/ liest JSON, lädt VID via
+// adb pull, schneidet bei jedem hit.t_ms Frames raus → Trainings-Set.
+// ──────────────────────────────────────────────────────────────────────
+
+function etf150DateStr() {
+    const d = new Date();
+    return d.getFullYear() +
+           String(d.getMonth() + 1).padStart(2, '0') +
+           String(d.getDate()).padStart(2, '0');
+}
+
+async function findMaxVidNumber(baseUrl, dateStr) {
+    // Coarse-Skip-Suche: erst in 10er-Schritten, dann letzte 10 fein
+    const probe = async (n) => {
+        const num = String(n).padStart(4, '0');
+        try {
+            const r = await fetch(`${baseUrl}/roc/file/${dateStr}/VID${num}.mp4`,
+                { method: 'HEAD', cache: 'no-store' });
+            return r.ok;
+        } catch(e) { return false; }
+    };
+    let lastOk = 0;
+    for (let n = 1; n <= 1000; n += 10) {
+        if (await probe(n)) lastOk = n;
+        else break;
+    }
+    if (lastOk === 0) {
+        // Maybe < 10? Probe 1-9
+        for (let n = 1; n < 10; n++) if (await probe(n)) lastOk = n;
+        return lastOk;
+    }
+    // Fein-Suche: lastOk+1 .. lastOk+10
+    for (let n = lastOk + 1; n <= lastOk + 10; n++) {
+        if (await probe(n)) lastOk = n;
+        else break;
+    }
+    return lastOk;
+}
+
+async function sessionRecMaybeStart() {
+    const chk = document.getElementById('chkAutoRec');
+    if (!chk || !chk.checked) return;
+    if (recSession) return; // already running
+    let gwIp = '192.168.0.1';
+    try { if (window.tpBridge) gwIp = window.tpBridge.getWifiGateway() || gwIp; } catch(_) {}
+    if (gwIp !== '192.168.10.1') return; // ETF150 only
+    const baseUrl = 'http://' + gwIp;
+    const dateStr = etf150DateStr();
+    const stEl = document.getElementById('sessionRecStatus');
+    if (stEl) stEl.textContent = '🎬 REC startet…';
+    try {
+        const prevMax = await findMaxVidNumber(baseUrl, dateStr);
+        const r = await fetch(baseUrl + '/roc/record/start',
+            { method: 'POST', cache: 'no-store' });
+        const j = await r.json();
+        if (!(j.ResponseStatus && j.ResponseStatus.statusCode === 0)) {
+            if (stEl) stEl.textContent = '⚠ REC start fehlgeschlagen';
+            return;
+        }
+        const disc = document.getElementById('discSel').value;
+        recSession = {
+            startMs: Date.now(),
+            prevMaxVid: prevMax,
+            dateStr: dateStr,
+            hits: [],
+            discipline: disc,
+            calib: calib ? {
+                cx: calib.cx, cy: calib.cy,
+                a: calib.a, b: calib.b,
+                angle: calib.angle, pxPerMm: calib.pxPerMm
+            } : null
+        };
+        if (stEl) stEl.textContent = `🎬 REC läuft (VID${String(prevMax + 1).padStart(4, '0')}.mp4)`;
+        // Save-Button erst nach Stop aktivierbar
+        document.getElementById('btnSaveSession').disabled = true;
+    } catch(e) {
+        if (stEl) stEl.textContent = '✗ REC: ' + e.message;
+        recSession = null;
+    }
+}
+
+async function sessionRecMaybeStop() {
+    if (!recSession) return;
+    let gwIp = '192.168.10.1';
+    const baseUrl = 'http://' + gwIp;
+    const stEl = document.getElementById('sessionRecStatus');
+    if (stEl) stEl.textContent = '⏹ REC stoppt…';
+    try {
+        await fetch(baseUrl + '/roc/record/stop',
+            { method: 'POST', cache: 'no-store' });
+        recSession.endMs = Date.now();
+        // Kamera braucht ~1.5s zum Finalisieren der Datei
+        await new Promise(r => setTimeout(r, 1500));
+        const newMax = await findMaxVidNumber(baseUrl, recSession.dateStr);
+        if (newMax > recSession.prevMaxVid) {
+            const num = String(newMax).padStart(4, '0');
+            recSession.vidPath = `/roc/file/${recSession.dateStr}/VID${num}.mp4`;
+        }
+        const dur = ((recSession.endMs - recSession.startMs) / 1000).toFixed(1);
+        const fname = recSession.vidPath ? recSession.vidPath.split('/').pop() : '?';
+        if (stEl) stEl.textContent = `✓ ${fname} (${dur}s, ${recSession.hits.length} Hits)`;
+        document.getElementById('btnSaveSession').disabled = false;
+    } catch(e) {
+        if (stEl) stEl.textContent = '⚠ Stop: ' + e.message;
+        document.getElementById('btnSaveSession').disabled = false;
+    }
+}
+
+function saveSessionJson() {
+    if (!recSession) return;
+    const data = {
+        version: APP_VERSION,
+        device: 'Apexel ETF150',
+        camera: { ip: '192.168.10.1' },
+        session: {
+            start_ms: recSession.startMs,
+            start_iso: new Date(recSession.startMs).toISOString(),
+            end_ms: recSession.endMs || Date.now(),
+            duration_s: ((recSession.endMs || Date.now()) - recSession.startMs) / 1000
+        },
+        rec: {
+            video_path: recSession.vidPath || null,
+            video_url:  recSession.vidPath ? 'http://192.168.10.1' + recSession.vidPath : null,
+            cover_url:  recSession.vidPath ? 'http://192.168.10.1' + recSession.vidPath + '_thumb' : null,
+            adb_pull_cmd: recSession.vidPath
+                ? `adb shell "curl -s -o /sdcard/.tp_session.mp4 'http://192.168.10.1${recSession.vidPath}'" && adb pull /sdcard/.tp_session.mp4 ./`
+                : null
+        },
+        discipline: recSession.discipline,
+        calibration: recSession.calib,
+        hits: recSession.hits
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const ts = new Date(recSession.startMs).toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `tp_session_${ts}_${recSession.discipline}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    const stEl = document.getElementById('sessionRecStatus');
+    if (stEl) stEl.textContent = `💾 Heruntergeladen: ${a.download}`;
 }
 
 // ⚙ Quick-Panel Toggle
