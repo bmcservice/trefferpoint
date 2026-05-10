@@ -1170,7 +1170,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.146';
+const APP_VERSION = '2.3.147';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3614,22 +3614,27 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         try {
             const gw = window.tpBridge.getWifiGateway();
             const rtspInput = document.getElementById('rtspUrl');
-            if (gw && !rtspInput.value) {
-                if (gw === '192.168.10.1') {
-                    // Apexel ETF150: kein Port, kein /tcp/chX
+            const isEtf150 = (gw === '192.168.10.1');
+            // Defensive: Komma in IP-Adressen reparieren (Locale-Tastatur-Bug)
+            // betrifft URLs aus localStorage älterer Sessions
+            if (rtspInput.value && /\d,\d/.test(rtspInput.value)) {
+                rtspInput.value = rtspInput.value.replace(/(\d+),(\d+)/g, '$1.$2');
+                localStorage.setItem('tp_rtsp_url', rtspInput.value);
+            }
+            if (isEtf150) {
+                // ETF150-Netz erkannt: URL ÜBERSCHREIBEN wenn aktuell nicht auf 192.168.10.x
+                const isEtfUrl = /192\.168\.10\.\d+/.test(rtspInput.value);
+                if (!isEtfUrl) {
                     rtspInput.value = 'rtsp://192.168.10.1/live';
-                    // HD/SD-Toggle für ETF150 ausblenden
-                    document.getElementById('btnRtspSd').style.display = 'none';
-                    document.getElementById('btnRtspHd').style.display = 'none';
-                    document.getElementById('rtspUrl').placeholder = 'rtsp://192.168.10.1/live';
-                } else {
-                    // Viidure SGK oder andere Kamera
-                    rtspInput.value = 'rtsp://' + gw + ':554/live/tcp/ch1';
+                    localStorage.setItem('tp_rtsp_url', rtspInput.value);
                 }
-            } else if (!rtspInput.value && gw === '192.168.10.1') {
-                // bereits Wert gesetzt aber ETF150 Netz → Toggle ausblenden
+                // HD/SD-Toggle für ETF150 immer ausblenden
                 document.getElementById('btnRtspSd').style.display = 'none';
                 document.getElementById('btnRtspHd').style.display = 'none';
+                document.getElementById('rtspUrl').placeholder = 'rtsp://192.168.10.1/live';
+            } else if (gw && !rtspInput.value) {
+                // SGK / andere: nur wenn Feld leer
+                rtspInput.value = 'rtsp://' + gw + ':554/live/tcp/ch1';
             }
         } catch(e) {}
     });
@@ -3661,7 +3666,12 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
 
     // RTSP starten
     document.getElementById('btnRtsp').addEventListener('click', () => {
-        const url = document.getElementById('rtspUrl').value.trim();
+        let url = document.getElementById('rtspUrl').value.trim();
+        // v2.3.147: Komma-in-IP-Adresse reparieren (Locale-Tastatur-Bug)
+        if (/\d,\d/.test(url)) {
+            url = url.replace(/(\d+),(\d+)/g, '$1.$2');
+            document.getElementById('rtspUrl').value = url;
+        }
         localStorage.setItem('tp_rtsp_url', url);
         const isMjpeg = /^https?:\/\//i.test(url);
         const lbl = isMjpeg ? 'MJPEG' : 'RTSP';
@@ -3684,9 +3694,15 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         setStatus('RTSP gestoppt', 'warn');
     });
 
-    // Gespeicherte RTSP-URL wiederherstellen
-    const savedRtsp = localStorage.getItem('tp_rtsp_url');
-    if (savedRtsp) document.getElementById('rtspUrl').value = savedRtsp;
+    // Gespeicherte RTSP-URL wiederherstellen — mit Komma-Sanitize (Locale-Tastatur-Bug)
+    let savedRtsp = localStorage.getItem('tp_rtsp_url');
+    if (savedRtsp) {
+        if (/\d,\d/.test(savedRtsp)) {
+            savedRtsp = savedRtsp.replace(/(\d+),(\d+)/g, '$1.$2');
+            localStorage.setItem('tp_rtsp_url', savedRtsp);
+        }
+        document.getElementById('rtspUrl').value = savedRtsp;
+    }
 
     // Kamera-Scanner — sucht nach Stream-Endpoints auf der Gateway-IP
     const scanBtn = document.getElementById('btnScanCam');
