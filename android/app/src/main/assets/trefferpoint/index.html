@@ -1170,7 +1170,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.150';
+const APP_VERSION = '2.3.151';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1329,6 +1329,10 @@ let overlayVisible = (localStorage.getItem('tp_overlay_visible') !== 'false');
 // Default: kleines Rechteck mittig unten (nur Uhrzeit-Bereich; Datum ändert sich nicht
 // während einer Schießserie und ist daher unkritisch).
 let timestampMaskVisible = (localStorage.getItem('tp_ts_mask') !== 'false');
+// v2.3.151: Cam-Type-Flag — true wenn aktive Cam die Apexel ETF150 ist.
+// ETF150 hat OSD per HTTP-API abschaltbar (siehe etf150OsdOff()), die SGK-Timestamp-Maske
+// ist dann irrelevant und wird vom Drawing unterdrückt + UI ausgeblendet.
+let camIsEtf = false;
 // Edit-Modus: User kann Mask via Drag verschieben (Pointer-Events auf Canvas)
 let tsMaskEditMode = false;
 let tsMaskDrag = null;  // { startX, startY, startCx, startCy } während Drag
@@ -1342,12 +1346,37 @@ function saveTsMask() {
 }
 
 /**
+ * v2.3.151: Multi-Cam-Aware UI-Mode.
+ * Bei ETF150 (active=true) wird die SGK-Timestamp-Maske im UI ausgeblendet
+ * (Apexel-Cam hat OSD-Off via HTTP-API), und ein PUT auf /roc/osd/param schaltet
+ * das Wasserzeichen serverseitig ab. Bei aktiv=false (SGK / andere) wird die
+ * Maske-UI wieder eingeblendet — der SGK-Pfad bleibt 1:1 wie heute.
+ */
+function applyEtfMode(active, gwIp) {
+    camIsEtf = !!active;
+    const tsBtn = document.getElementById('btnTsMask');
+    const tsSliders = document.getElementById('tsMaskSliders');
+    if (tsBtn) tsBtn.style.display = active ? 'none' : '';
+    if (tsSliders) tsSliders.style.display = active ? 'none' : '';
+    if (active && gwIp) {
+        // Wasserzeichen abschalten (kein Auth, freundlich gegenüber Power-Cycles).
+        // Schema reverse-engineered aus Apexel-App-DEX (OSDStatus.OSDWATER).
+        fetch('http://' + gwIp + '/roc/osd/param', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            cache: 'no-store',
+            body: JSON.stringify({ OSDStatus: { OSDWATER: 0 } })
+        }).catch(() => {});
+    }
+}
+
+/**
  * Berechnet das Mask-Rechteck in CANVAS-Koordinaten basierend auf der
  * aktuellen Bild-Transformation (Software-Zoom + Rotation).
  * Liefert {x0, y0, x1, y1} oder null wenn keine Mask aktiv.
  */
 function tsMaskCanvasRect(W, H) {
-    if (!timestampMaskVisible) return null;
+    if (!timestampMaskVisible || camIsEtf) return null;
     if (camRotation !== 0) {
         // Bei Rotation: vereinfacht, in Canvas-Mittelpunkt-Koordinaten rechnen
         // — wird im Render-Loop direkt mit der Rotation gezeichnet.
@@ -3634,9 +3663,13 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
                 document.getElementById('btnRtspSd').style.display = 'none';
                 document.getElementById('btnRtspHd').style.display = 'none';
                 document.getElementById('rtspUrl').placeholder = 'rtsp://192.168.10.1/live';
-            } else if (gw && !rtspInput.value) {
-                // SGK / andere: nur wenn Feld leer
-                rtspInput.value = 'rtsp://' + gw + ':554/live/tcp/ch1';
+                applyEtfMode(true, '192.168.10.1');
+            } else {
+                applyEtfMode(false, null);
+                if (gw && !rtspInput.value) {
+                    // SGK / andere: nur wenn Feld leer
+                    rtspInput.value = 'rtsp://' + gw + ':554/live/tcp/ch1';
+                }
             }
         } catch(e) {}
     });
@@ -3687,6 +3720,13 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         try { window.tpBridge.startRtsp(url); } catch(e) {
             setStatus('\u26a0 ' + lbl + '-Bridge-Fehler', 'warn');
             setMsg('' + e);
+        }
+        // v2.3.151: ETF150-Cam \u2014 OSD/Wasserzeichen abschalten + Maske-UI ausblenden.
+        // Bei jedem Stream-Start neu, weil Cam-Power-Cycle das Setting auf Default zur\u00fccksetzt.
+        if (/192\.168\.10\.1/.test(url)) {
+            applyEtfMode(true, '192.168.10.1');
+        } else {
+            applyEtfMode(false, null);
         }
         document.getElementById('btnRtspStop').style.display = '';
         initWlanCamButtons(); // v2.3.119: SGK-Kamera-Buttons aktivieren
@@ -4704,6 +4744,8 @@ function initWlanCamButtons() {
     const status = document.getElementById('camWlanStatus');
 
     if (isEtf150) {
+        // v2.3.151: OSD-Off + Maske-UI ausblenden (idempotent — auch wenn Mode-Switch das schon getan hat)
+        applyEtfMode(true, gwIp);
         // v2.3.146: Session-Recorder-Panel sichtbar machen + Save-Button-Handler
         document.getElementById('camSessionRec').style.display = '';
         document.getElementById('btnSaveSession').addEventListener('click', saveSessionJson);
