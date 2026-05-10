@@ -322,7 +322,12 @@ class RtspMediaCodecPipeline(
         var encodeCounter = 0L
         imageReader!!.setOnImageAvailableListener({ reader ->
             try {
-                val image = reader.acquireNextImage() ?: return@setOnImageAvailableListener
+                // v2.3.158: acquireLatestImage statt acquireNextImage — verwirft
+                // automatisch alle veralteten Frames im Reader-Buffer und liefert nur
+                // den aktuellsten. Damit bricht der Pipeline-Backlog auch dann zusammen,
+                // wenn JPEG-Encode zwischendurch zu langsam war (Codex-Empfehlung —
+                // Android-Doku warnt explizit vor acquireNextImage in Realtime-Pfaden).
+                val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
                 try {
                     encodeCounter++
                     val skip = (encodeCounter and 1L) == 0L  // jeden 2. Frame skippen
