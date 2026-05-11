@@ -1179,7 +1179,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.162';
+const APP_VERSION = '2.3.163';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -5148,16 +5148,34 @@ function saveSessionJson() {
         calibration: recSession.calib,
         hits: recSession.hits
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const jsonText = JSON.stringify(data, null, 2);
     const ts = new Date(recSession.startMs).toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
+    const filename = `tp_session_${ts}_${recSession.discipline}.json`;
+    const stEl = document.getElementById('sessionRecStatus');
+    // v2.3.163: Bevorzugt nativ via Bridge nach /sdcard/Download/ — der alte
+    // <a download="…" href="blob:…">.click()-Pfad funktioniert in der WebView
+    // ohne setDownloadListener gar nicht (gestern am Stand: keine JSON-Datei
+    // auf dem Tablet trotz Klick). Fallback nur für Browser-PWA.
+    try {
+        if (window.tpBridge && typeof window.tpBridge.saveJsonToDownloads === 'function') {
+            const res = window.tpBridge.saveJsonToDownloads(jsonText, filename);
+            if (res && !res.startsWith('ERROR')) {
+                if (stEl) stEl.textContent = `💾 Gespeichert: ${filename}`;
+                return;
+            }
+            if (stEl) stEl.textContent = `⚠ Save: ${res}`;
+            return;
+        }
+    } catch(e) { if (stEl) stEl.textContent = '⚠ ' + e.message; }
+    // Browser-PWA-Fallback: <a download>
+    const blob = new Blob([jsonText], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `tp_session_${ts}_${recSession.discipline}.json`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-    const stEl = document.getElementById('sessionRecStatus');
-    if (stEl) stEl.textContent = `💾 Heruntergeladen: ${a.download}`;
+    if (stEl) stEl.textContent = `💾 Heruntergeladen: ${filename}`;
 }
 
 // ⚙ Quick-Panel Toggle

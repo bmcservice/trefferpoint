@@ -22,6 +22,8 @@ import java.util.Locale
 import android.util.Base64
 import android.content.ContentValues
 import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.PixelCopy
 import android.view.Surface
 import android.view.SurfaceHolder
@@ -594,6 +596,51 @@ class MainActivity : AppCompatActivity() {
         fun captureCurrentFrame(): String {
             val jpeg = captureRtspSurfaceJpeg() ?: return ""
             return Base64.encodeToString(jpeg, Base64.NO_WRAP)
+        }
+
+        /**
+         * v2.3.163: Speichert einen JSON-String direkt in /sdcard/Download/<filename>.
+         * Vorher: WebView nutzte `<a download="…" href="blob:…">.click()`, was im
+         * WebView ohne setDownloadListener KOMPLETT IGNORIERT wird. Ergebnis:
+         * Session-Logs am Stand wurden nie auf dem Tablet abgelegt (User-Bericht
+         * "JSON-Save funktionierte nicht").
+         *
+         * Ab Android Q (API 29): MediaStore.Downloads (sauberer Pfad). Vorher:
+         * direkt nach Environment.getExternalStoragePublicDirectory(DOWNLOADS).
+         * Returns: erfolg-uri oder "ERROR: …".
+         */
+        @JavascriptInterface
+        fun saveJsonToDownloads(content: String, filename: String): String {
+            return try {
+                val bytes = content.toByteArray(Charsets.UTF_8)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    val resolver = contentResolver
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                        put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                        ?: return "ERROR: kein MediaStore-URI"
+                    resolver.openOutputStream(uri).use { it?.write(bytes) }
+                    values.clear()
+                    values.put(MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    AppLog.i(TAG, "Session-JSON gespeichert via MediaStore: $filename (${bytes.size}B) → $uri")
+                    uri.toString()
+                } else {
+                    @Suppress("DEPRECATION")
+                    val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    if (!dir.exists()) dir.mkdirs()
+                    val file = java.io.File(dir, filename)
+                    file.writeBytes(bytes)
+                    AppLog.i(TAG, "Session-JSON gespeichert (legacy): ${file.absolutePath} (${bytes.size}B)")
+                    file.absolutePath
+                }
+            } catch (e: Exception) {
+                AppLog.e(TAG, "saveJsonToDownloads fehlgeschlagen", e)
+                "ERROR: ${e.message ?: "unbekannt"}"
+            }
         }
 
         /**
