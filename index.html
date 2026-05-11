@@ -1183,7 +1183,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.165';
+const APP_VERSION = '2.3.166';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3413,10 +3413,14 @@ function ensureDetCanvas() {
 function getDetectionImageData() {
     // Im SurfaceView-Modus aus dem Off-Screen-Canvas lesen; sonst aus dem
     // visible Canvas wie im klassischen Pfad.
-    if (isNativeSurfaceRtspMode() && detCtx && imgEl && imgEl.naturalWidth > 0) {
+    // v2.3.166: ensureDetCanvas VOR der detCtx-Prüfung — sonst Henne-Ei
+    // (detCtx ist beim ersten Aufruf null → Fallback zum leeren visible-Canvas).
+    if (isNativeSurfaceRtspMode() && imgEl && imgEl.naturalWidth > 0) {
         ensureDetCanvas();
-        try { detCtx.drawImage(imgEl, 0, 0, detCanvas.width, detCanvas.height); } catch(e) {}
-        try { return detCtx.getImageData(0, 0, detCanvas.width, detCanvas.height); } catch(e) {}
+        if (detCtx) {
+            try { detCtx.drawImage(imgEl, 0, 0, detCanvas.width, detCanvas.height); } catch(e) {}
+            try { return detCtx.getImageData(0, 0, detCanvas.width, detCanvas.height); } catch(e) {}
+        }
     }
     try { return ctx.getImageData(0, 0, canvas.width, canvas.height); } catch(e) { return null; }
 }
