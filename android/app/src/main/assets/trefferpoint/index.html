@@ -1183,7 +1183,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.166';
+const APP_VERSION = '2.3.167';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3452,6 +3452,34 @@ function stopRtspSnapshotLoop() {
         console.log('[v2.3.162] RTSP-Snapshot-Loop gestoppt');
     }
 }
+
+// v2.3.167: Keep-Alive-Ping gegen ETF150-autoShutdown.
+// Symptom: Cam schaltet sich nach ~60-90s Inaktivität ab → Tablet wechselt
+// automatisch ins Heimnetz → Reconnect-Aufwand bei jedem Test-Zyklus.
+// Apexel-DEX hat AutoShutdownCmd in der Jieli-Lib (Binary-Protokoll, schwer
+// reverse-engineerbar). Einfacher: /ROC/System/keepAlive alle 30s anpingen,
+// das resettet den autoShutdown-Timer ohne persistente Cam-Änderung.
+let rtspKeepAliveInterval = null;
+function startEtfKeepAlive(gwIp) {
+    if (rtspKeepAliveInterval) return;
+    rtspKeepAliveInterval = setInterval(() => {
+        // Drei Endpunkte parallel — falls einer nicht den Timer resettet,
+        // die anderen tun's. Alle leichtgewichtig (kein Auth, kleine Response).
+        ['/ROC/System/keepAlive', '/roc/version', '/roc/power/status'].forEach(ep => {
+            fetch('http://' + gwIp + ep, { method: 'POST', cache: 'no-store' })
+                .catch(() => fetch('http://' + gwIp + ep, { method: 'GET', cache: 'no-store' }))
+                .catch(() => {});
+        });
+    }, 30000);
+    console.log('[v2.3.167] ETF150-KeepAlive gestartet (30s-Ping)');
+}
+function stopEtfKeepAlive() {
+    if (rtspKeepAliveInterval) {
+        clearInterval(rtspKeepAliveInterval);
+        rtspKeepAliveInterval = null;
+        console.log('[v2.3.167] ETF150-KeepAlive gestoppt');
+    }
+}
 function setupBridgeFrameReceiver() {
     bridgeReceiverReady = true;
     const nativeSurfaceMode = isNativeSurfaceRtspMode();
@@ -3907,6 +3935,8 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         if (!isMjpeg) document.body.classList.add('rtsp-live');
         // v2.3.162: 4-Hz-Snapshot-Loop f\u00fcr Auto-Detection im RTSP-Modus
         if (!isMjpeg) startRtspSnapshotLoop();
+        // v2.3.167: Keep-Alive-Ping gegen ETF150-autoShutdown
+        if (/192\.168\.10\.1/.test(url)) startEtfKeepAlive('192.168.10.1');
         // v2.3.151: ETF150-Cam \u2014 OSD/Wasserzeichen abschalten + Maske-UI ausblenden.
         // Bei jedem Stream-Start neu, weil Cam-Power-Cycle das Setting auf Default zur\u00fccksetzt.
         if (/192\.168\.10\.1/.test(url)) {
@@ -3926,6 +3956,8 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         document.body.classList.remove('rtsp-live');
         // v2.3.162: Snapshot-Loop stoppen
         stopRtspSnapshotLoop();
+        // v2.3.167: Keep-Alive stoppen
+        stopEtfKeepAlive();
         setStatus('RTSP gestoppt', 'warn');
     });
 
