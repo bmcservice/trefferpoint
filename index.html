@@ -1179,7 +1179,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.161';
+const APP_VERSION = '2.3.162';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3389,6 +3389,34 @@ function resetSession() {
 // gezeichnet → kein Tearing/Flackern beim Bildwechsel.
 let bridgeReceiverReady = false;
 let imgLoading = null;  // Back-Buffer: lädt gerade
+
+// v2.3.162: 4-Hz-Snapshot-Loop für RTSP-Modus.
+// Mit der SurfaceView-Architektur (v2.3.159+) rendert der HW-Decoder direkt ins
+// Hardware-Overlay — imgEl wird nicht mehr kontinuierlich befüllt. Für die
+// Treffer-Detection brauchen wir aber Pixel-Zugriff: tpBridge.captureCurrentFrame()
+// macht einen PixelCopy aus der SurfaceView (~5-10 ms) und liefert JPEG-Base64.
+// Wir laden's in imgLoading → onload-Swap → runDetection() im rAF-Loop sieht
+// aktuelle Pixel. 4 Hz = max 250 ms Sampling + ~50 ms Detection = sub-300 ms
+// Latenz vom Schuss zur Signalisierung (User-Anforderung: <1 s).
+let rtspSnapshotInterval = null;
+function startRtspSnapshotLoop() {
+    if (rtspSnapshotInterval) return;
+    rtspSnapshotInterval = setInterval(() => {
+        try {
+            const b64 = window.tpBridge && window.tpBridge.captureCurrentFrame && window.tpBridge.captureCurrentFrame();
+            if (!b64 || !imgLoading) return;
+            imgLoading.src = 'data:image/jpeg;base64,' + b64;
+        } catch(e) { /* ignore — Bridge fehlt im Browser-Preview */ }
+    }, 250);
+    console.log('[v2.3.162] RTSP-Snapshot-Loop gestartet (250ms / 4Hz)');
+}
+function stopRtspSnapshotLoop() {
+    if (rtspSnapshotInterval) {
+        clearInterval(rtspSnapshotInterval);
+        rtspSnapshotInterval = null;
+        console.log('[v2.3.162] RTSP-Snapshot-Loop gestoppt');
+    }
+}
 function setupBridgeFrameReceiver() {
     bridgeReceiverReady = true;
     const nativeSurfaceMode = isNativeSurfaceRtspMode();
@@ -3842,6 +3870,8 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         // v2.3.161: RTSP-Live nutzt native SurfaceView (HW-Overlay). Body + .camera-wrap
         // m\u00fcssen transparent sein, damit das Bild durchscheint.
         if (!isMjpeg) document.body.classList.add('rtsp-live');
+        // v2.3.162: 4-Hz-Snapshot-Loop f\u00fcr Auto-Detection im RTSP-Modus
+        if (!isMjpeg) startRtspSnapshotLoop();
         // v2.3.151: ETF150-Cam \u2014 OSD/Wasserzeichen abschalten + Maske-UI ausblenden.
         // Bei jedem Stream-Start neu, weil Cam-Power-Cycle das Setting auf Default zur\u00fccksetzt.
         if (/192\.168\.10\.1/.test(url)) {
@@ -3859,6 +3889,8 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         document.getElementById('btnRtspStop').style.display = 'none';
         // v2.3.161: HTML-Hintergrund wieder normal (für USB/MJPEG-Modi sichtbar)
         document.body.classList.remove('rtsp-live');
+        // v2.3.162: Snapshot-Loop stoppen
+        stopRtspSnapshotLoop();
         setStatus('RTSP gestoppt', 'warn');
     });
 
