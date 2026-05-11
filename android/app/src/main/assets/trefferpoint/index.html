@@ -1183,7 +1183,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.164';
+const APP_VERSION = '2.3.165';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2540,7 +2540,9 @@ function loop() {
     if (manualPointer) drawManualPointer();
 
     if (refWarmup > 0) {
-        try { refFrame = ctx.getImageData(0, 0, canvas.width, canvas.height); } catch(e) {}
+        // v2.3.165: getDetectionImageData() liest im SurfaceView-Modus aus detCtx
+        const img = getDetectionImageData();
+        if (img) refFrame = img;
         refWarmup--;
         if (refWarmup === 0) {
             setStatus(detecting ? 'Erkennung aktiv' : 'Referenz gesetzt · bereit', detecting ? 'hot' : 'ok');
@@ -2951,10 +2953,9 @@ function isInsideSpiegel(px, py) {
 }
 
 function runDetection() {
-    let cur;
-    try {
-        cur = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    } catch(e) {
+    // v2.3.165: getDetectionImageData() routet im SurfaceView-Modus auf detCtx
+    const cur = getDetectionImageData();
+    if (!cur) {
         detecting = false;
         setStatus('Pixel-Zugriff blockiert — Handy per USB verbinden', 'warn');
         return;
@@ -3391,6 +3392,34 @@ function resetSession() {
 // gezeichnet → kein Tearing/Flackern beim Bildwechsel.
 let bridgeReceiverReady = false;
 let imgLoading = null;  // Back-Buffer: lädt gerade
+
+// v2.3.165: Off-Screen-Canvas für Detection im SurfaceView-Modus.
+// Das visible Canvas (ctx) bleibt im SurfaceView-Modus leer (Codex' loop-Logik
+// zeichnet imgEl nicht ins Canvas, damit die SurfaceView durchscheint).
+// Aber runDetection liest per ctx.getImageData Pixel — bei leerem Canvas keine
+// Differenz möglich → 0 Hits trotz Schuss. Lösung: ein OffscreenCanvas, das
+// vom Snapshot-Loop (4 Hz) mit imgEl befüllt wird. runDetection liest aus
+// detCtx wenn SurfaceView-Modus, sonst aus ctx.
+let detCanvas = null;
+let detCtx = null;
+function ensureDetCanvas() {
+    if (!detCanvas || detCanvas.width !== canvas.width || detCanvas.height !== canvas.height) {
+        detCanvas = document.createElement('canvas');
+        detCanvas.width = canvas.width;
+        detCanvas.height = canvas.height;
+        detCtx = detCanvas.getContext('2d', { willReadFrequently: true });
+    }
+}
+function getDetectionImageData() {
+    // Im SurfaceView-Modus aus dem Off-Screen-Canvas lesen; sonst aus dem
+    // visible Canvas wie im klassischen Pfad.
+    if (isNativeSurfaceRtspMode() && detCtx && imgEl && imgEl.naturalWidth > 0) {
+        ensureDetCanvas();
+        try { detCtx.drawImage(imgEl, 0, 0, detCanvas.width, detCanvas.height); } catch(e) {}
+        try { return detCtx.getImageData(0, 0, detCanvas.width, detCanvas.height); } catch(e) {}
+    }
+    try { return ctx.getImageData(0, 0, canvas.width, canvas.height); } catch(e) { return null; }
+}
 
 // v2.3.162: 4-Hz-Snapshot-Loop für RTSP-Modus.
 // Mit der SurfaceView-Architektur (v2.3.159+) rendert der HW-Decoder direkt ins
