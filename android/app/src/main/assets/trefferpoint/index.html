@@ -136,6 +136,14 @@
             overflow: hidden;
         }
 
+        /* v2.3.161: Im RTSP-Live-Modus muss body + .camera-wrap transparent sein,
+           damit die native SurfaceView (HW-Decoder direkt ins Hardware-Overlay,
+           v2.3.159+) durch die WebView durchscheint. Sonst überdecken die schwarzen
+           HTML-Hintergründe das Live-Bild komplett — selbst wenn webView.setBackgroundColor
+           in Java auf TRANSPARENT steht. */
+        body.rtsp-live { background: transparent !important; }
+        body.rtsp-live .camera-wrap { background: transparent !important; }
+
         #canvas {
             max-width: 100%;
             max-height: 100%;
@@ -1171,7 +1179,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.159';
+const APP_VERSION = '2.3.161';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3831,6 +3839,9 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
             setStatus('\u26a0 ' + lbl + '-Bridge-Fehler', 'warn');
             setMsg('' + e);
         }
+        // v2.3.161: RTSP-Live nutzt native SurfaceView (HW-Overlay). Body + .camera-wrap
+        // m\u00fcssen transparent sein, damit das Bild durchscheint.
+        if (!isMjpeg) document.body.classList.add('rtsp-live');
         // v2.3.151: ETF150-Cam \u2014 OSD/Wasserzeichen abschalten + Maske-UI ausblenden.
         // Bei jedem Stream-Start neu, weil Cam-Power-Cycle das Setting auf Default zur\u00fccksetzt.
         if (/192\.168\.10\.1/.test(url)) {
@@ -3846,6 +3857,8 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
     document.getElementById('btnRtspStop').addEventListener('click', () => {
         try { window.tpBridge.stopRtsp(); } catch(e) {}
         document.getElementById('btnRtspStop').style.display = 'none';
+        // v2.3.161: HTML-Hintergrund wieder normal (für USB/MJPEG-Modi sichtbar)
+        document.body.classList.remove('rtsp-live');
         setStatus('RTSP gestoppt', 'warn');
     });
 
