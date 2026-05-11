@@ -153,24 +153,28 @@
         }
 
         .overlay-msg {
+            /* v2.3.164: oben statt unten (verhinderte 6-Uhr-Klick beim Kalibrieren),
+               und pointer-events:none — Klicks gehen durch auch wenn Banner kurz
+               über einem Klick-Bereich liegt. */
             position: absolute;
-            bottom: 24px;
+            top: 16px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(8,10,13,0.92);
+            background: rgba(8,10,13,0.85);
             border: 1px solid var(--accent);
             color: var(--accent);
-            padding: 9px 22px;
+            padding: 6px 14px;
             font-family: 'Share Tech Mono', monospace;
-            font-size: 13px;
-            letter-spacing: 0.08em;
-            pointer-events: auto;
+            font-size: 12px;
+            letter-spacing: 0.06em;
+            pointer-events: none;
             white-space: pre-wrap;
-            text-align: left;
-            max-width: 90%;
-            max-height: 70vh;
-            overflow: auto;
+            text-align: center;
+            max-width: 85%;
+            max-height: 25vh;
+            overflow: hidden;
             display: none;
+            z-index: 5;
         }
 
         .last-hit-pop {
@@ -1179,7 +1183,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.163';
+const APP_VERSION = '2.3.164';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2886,11 +2890,9 @@ canvas.addEventListener('click', e => {
 // --- Hit Detection ---
 function setRef() {
     if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
-    if (isNativeSurfaceRtspMode()) {
-        setStatus('RTSP-SurfaceView: Live-Erkennung pausiert — nutze Vergleich unten', 'warn');
-        setMsg('Referenz/Vergleich arbeitet im RTSP-Modus per Snapshot');
-        return;
-    }
+    // v2.3.164: Codex' Option-A-Sperre entfernt. Mit dem v2.3.162-Snapshot-Loop
+    // (4 Hz tpBridge.captureCurrentFrame → imgEl) funktioniert die normale
+    // setRef/runDetection-Pipeline auch im SurfaceView-Modus.
     try {
         ctx.getImageData(0, 0, 1, 1);
         refFrame = null;
@@ -4185,11 +4187,7 @@ document.getElementById('btnCalib').addEventListener('click', startCalib);
 document.getElementById('btnRef').addEventListener('click', setRef);
 
 document.getElementById('btnDetect').addEventListener('click', () => {
-    if (isNativeSurfaceRtspMode()) {
-        setStatus('RTSP-SurfaceView: kontinuierliche Erkennung aus — nutze Vergleich unten', 'warn');
-        setMsg('Plan B aktiv: Live-Bild direkt, Detection nur on-demand per Snapshot');
-        return;
-    }
+    // v2.3.164: Codex' Option-A-Sperre entfernt — siehe setRef().
     if (!refFrame && refWarmup === 0) setRef();
     detecting = !detecting;
     const btn = document.getElementById('btnDetect');
