@@ -1139,6 +1139,14 @@
               <input type="range" id="sensOuter" min="10" max="70" value="35">
               <span class="sens-val" id="sensOuterVal">35</span>
             </div>
+            <!-- v2.3.168: Bestätigungs-Modus — Tap-to-Confirm gegen False-Positives -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
+                <label style="font-size:11px;color:var(--text-dim);
+                    font-family:'Share Tech Mono',monospace;display:flex;align-items:center;gap:6px">
+                    <input type="checkbox" id="chkConfirmMode" style="margin:0">
+                    ✋ Bestätigung erforderlich (Tap im Canvas innerhalb 5s)
+                </label>
+            </div>
         </div>
 
         <!-- Score -->
@@ -1183,7 +1191,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.167';
+const APP_VERSION = '2.3.168';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1299,6 +1307,10 @@ const DISCS = {
         // Per-Disc (nur kk25, nicht gk25) → 9mm-Zählgenauigkeit bleibt erhalten.
         // Offline-Sweep: mpf=0.75 → .22=16 (+2 FP offline, aber Persistenz-Maske live filtert).
         minPtsFactor: 0.75,
+        // v2.3.168: Treffer mit Ring < minRing als verdächtig verwerfen.
+        // Bei Sportpistole-25m sind Ring 1-2 weit außerhalb des Spiegels — bei echten Schüssen
+        // sehr selten, viel häufiger durch Mündungsfeuer/Lichtsprung verursacht.
+        minRing: 3,
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -1320,6 +1332,8 @@ const DISCS = {
         // War: minPtsAbsolute=20 → killt 11/16 echte Treffer (live-Test leer/besc2 9mm).
         minPtsFactor: 0.65,
         minPtsAbsolute: 12,
+        // v2.3.168: Sportpistole-Mindest-Ring (siehe kk25-Kommentar)
+        minRing: 3,
         outer_mm: 100.0,
         ringe: [
             { r: 10, radius: 25.0 },  { r: 9, radius: 50.0 },
@@ -1409,7 +1423,16 @@ function isInTsMask(x, y, W, H) {
     const r = tsMaskCanvasRect(W, H);
     return r != null && x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
 }
-let refWarmup = 0;
+// v2.3.168: Warmup zeitbasiert + Median-Ref-Frame.
+// Vorher: 60 rAF-Frames (~1 s bei 60 Hz) → bei 4-Hz-Snapshot-Loop nur 4 Snapshots gelesen,
+// einzelner Wackler überlebte als Referenz → False-Positives ab t=0.42s.
+// Jetzt: 6 s real-time, dabei werden ALLE eintreffenden Frames akkumuliert,
+// am Ende durch Sample-Anzahl geteilt → robuster Mittel-Referenzframe.
+let refWarmupUntil = 0;          // Performance-now-Timestamp bis zu dem Warmup läuft
+let refAccum = null;             // Uint32Array Akkumulator für Pixel-Summen
+let refAccumSamples = 0;         // Anzahl akkumulierter Frames
+let refAccumW = 0, refAccumH = 0;
+function isWarmupActive() { return performance.now() < refWarmupUntil; }
 let pendingHit = null;
 let speechEnabled = true;
 let debugMode = false;
@@ -2539,15 +2562,38 @@ function loop() {
     // Manueller Pointer einzeichnen
     if (manualPointer) drawManualPointer();
 
-    if (refWarmup > 0) {
+    // v2.3.168: zeit­basiertes Warmup + Median-Accum
+    const _nowMs = performance.now();
+    if (_nowMs < refWarmupUntil) {
         // v2.3.165: getDetectionImageData() liest im SurfaceView-Modus aus detCtx
         const img = getDetectionImageData();
-        if (img) refFrame = img;
-        refWarmup--;
-        if (refWarmup === 0) {
-            setStatus(detecting ? 'Erkennung aktiv' : 'Referenz gesetzt · bereit', detecting ? 'hot' : 'ok');
-            setMsg('');
+        if (img) {
+            // Akku-Größe anpassen wenn neue Auflösung
+            if (!refAccum || refAccum.length !== img.data.length || refAccumW !== img.width) {
+                refAccum = new Uint32Array(img.data.length);
+                refAccumSamples = 0;
+                refAccumW = img.width; refAccumH = img.height;
+            }
+            const d = img.data;
+            for (let i = 0; i < d.length; i++) refAccum[i] += d[i];
+            refAccumSamples++;
+            // Live-Status: verbleibende Zeit
+            const remainSec = Math.ceil((refWarmupUntil - _nowMs) / 1000);
+            setMsg(`Bitte warten · stabilisiere Referenz (${remainSec}s · ${refAccumSamples} Samples)`);
         }
+    } else if (refAccum && refAccumSamples > 0) {
+        // Warmup gerade beendet: Median-Ref-Frame finalisieren
+        const out = new Uint8ClampedArray(refAccum.length);
+        const n = refAccumSamples;
+        for (let i = 0; i < refAccum.length; i++) out[i] = refAccum[i] / n;
+        try {
+            refFrame = new ImageData(out, refAccumW, refAccumH);
+            setStatus(detecting ? 'Erkennung aktiv' : 'Referenz gesetzt · bereit', detecting ? 'hot' : 'ok');
+            setMsg(`Referenz aus ${n} Frames gemittelt`);
+        } catch(e) {
+            console.error('[v2.3.168] ImageData-Create fehlgeschlagen:', e);
+        }
+        refAccum = null; refAccumSamples = 0;
     } else if (detecting && refFrame && calib && cooldown <= 0) {
         runDetection();
     }
@@ -2753,6 +2799,22 @@ async function autoCalib() {
             const avgBrightness = brightnessSum / sampleCount;
             const threshold = avgBrightness * 0.5;
 
+            // ─── v2.3.168: Center-of-Mass-Anchor ───
+            // Vor dem Gradient-Filter den Schwerpunkt aller dunklen Pixel berechnen.
+            // Bei "alle-Ringe-schwarz"-Disziplinen (KK25/GK25) ist der CoM eine sehr gute
+            // Schätzung des Spiegelzentrums — der Gradient-Filter wird dann RELATIV zu diesem
+            // Anker geprüft (statt zur fixen Bildmitte). Behebt den Bias bei Off-Center-Scheiben.
+            let comSumX = 0, comSumY = 0, comN = 0;
+            for (let y = 0; y < H; y += 4) {
+                for (let x = 0; x < W; x += 4) {
+                    const idx = (y * W + x) * 4;
+                    const bb = (data[idx] + data[idx+1] + data[idx+2]) / 3;
+                    if (bb < threshold) { comSumX += x; comSumY += y; comN++; }
+                }
+            }
+            const ANCHOR_X = comN > 100 ? comSumX / comN : W * 0.5;
+            const ANCHOR_Y = comN > 100 ? comSumY / comN : H * 0.5;
+
             // ─── Rand-Extraktion ───
             // Statt "alle dunklen Pixel" sammeln wir nur die Übergangs-Pixel (schwarz/weiß-Rand).
             // Ein Pixel ist Randkandidat wenn er dunkel ist UND ein naher Nachbar hell.
@@ -2775,10 +2837,10 @@ async function autoCalib() {
                     const bD = (data[iD] + data[iD+1] + data[iD+2]) / 3;
                     const bU = (data[iU] + data[iU+1] + data[iU+2]) / 3;
                     // Gradient-Filter: nur Pixel behalten, bei denen der Helligkeitsgradient
-                    // von der Bildmitte nach außen zeigt (= äußerer Spiegel-Rand).
+                    // vom CoM-Anker (v2.3.168) nach außen zeigt (= äußerer Spiegel-Rand).
                     // Verhindert, dass innere Ringgrenzen, Schusslöcher oder Beschriftungen
-                    // als Spiegel-Rand erkannt werden.
-                    const gradOk = (bR - bL) * (x - W * 0.5) + (bD - bU) * (y - H * 0.5) > 0;
+                    // als Spiegel-Rand erkannt werden — UND ist robust gegen Off-Center-Scheibe.
+                    const gradOk = (bR - bL) * (x - ANCHOR_X) + (bD - bU) * (y - ANCHOR_Y) > 0;
                     if (gradOk && (bR >= threshold || bL >= threshold || bD >= threshold || bU >= threshold)) {
                         edgePixels.push({ x, y });
                     }
@@ -2806,6 +2868,25 @@ async function autoCalib() {
             // Inlier sammeln (Punkte nahe dem RANSAC-Kreis = wahrscheinliche Spiegel-Randpixel)
             const inliers = edgePixels.filter(p =>
                 Math.abs(Math.hypot(p.x - ransac.cx, p.y - ransac.cy) - ransac.r) < 8);
+
+            // ─── v2.3.168: Symmetrie-Check über 4 Quadranten ───
+            // Ein gesunder Fit hat Inlier rundum verteilt. Halbkreis-Fits (z.B. wenn nur eine
+            // Spiegelseite Kanten lieferte) haben ≥80% in <3 Quadranten. Verhindert
+            // systematisch versetzte Kalibrierungen bei Off-Center-Scheiben.
+            const quadCount = [0, 0, 0, 0]; // NW, NE, SW, SE relativ zum Fit-Center
+            for (const p of inliers) {
+                const qi = (p.y < ransac.cy ? 0 : 2) + (p.x < ransac.cx ? 0 : 1);
+                quadCount[qi]++;
+            }
+            const totalInl = inliers.length;
+            const minPerQuad = totalInl * 0.10;  // jeder Quadrant ≥10% der Inlier
+            const quadsOk = quadCount.filter(c => c >= minPerQuad).length;
+            if (quadsOk < 3) {
+                setMsg(`⚠ Asymmetrischer Fit (Quadranten ${quadCount.join('/')}) — manuell kalibrieren`);
+                setStatus('Auto-Kalibrierung: asymmetrisch', 'warn');
+                calibFailFlashUntil = Date.now() + 2500;
+                return;
+            }
 
             // ─── Ellipsen-Fit auf Inlier ───
             // Besser als Kreisfit bei leicht schrägem Spektiv (Spiegel erscheint als Ellipse).
@@ -2887,6 +2968,11 @@ canvas.addEventListener('click', e => {
         confirmPointer();
         return;
     }
+    // v2.3.168: Bestätigungs-Modus — Canvas-Tap commit den pendenden Treffer
+    if (confirmPending) {
+        resolveConfirm(true);
+        return;
+    }
 });
 
 // --- Hit Detection ---
@@ -2899,9 +2985,11 @@ function setRef() {
         ctx.getImageData(0, 0, 1, 1);
         refFrame = null;
         pendingHit = null;
-        refWarmup = 60;
+        // v2.3.168: 6 s real-time Warmup, akkumuliert alle eintreffenden Frames
+        refWarmupUntil = performance.now() + 6000;
+        refAccum = null; refAccumSamples = 0;
         setStatus('Referenz stabilisiert sich…', 'warn');
-        setMsg('Bitte warten · Kamera stabilisiert…');
+        setMsg('Bitte warten · Kamera stabilisiert (~6s)…');
     } catch(e) {
         setStatus('Pixel-Zugriff blockiert — Handy per USB verbinden', 'warn');
     }
@@ -3046,18 +3134,32 @@ function runDetection() {
 
     const candidateCx = sumX / pts.length;
     const candidateCy = sumY / pts.length;
+    const nowMs = performance.now();
 
-    if (!pendingHit) {
-        pendingHit = { cx: candidateCx, cy: candidateCy };
+    // v2.3.168: 3-Frame-Bestätigung (vorher 2-Frame).
+    // Hit muss in 3 aufeinanderfolgenden Detection-Runs am ungefähr selben Ort
+    // erscheinen (Δ<25px). Filtert JPEG-Rausch-Cluster, Mündungsfeuer-Blitze und
+    // Single-Frame-Helligkeits-Wackler raus. TTL 1500 ms: wenn 3. Bestätigung
+    // nicht innerhalb 1.5s kommt, invalidieren.
+    if (!pendingHit || (nowMs - (pendingHit.t || 0) > 1500)) {
+        pendingHit = { cx: candidateCx, cy: candidateCy, count: 1, t: nowMs, sumX: candidateCx, sumY: candidateCy };
         return;
     }
     if (Math.hypot(candidateCx - pendingHit.cx, candidateCy - pendingHit.cy) > 25) {
-        pendingHit = { cx: candidateCx, cy: candidateCy };
+        // Spatiale Abweichung zu groß → mit neuer Position re-starten
+        pendingHit = { cx: candidateCx, cy: candidateCy, count: 1, t: nowMs, sumX: candidateCx, sumY: candidateCy };
         return;
     }
+    // Übereinstimmung — Counter hoch, gemittelte Position für nächste Vergleichsrunde
+    pendingHit.count++;
+    pendingHit.sumX += candidateCx; pendingHit.sumY += candidateCy;
+    pendingHit.cx = pendingHit.sumX / pendingHit.count;
+    pendingHit.cy = pendingHit.sumY / pendingHit.count;
+    pendingHit.t = nowMs;
+    if (pendingHit.count < 3) return;       // Erst nach 3 Bestätigungen weitermachen
 
-    const cx = (candidateCx + pendingHit.cx) / 2;
-    const cy = (candidateCy + pendingHit.cy) / 2;
+    const cx = pendingHit.cx;
+    const cy = pendingHit.cy;
     pendingHit = null;
 
     const disc = DISCS[document.getElementById('discSel').value];
@@ -3076,7 +3178,13 @@ function runDetection() {
     }
 
     // v2.3.136: Treffer außerhalb Ring 1 (ring===0) verwerfen — kein Fehlschuss-Spam
-    if (ring === 0) { pendingHit = null; return; }
+    // v2.3.168: zusätzlich disc.minRing (Sportpistole=3) — Ring 1-2 fast immer Mündungsfeuer/Lichtsprung
+    const _minRing = disc.minRing || 1;
+    if (ring === 0 || ring < _minRing) {
+        pendingHit = null;
+        if (debugMode) console.log(`[v2.3.168] Hit verworfen: ring=${ring} < minRing=${_minRing}`);
+        return;
+    }
 
     // v2.3.138: Spatial Exclusion — Loch das bereits erkannt wurde nicht nochmal zählen.
     // Exclusion-Zone = 2× Kaliber-Durchmesser (z.B. 11.2mm bei .22, 18mm bei 9mm).
@@ -3090,8 +3198,23 @@ function runDetection() {
     // v2.3.137: Zehntelwertung
     const ringDec = ringMitZehntel(scoreDist, ring, disc);
     const ringLabel = ringDec.toFixed(1);
-
     const deg = hitDeg(cx, cy);
+
+    // v2.3.168: Bestätigungs-Modus — wenn aktiviert, geht der Treffer in den Pending-Banner.
+    tryCommitHit({ cx, cy, ringDec, ringLabel, distMm, deg });
+}
+
+// v2.3.168: Hit-Commit-Logik aus runDetection extrahiert.
+// Bei Bestätigungs-Modus AN → Banner mit Tap/Auto-Discard-Timer; sonst direkt committen.
+let confirmPending = null;       // {payload, expiresAt, timeoutId}
+function tryCommitHit(payload) {
+    const cbEl = document.getElementById('chkConfirmMode');
+    if (cbEl && cbEl.checked) showConfirmBanner(payload);
+    else commitHit(payload);
+}
+
+function commitHit(payload) {
+    const { cx, cy, ringDec, ringLabel, distMm, deg } = payload;
     hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg });
     // v2.3.146: bei aktiver Session-Aufnahme den Hit auch dort mit Timestamp loggen
     if (recSession) {
@@ -3104,9 +3227,9 @@ function runDetection() {
             deg: Math.round(deg)
         });
     }
-    // v2.3.138: refWarmup statt sofortigem refFrame=cur → Bild stabilisiert sich
-    // über ~1.5s bevor nächste Erkennung möglich ist. Verhindert JPEG-Rauschen-Drift.
-    refWarmup = Math.round(displayFps * 1.5) || 40;
+    // v2.3.168: 1.5 s real-time Re-Stabilisierung + neuen Median-Akkumulator.
+    refWarmupUntil = performance.now() + 1500;
+    refAccum = null; refAccumSamples = 0;
     cooldown  = Math.round(displayFps * 3.0) || 75;
 
     updateScore();
@@ -3116,6 +3239,60 @@ function runDetection() {
     if (speechEnabled) {
         const clock = clockPos(cx, cy);
         speak(`${ringZuSprache(ringDec)} auf ${clock} Uhr`);
+    }
+}
+
+// Banner-Logik
+function showConfirmBanner(payload) {
+    // Vorigen Pending (noch nicht beantwortet) verwerfen, falls Hit dichter kam als 5s
+    if (confirmPending && confirmPending.timeoutId) clearTimeout(confirmPending.timeoutId);
+    const TIMEOUT_MS = 5000;
+    confirmPending = { payload, expiresAt: performance.now() + TIMEOUT_MS, timeoutId: null };
+    let banner = document.getElementById('confirmBanner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'confirmBanner';
+        banner.style.cssText = 'position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:10000;'
+            + 'background:rgba(40,40,40,0.96);border:2px solid #c8a84b;border-radius:8px;padding:10px 14px;'
+            + 'font-family:Share Tech Mono,monospace;color:#fff;font-size:14px;'
+            + 'display:flex;align-items:center;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,0.6);max-width:92vw';
+        banner.innerHTML = '<span id="confirmText">Treffer?</span>'
+            + '<button id="confirmYes" style="background:#3a8;color:#000;border:0;border-radius:4px;padding:6px 10px;font-weight:bold;font-size:14px;cursor:pointer">✓ Behalten</button>'
+            + '<button id="confirmNo" style="background:#a33;color:#fff;border:0;border-radius:4px;padding:6px 10px;font-size:14px;cursor:pointer">✗ Verwerfen</button>'
+            + '<span id="confirmCountdown" style="opacity:0.7;font-size:12px;min-width:24px;text-align:right">5s</span>';
+        document.body.appendChild(banner);
+        document.getElementById('confirmYes').addEventListener('click', () => resolveConfirm(true));
+        document.getElementById('confirmNo').addEventListener('click', () => resolveConfirm(false));
+    }
+    document.getElementById('confirmText').textContent = `${payload.ringLabel} · ${payload.distMm.toFixed(1)} mm`;
+    banner.style.display = 'flex';
+    if (speechEnabled) speak(`Treffer Ring ${payload.ringLabel} – bestätigen?`);
+    confirmPending.timeoutId = setTimeout(() => resolveConfirm(false), TIMEOUT_MS);
+    // Live-Countdown
+    const tickFn = () => {
+        if (!confirmPending) return;
+        const remain = Math.max(0, Math.ceil((confirmPending.expiresAt - performance.now()) / 1000));
+        const cd = document.getElementById('confirmCountdown');
+        if (cd) cd.textContent = remain + 's';
+        if (remain > 0 && confirmPending) setTimeout(tickFn, 250);
+    };
+    setTimeout(tickFn, 50);
+}
+
+function resolveConfirm(commit) {
+    if (!confirmPending) return;
+    const p = confirmPending.payload;
+    if (confirmPending.timeoutId) clearTimeout(confirmPending.timeoutId);
+    confirmPending = null;
+    const banner = document.getElementById('confirmBanner');
+    if (banner) banner.style.display = 'none';
+    if (commit) {
+        commitHit(p);
+    } else {
+        // Auch beim Verwerfen kurz warm halten — sonst läuft sofort wieder eine Detection
+        refWarmupUntil = performance.now() + 1500;
+        refAccum = null; refAccumSamples = 0;
+        cooldown = Math.round(displayFps * 1.5) || 40;
     }
 }
 
@@ -3168,6 +3345,7 @@ function addHitRow(ring, dist, n, deg) {
     const label = ring || 'M';
     const arrowStyle = deg != null ? ` style="transform:rotate(${deg.toFixed(0)}deg)"` : '';
     const arrowChar = '↑';
+    const MAX_HIT_ROWS = 60;  // v2.3.168: FIFO-Cap gegen DOM-Pollution bei langen Sessions
 
     // Panel-Liste
     const list = document.getElementById('hitList');
@@ -3179,6 +3357,8 @@ function addHitRow(ring, dist, n, deg) {
         <span class="hit-d">${dist}mm</span>
         <span class="hit-dir"${arrowStyle}>${arrowChar}</span>`;
     list.insertBefore(row, list.firstChild);
+    // FIFO-Trim
+    while (list.children.length > MAX_HIT_ROWS) list.removeChild(list.lastChild);
 
     // Treffer-Vollansicht
     document.getElementById('tvEmpty').style.display = 'none';
@@ -3191,6 +3371,8 @@ function addHitRow(ring, dist, n, deg) {
         <span class="tv-hit-d">${dist} mm</span>
         <span class="tv-hit-dir"${arrowStyle}>${arrowChar}</span>`;
     tvList.insertBefore(tvRow, tvList.firstChild.nextSibling);
+    // FIFO-Trim (firstChild ist Header — beibehalten)
+    while (tvList.children.length > MAX_HIT_ROWS + 1) tvList.removeChild(tvList.lastChild);
 
     // Letzter Treffer Karte
     const lc = document.getElementById('tvLastCard');
@@ -3366,7 +3548,7 @@ function resetSession() {
     if (stEl) stEl.textContent = '';
     hits = [];
     refFrame = null;
-    refWarmup = 0;
+    refWarmupUntil = 0; refAccum = null; refAccumSamples = 0;
     pendingHit = null;
     detecting = false;
     if (window.speechSynthesis) speechSynthesis.cancel();
@@ -3434,16 +3616,21 @@ function getDetectionImageData() {
 // aktuelle Pixel. 4 Hz = max 250 ms Sampling + ~50 ms Detection = sub-300 ms
 // Latenz vom Schuss zur Signalisierung (User-Anforderung: <1 s).
 let rtspSnapshotInterval = null;
+let _snapshotInFlight = false;  // v2.3.168: doppel-Trigger blocken wenn voriger Snapshot noch lädt
 function startRtspSnapshotLoop() {
     if (rtspSnapshotInterval) return;
     rtspSnapshotInterval = setInterval(() => {
         try {
+            // v2.3.168: wenn voriger src noch lädt, diesen Tick überspringen.
+            // Vermeidet WebView-Heap-Akkumulation bei langsamer JPEG-Decode-Zeit.
+            if (_snapshotInFlight || !imgLoading) return;
             const b64 = window.tpBridge && window.tpBridge.captureCurrentFrame && window.tpBridge.captureCurrentFrame();
-            if (!b64 || !imgLoading) return;
+            if (!b64) return;
+            _snapshotInFlight = true;
             imgLoading.src = 'data:image/jpeg;base64,' + b64;
         } catch(e) { /* ignore — Bridge fehlt im Browser-Preview */ }
     }, 250);
-    console.log('[v2.3.162] RTSP-Snapshot-Loop gestartet (250ms / 4Hz)');
+    console.log('[v2.3.168] RTSP-Snapshot-Loop gestartet (250ms / 4Hz, in-flight-guard)');
 }
 function stopRtspSnapshotLoop() {
     if (rtspSnapshotInterval) {
@@ -3493,6 +3680,7 @@ function setupBridgeFrameReceiver() {
     // (das Original-Image, an das wir hier gebunden haben, ist nach Swap = imgEl
     // und bekommt keinen neuen src mehr → WebView friert auf 1. Frame ein).
     const onFrameLoaded = () => {
+        _snapshotInFlight = false;  // v2.3.168: Loop kann nächsten Frame holen
         // Canvas-Größe syncen falls Auflösung wechselt
         if (imgLoading.naturalWidth > 0 &&
             (canvas.width !== imgLoading.naturalWidth || canvas.height !== imgLoading.naturalHeight)) {
@@ -3505,6 +3693,7 @@ function setupBridgeFrameReceiver() {
         imgLoading = tmp;
         // Re-Bind: das NEUE imgLoading (= alte imgEl) braucht den Handler für nächste Frames
         imgLoading.onload = onFrameLoaded;
+        imgLoading.onerror = () => { _snapshotInFlight = false; };  // sonst hängt der Guard
 
         if (firstFrameDone) return;
         firstFrameDone = true;
@@ -4253,14 +4442,15 @@ document.getElementById('btnRef').addEventListener('click', setRef);
 
 document.getElementById('btnDetect').addEventListener('click', () => {
     // v2.3.164: Codex' Option-A-Sperre entfernt — siehe setRef().
-    if (!refFrame && refWarmup === 0) setRef();
+    if (!refFrame && !isWarmupActive()) setRef();
     detecting = !detecting;
     const btn = document.getElementById('btnDetect');
     const spiegelBtn = document.getElementById('btnNewSpiegel');
     if (detecting) {
         btn.textContent = '⏸ Erkennung pausieren';
         btn.className = 'btn btn-active';
-        setStatus(refWarmup > 0 ? 'Referenz stabilisiert sich…' : 'Erkennung aktiv', refWarmup > 0 ? 'warn' : 'hot');
+        const warming = isWarmupActive();
+        setStatus(warming ? 'Referenz stabilisiert sich…' : 'Erkennung aktiv', warming ? 'warn' : 'hot');
         setMsg('');
         spiegelBtn.disabled = false;
         // v2.3.146: Auto-REC starten falls aktiv und ETF150 verbunden
@@ -4842,7 +5032,7 @@ canvas.addEventListener('pointerup', (e) => {
 document.getElementById('btnClearCalib').addEventListener('click', () => {
     calib = null;
     refFrame = null;
-    refWarmup = 0;
+    refWarmupUntil = 0; refAccum = null; refAccumSamples = 0;
     hits = [];
     pendingHit = null;
     detecting = false;
@@ -5170,16 +5360,21 @@ async function sessionRecMaybeStop() {
         await fetch(baseUrl + '/roc/record/stop',
             { method: 'POST', cache: 'no-store' });
         recSession.endMs = Date.now();
-        // Kamera braucht ~1.5s zum Finalisieren der Datei
-        await new Promise(r => setTimeout(r, 1500));
+        // v2.3.168: ETF150 auto-segmentiert in ~40s-Clips. Beim Stop alle seit Start
+        // erzeugten VIDs einsammeln (nicht nur den letzten). Damit hat die JSON eine
+        // komplette Liste statt nur "VID0001".
+        await new Promise(r => setTimeout(r, 1500));  // Letzte Datei finalisieren lassen
         const newMax = await findMaxVidNumber(baseUrl, recSession.dateStr);
-        if (newMax > recSession.prevMaxVid) {
-            const num = String(newMax).padStart(4, '0');
-            recSession.vidPath = `/roc/file/${recSession.dateStr}/VID${num}.mp4`;
+        recSession.vidPaths = [];
+        for (let n = recSession.prevMaxVid + 1; n <= newMax; n++) {
+            const num = String(n).padStart(4, '0');
+            recSession.vidPaths.push(`/roc/file/${recSession.dateStr}/VID${num}.mp4`);
         }
+        // Rückwärts-kompatibel: vidPath = erstes Element für alten Code
+        recSession.vidPath = recSession.vidPaths[0] || null;
         const dur = ((recSession.endMs - recSession.startMs) / 1000).toFixed(1);
-        const fname = recSession.vidPath ? recSession.vidPath.split('/').pop() : '?';
-        if (stEl) stEl.textContent = `✓ ${fname} (${dur}s, ${recSession.hits.length} Hits)`;
+        const nClips = recSession.vidPaths.length;
+        if (stEl) stEl.textContent = `✓ ${nClips} Clip${nClips !== 1 ? 's' : ''} (${dur}s, ${recSession.hits.length} Hits)`;
         document.getElementById('btnSaveSession').disabled = false;
     } catch(e) {
         if (stEl) stEl.textContent = '⚠ Stop: ' + e.message;
@@ -5200,11 +5395,19 @@ function saveSessionJson() {
             duration_s: ((recSession.endMs || Date.now()) - recSession.startMs) / 1000
         },
         rec: {
+            // v2.3.168: ETF150 auto-segmentiert in ~40s-Clips — alle einsammeln.
+            video_paths: recSession.vidPaths || (recSession.vidPath ? [recSession.vidPath] : []),
+            video_urls: (recSession.vidPaths || (recSession.vidPath ? [recSession.vidPath] : []))
+                .map(p => 'http://192.168.10.1' + p),
+            // Rückwärts-kompatibel: Single-Path-Felder (= erstes Element)
             video_path: recSession.vidPath || null,
             video_url:  recSession.vidPath ? 'http://192.168.10.1' + recSession.vidPath : null,
             cover_url:  recSession.vidPath ? 'http://192.168.10.1' + recSession.vidPath + '_thumb' : null,
             adb_pull_cmd: recSession.vidPath
                 ? `adb shell "curl -s -o /sdcard/.tp_session.mp4 'http://192.168.10.1${recSession.vidPath}'" && adb pull /sdcard/.tp_session.mp4 ./`
+                : null,
+            adb_pull_all: (recSession.vidPaths && recSession.vidPaths.length > 1)
+                ? recSession.vidPaths.map((p, i) => `adb shell "curl -s -o /sdcard/.tp_clip${i}.mp4 'http://192.168.10.1${p}'" && adb pull /sdcard/.tp_clip${i}.mp4 ./`).join(' && ')
                 : null
         },
         discipline: recSession.discipline,
@@ -5259,7 +5462,7 @@ document.getElementById('btnRotateCam').addEventListener('click', () => {
     camRotation = (camRotation + 90) % 360;
     calib = null;
     refFrame = null;
-    refWarmup = 0;
+    refWarmupUntil = 0; refAccum = null; refAccumSamples = 0;
     pendingHit = null;
     document.getElementById('calibStatus').textContent = 'Nicht kalibriert';
     document.getElementById('btnRotateCam').textContent = `↻ Bild drehen (${camRotation}°)`;
