@@ -1191,7 +1191,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.168';
+const APP_VERSION = '2.3.169';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3972,10 +3972,30 @@ async function startStream() {
 // --- Mode Toggle ---
 // Hilfsfunktion: alle laufenden Streams stoppen (RTSP-Bridge, MJPEG, getUserMedia)
 function stopAllActiveStreams() {
+    // v2.3.169: zentrale Cleanup-Stelle — Befund Code-Review 2026-05-13:
+    // rtspSnapshotInterval und rtspKeepAliveInterval blieben bei Mode-Wechsel laufen.
     if (mjpegAbort) { mjpegAbort.abort(); mjpegAbort = null; }
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
     try { if (window.tpBridge && window.tpBridge.stopRtsp) window.tpBridge.stopRtsp(); } catch(e) {}
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    // RTSP-Side-Channels (4-Hz-Snapshot-Loop + 30-s-KeepAlive)
+    try { stopRtspSnapshotLoop(); } catch(e) {}
+    try { stopEtfKeepAlive(); } catch(e) {}
+    // SurfaceView-Modus-Marker zurücksetzen (body.rtsp-live → transparent BG)
+    try { document.body.classList.remove('rtsp-live'); } catch(e) {}
+    // Detection-State: kein "Pending-Confirm-Banner" über Mode-Wechsel hinweg
+    try {
+        const banner = document.getElementById('confirmBanner');
+        if (banner) banner.style.display = 'none';
+        if (typeof confirmPending !== 'undefined' && confirmPending && confirmPending.timeoutId) {
+            clearTimeout(confirmPending.timeoutId);
+        }
+        if (typeof confirmPending !== 'undefined') confirmPending = null;
+    } catch(e) {}
+    // Warmup-Akku verwerfen — neuer Modus = neuer Referenzframe
+    refWarmupUntil = 0; refAccum = null; refAccumSamples = 0;
+    pendingHit = null;
+    _snapshotInFlight = false;
     appState = 'IDLE';
 }
 
