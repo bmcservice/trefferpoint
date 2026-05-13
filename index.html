@@ -1191,7 +1191,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.169';
+const APP_VERSION = '2.3.170';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1433,7 +1433,22 @@ let refAccum = null;             // Uint32Array Akkumulator für Pixel-Summen
 let refAccumSamples = 0;         // Anzahl akkumulierter Frames
 let refAccumW = 0, refAccumH = 0;
 function isWarmupActive() { return performance.now() < refWarmupUntil; }
+// v2.3.170: Snapshot-Generation Counter. Im SurfaceView-Modus läuft der rAF-Loop
+// mit 60Hz, der Snapshot-Loop aber mit 4Hz → ohne Generation-Check würde die
+// 3-Frame-Bestätigung dieselbe imageData 15× zählen und wäre wirkungslos.
+let snapshotGen = 0;
 let pendingHit = null;
+// v2.3.170: Diagnostik — abgelehnte Hits inkl. Grund für post-mortem Analyse
+let rejectedCandidates = [];     // [{t_ms, x, y, reason, ...}] pro Session
+function logRejected(reason, info) {
+    if (!recSession) return;
+    rejectedCandidates.push(Object.assign({
+        t_ms: Date.now() - recSession.startMs,
+        reason: reason
+    }, info));
+    // Soft-Cap gegen Memory bei langen Sessions (3000 Einträge ≈ 12 min @ 4Hz ohne Filter)
+    if (rejectedCandidates.length > 3000) rejectedCandidates.splice(0, 1000);
+}
 let speechEnabled = true;
 let debugMode = false;
 let debugCanvas = null, debugCtx = null;
@@ -2443,6 +2458,11 @@ function loop() {
     // 'stream' = MJPEG-URL, 'rtsp' = RTSP via Native-Bridge — beide nutzen imgEl statt mediaStream
     if (!mediaStream && inputMode !== 'stream' && inputMode !== 'rtsp') return;
 
+    // v2.3.170: In Non-SurfaceView-Modes liefert jeder rAF-Tick einen frischen
+    // Frame (USB-Cam @30fps, MJPEG-Stream). snapshotGen wird hier ge-tickt,
+    // damit die 3-Frame-Bestätigung in allen Modi funktioniert.
+    if (!isNativeSurfaceRtspMode()) snapshotGen++;
+
     // FPS
     frameCount++;
     const now = performance.now();
@@ -2499,6 +2519,28 @@ function loop() {
     if (calib && overlayVisible) {
         drawOverlay();
         hits.forEach((h, i) => drawHit(h, i + 1, i === hits.length - 1));
+    }
+
+    // v2.3.170: Pending-Hit-Counter Overlay (visuelles Feedback der 3-Frame-Bestätigung)
+    if (pendingHit && pendingHit.count >= 1) {
+        ctx.save();
+        const r = 16;
+        const gradColor = pendingHit.count === 1 ? 'rgba(255,180,40,' :
+                          pendingHit.count === 2 ? 'rgba(255,220,40,' :
+                                                   'rgba(120,255,60,';
+        ctx.strokeStyle = gradColor + '0.95)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(pendingHit.cx, pendingHit.cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = gradColor + '0.9)';
+        ctx.font = "bold 14px 'Share Tech Mono', monospace";
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pendingHit.count + '/3', pendingHit.cx, pendingHit.cy - r - 10);
+        ctx.restore();
     }
 
     // Roter Fehler-Flash nach fehlgeschlagener Kalibrierung
@@ -3121,13 +3163,17 @@ function runDetection() {
     }
 
     if (pts.length < 15 || pts.length > 2500) {
+        if (pts.length >= 5) logRejected('pts_out_of_range', { pts: pts.length });
         pendingHit = null;
         return;
     }
 
     // v2.3.135: Kreisförmigkeits-Filter — streifige Artefakte (b/a < 0.25) verwerfen
     // Einzelnes Einschussloch: b/a ≈ 0.7–1.0; Randtreffer ≥ 0.25; Rauschen / Licht < 0.25
-    if (kreisfoermigkeit(pts) < 0.25) {
+    const _kf = kreisfoermigkeit(pts);
+    if (_kf < 0.25) {
+        logRejected('not_circular', { pts: pts.length, kf: parseFloat(_kf.toFixed(2)),
+            x: Math.round(sumX/pts.length), y: Math.round(sumY/pts.length) });
         pendingHit = null;
         return;
     }
@@ -3137,26 +3183,36 @@ function runDetection() {
     const nowMs = performance.now();
 
     // v2.3.168: 3-Frame-Bestätigung (vorher 2-Frame).
-    // Hit muss in 3 aufeinanderfolgenden Detection-Runs am ungefähr selben Ort
-    // erscheinen (Δ<25px). Filtert JPEG-Rausch-Cluster, Mündungsfeuer-Blitze und
-    // Single-Frame-Helligkeits-Wackler raus. TTL 1500 ms: wenn 3. Bestätigung
-    // nicht innerhalb 1.5s kommt, invalidieren.
+    // v2.3.170: KORREKTUR — Count nur erhöhen wenn snapshotGen neue Generation hat.
+    // Vorher: rAF 60Hz × identische Snapshot-Daten → 3 Counts in 50 ms, wirkungslos.
+    // Jetzt: 3 Counts erfordern 3 verschiedene Source-Frames (~750ms im SurfaceView-Mode).
     if (!pendingHit || (nowMs - (pendingHit.t || 0) > 1500)) {
-        pendingHit = { cx: candidateCx, cy: candidateCy, count: 1, t: nowMs, sumX: candidateCx, sumY: candidateCy };
+        pendingHit = { cx: candidateCx, cy: candidateCy, count: 1, t: nowMs,
+                       sumX: candidateCx, sumY: candidateCy, lastGen: snapshotGen };
         return;
     }
     if (Math.hypot(candidateCx - pendingHit.cx, candidateCy - pendingHit.cy) > 25) {
-        // Spatiale Abweichung zu groß → mit neuer Position re-starten
-        pendingHit = { cx: candidateCx, cy: candidateCy, count: 1, t: nowMs, sumX: candidateCx, sumY: candidateCy };
+        // Spatiale Abweichung zu groß — mit neuer Position re-starten
+        // v2.3.170: dies als rejected loggen, falls bisheriger pendingHit count≥2 war
+        if (pendingHit.count >= 2) logRejected('spatial_jitter', {
+            x: Math.round(pendingHit.cx), y: Math.round(pendingHit.cy),
+            x_new: Math.round(candidateCx), y_new: Math.round(candidateCy),
+            jitter_px: Math.round(Math.hypot(candidateCx - pendingHit.cx, candidateCy - pendingHit.cy)),
+            count_before: pendingHit.count
+        });
+        pendingHit = { cx: candidateCx, cy: candidateCy, count: 1, t: nowMs,
+                       sumX: candidateCx, sumY: candidateCy, lastGen: snapshotGen };
         return;
     }
-    // Übereinstimmung — Counter hoch, gemittelte Position für nächste Vergleichsrunde
+    // v2.3.170: Generation-Guard — nur zählen wenn Source-Frame gewechselt
+    if (snapshotGen === pendingHit.lastGen) return;
+    pendingHit.lastGen = snapshotGen;
     pendingHit.count++;
     pendingHit.sumX += candidateCx; pendingHit.sumY += candidateCy;
     pendingHit.cx = pendingHit.sumX / pendingHit.count;
     pendingHit.cy = pendingHit.sumY / pendingHit.count;
     pendingHit.t = nowMs;
-    if (pendingHit.count < 3) return;       // Erst nach 3 Bestätigungen weitermachen
+    if (pendingHit.count < 3) return;       // Erst nach 3 verschiedenen Frames weitermachen
 
     const cx = pendingHit.cx;
     const cy = pendingHit.cy;
@@ -3181,6 +3237,8 @@ function runDetection() {
     // v2.3.168: zusätzlich disc.minRing (Sportpistole=3) — Ring 1-2 fast immer Mündungsfeuer/Lichtsprung
     const _minRing = disc.minRing || 1;
     if (ring === 0 || ring < _minRing) {
+        logRejected('below_min_ring', { x: Math.round(cx), y: Math.round(cy), ring, min_ring: _minRing,
+            distMm: parseFloat(distMm.toFixed(1)) });
         pendingHit = null;
         if (debugMode) console.log(`[v2.3.168] Hit verworfen: ring=${ring} < minRing=${_minRing}`);
         return;
@@ -3193,7 +3251,12 @@ function runDetection() {
         const dx = h.x - cx, dy = h.y - cy;
         return dx*dx + dy*dy < exclPx*exclPx;
     });
-    if (alreadyDetected) { pendingHit = null; return; }
+    if (alreadyDetected) {
+        logRejected('spatial_exclusion', { x: Math.round(cx), y: Math.round(cy), ring,
+            distMm: parseFloat(distMm.toFixed(1)) });
+        pendingHit = null;
+        return;
+    }
 
     // v2.3.137: Zehntelwertung
     const ringDec = ringMitZehntel(scoreDist, ring, disc);
@@ -3289,6 +3352,11 @@ function resolveConfirm(commit) {
     if (commit) {
         commitHit(p);
     } else {
+        // v2.3.170: User-verworfener Hit ist Gold für FP-Analyse
+        logRejected('user_discarded', {
+            x: Math.round(p.cx), y: Math.round(p.cy),
+            ring: p.ringDec, distMm: parseFloat(p.distMm.toFixed(1))
+        });
         // Auch beim Verwerfen kurz warm halten — sonst läuft sofort wieder eine Detection
         refWarmupUntil = performance.now() + 1500;
         refAccum = null; refAccumSamples = 0;
@@ -3681,6 +3749,7 @@ function setupBridgeFrameReceiver() {
     // und bekommt keinen neuen src mehr → WebView friert auf 1. Frame ein).
     const onFrameLoaded = () => {
         _snapshotInFlight = false;  // v2.3.168: Loop kann nächsten Frame holen
+        snapshotGen++;              // v2.3.170: neue Snapshot-Generation für 3-Frame-Confirm
         // Canvas-Größe syncen falls Auflösung wechselt
         if (imgLoading.naturalWidth > 0 &&
             (canvas.width !== imgLoading.naturalWidth || canvas.height !== imgLoading.naturalHeight)) {
@@ -5349,6 +5418,8 @@ async function sessionRecMaybeStart() {
             return;
         }
         const disc = document.getElementById('discSel').value;
+        // v2.3.170: bei neuem REC den Rejected-Log resetten (vorige Session wäre stale)
+        rejectedCandidates = [];
         recSession = {
             startMs: Date.now(),
             prevMaxVid: prevMax,
@@ -5432,7 +5503,14 @@ function saveSessionJson() {
         },
         discipline: recSession.discipline,
         calibration: recSession.calib,
-        hits: recSession.hits
+        hits: recSession.hits,
+        // v2.3.170: Diagnostik — abgelehnte Hits inkl. Grund. Für post-test FP-Analyse.
+        // Reasons: pts_out_of_range | not_circular | spatial_jitter | below_min_ring |
+        //          spatial_exclusion | user_discarded
+        rejected_candidates: rejectedCandidates,
+        rejected_summary: rejectedCandidates.reduce((acc, r) => {
+            acc[r.reason] = (acc[r.reason] || 0) + 1; return acc;
+        }, {})
     };
     const jsonText = JSON.stringify(data, null, 2);
     const ts = new Date(recSession.startMs).toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);

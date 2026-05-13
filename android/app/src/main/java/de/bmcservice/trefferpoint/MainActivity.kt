@@ -87,6 +87,20 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var rtspVideoHeight: Int = 0
     private var pendingRtspUrl: String? = null
 
+    // v2.3.170: Async PixelCopy-Producer (Code-Review P1 #4).
+    // Vorher (v2.3.169): captureRtspSurfaceJpeg() blockierte den JS-Thread für bis zu 1500 ms
+    // (latch.await), allokierte 8 MB Bitmap pro Call (1080p), startete/stoppte einen HandlerThread.
+    // Bei 4 Hz × 36 min = ~9k Allocs/Recycles = massiver GC-Druck + plausible Freeze-Quelle.
+    // Jetzt: dedicated worker thread + Bitmap-Reuse, latestJpeg via AtomicReference,
+    // JS-Call kehrt sofort zurück (gibt zuletzt fertige JPEG oder null) und triggert async den nächsten.
+    private val captureThread by lazy { HandlerThread("tp-pixelcopy").apply { start() } }
+    private val captureHandler by lazy { Handler(captureThread.looper) }
+    private var captureBitmap: Bitmap? = null
+    private var captureBitmapW = 0
+    private var captureBitmapH = 0
+    private val captureLatestJpeg = java.util.concurrent.atomic.AtomicReference<ByteArray?>(null)
+    private val captureInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
 
@@ -479,37 +493,58 @@ class MainActivity : AppCompatActivity() {
     private fun isRtspSurfaceUsable(): Boolean =
         this::surfaceView.isInitialized && rtspSurfaceReady && surfaceView.holder.surface?.isValid == true
 
+    /**
+     * v2.3.170: Async-Producer-Pattern.
+     * - JS-Call kehrt SOFORT zurück (max ~1 ms statt vorher bis 1500 ms blockend).
+     * - Letztes fertiges JPEG aus AtomicReference, kein latch.await mehr.
+     * - Bitmap einmalig allokiert + recycelt nur bei Auflösungs-Wechsel.
+     * - Worker-Thread läuft für die gesamte App-Lebensdauer.
+     * - Wenn voriger Capture noch läuft (captureInFlight), wird kein neuer angestoßen.
+     */
     private fun captureRtspSurfaceJpeg(): ByteArray? {
         if (!isRtspSurfaceUsable()) return null
         val width = rtspVideoWidth.takeIf { it > 0 } ?: surfaceView.width
         val height = rtspVideoHeight.takeIf { it > 0 } ?: surfaceView.height
         if (width <= 0 || height <= 0) return null
 
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val thread = HandlerThread("tp-pixelcopy").apply { start() }
-        return try {
-            val latch = java.util.concurrent.CountDownLatch(1)
-            var resultCode = PixelCopy.ERROR_UNKNOWN
-            PixelCopy.request(surfaceView, bitmap, { copyResult ->
-                resultCode = copyResult
-                latch.countDown()
-            }, Handler(thread.looper))
-            latch.await(1500, java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (resultCode != PixelCopy.SUCCESS) {
-                AppLog.w(TAG, "PixelCopy fehlgeschlagen: code=$resultCode")
-                null
-            } else {
-                val out = java.io.ByteArrayOutputStream(width * height / 4)
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                out.toByteArray()
-            }
-        } catch (e: Exception) {
-            AppLog.e(TAG, "captureRtspSurfaceJpeg fehlgeschlagen", e)
-            null
-        } finally {
-            thread.quitSafely()
-            bitmap.recycle()
+        // Bitmap-Reuse: nur neu allokieren wenn Auflösung wechselt
+        val bm = captureBitmap
+        if (bm == null || captureBitmapW != width || captureBitmapH != height) {
+            try { bm?.recycle() } catch (_: Exception) {}
+            captureBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            captureBitmapW = width
+            captureBitmapH = height
         }
+
+        // Nächsten Async-Capture anstoßen wenn keiner läuft
+        if (captureInFlight.compareAndSet(false, true)) {
+            try {
+                val target = captureBitmap!!
+                PixelCopy.request(surfaceView, target, { copyResult ->
+                    // Hintergrund-Thread: JPEG-Kompression nicht im PixelCopy-Callback-Thread blockieren
+                    captureHandler.post {
+                        try {
+                            if (copyResult == PixelCopy.SUCCESS) {
+                                val out = java.io.ByteArrayOutputStream(width * height / 4)
+                                target.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                                captureLatestJpeg.set(out.toByteArray())
+                            } else {
+                                AppLog.w(TAG, "PixelCopy fehlgeschlagen: code=$copyResult")
+                            }
+                        } catch (e: Exception) {
+                            AppLog.e(TAG, "JPEG-Kompression fehlgeschlagen", e)
+                        } finally {
+                            captureInFlight.set(false)
+                        }
+                    }
+                }, captureHandler)
+            } catch (e: Exception) {
+                AppLog.e(TAG, "PixelCopy.request fehlgeschlagen", e)
+                captureInFlight.set(false)
+            }
+        }
+        // Sofort den zuletzt fertigen JPEG zurückgeben (kann beim ersten Call null sein)
+        return captureLatestJpeg.get()
     }
 
     private fun startRtspPipeline(url: String) {
@@ -568,6 +603,10 @@ class MainActivity : AppCompatActivity() {
         try { cameraHelper?.closeCamera() } catch (_: Exception) {}
         try { cameraHelper?.release() } catch (_: Exception) {}
         try { tts?.stop(); tts?.shutdown() } catch (_: Exception) {}
+        // v2.3.170: Async PixelCopy-Producer aufräumen
+        try { captureBitmap?.recycle() } catch (_: Exception) {}
+        captureBitmap = null
+        try { captureThread.quitSafely() } catch (_: Exception) {}
     }
 
     // ── JavaScript-Bridge ────────────────────────────────────────────────────
