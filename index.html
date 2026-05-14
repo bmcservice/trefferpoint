@@ -1033,6 +1033,7 @@
             </canvas>
             <button class="btn btn-primary" id="btnAutoCalib" disabled>⊕ Auto-Erkennung</button>
             <button class="btn" id="btnCalib" disabled style="font-size:11px">✎ Manuell (3 Klicks)</button>
+            <button class="btn" id="btnCalibTap" style="font-size:11px;margin-top:3px" title="v2.3.171: schnelle Mitten-Korrektur ohne Neukalibrierung">📍 Mitte verschieben (Tap)</button>
             <div style="display:flex;gap:5px;margin-top:5px">
                 <button class="btn" id="btnToggleOverlay" style="flex:1;font-size:10px" title="Ring-Overlay ein/ausblenden">👁 Ringe</button>
                 <button class="btn" id="btnTsMask" style="flex:1;font-size:10px" title="Timestamp-Maske an/aus">🔳 Maske</button>
@@ -1129,12 +1130,12 @@
                 <button class="btn" id="btnDebug" style="flex:1;padding:5px;font-size:11px">⬛ Debug</button>
             <button class="btn" id="btnDemo">▶ Demo (10 Schuss)</button>
             </div>
-            <div class="sens-row">
-                <span class="sens-label">Empfindlichkeit</span>
+            <div class="sens-row" title="Helligkeits-Schwelle pro Pixel. Höher = strenger (weniger False-Positives). Niedriger = empfindlicher (mehr Treffer, aber auch mehr Rauschen).">
+                <span class="sens-label">Schwelle ↑=streng</span>
                 <input type="range" id="sens" min="10" max="70" value="28">
                 <span class="sens-val" id="sensVal">28</span>
             </div>
-            <div class="sens-row" id="sensOuterRow" style="display:none">
+            <div class="sens-row" id="sensOuterRow" style="display:none" title="Schwelle für die weiße Außenzone (Ringe 1-6 bei KK25/GK25)">
               <span class="sens-label">Schwelle Außen</span>
               <input type="range" id="sensOuter" min="10" max="70" value="35">
               <span class="sens-val" id="sensOuterVal">35</span>
@@ -1191,7 +1192,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.170';
+const APP_VERSION = '2.3.171';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1385,6 +1386,14 @@ function applyEtfMode(active, gwIp) {
     const tsSliders = document.getElementById('tsMaskSliders');
     if (tsBtn) tsBtn.style.display = active ? 'none' : '';
     if (tsSliders) tsSliders.style.display = active ? 'none' : '';
+    // v2.3.171: SW-Zoom + Pinch im SurfaceView-Modus visuell ausblenden
+    // (Funktion wäre da, aber wirkt nur auf Overlay-Ringe nicht auf Video → verwirrend)
+    try {
+        const zoomRow1 = document.getElementById('swZoom');
+        const zoomRow2 = document.getElementById('swZoomQ');
+        if (zoomRow1 && zoomRow1.parentElement) zoomRow1.parentElement.style.display = active ? 'none' : '';
+        if (zoomRow2 && zoomRow2.parentElement) zoomRow2.parentElement.style.display = active ? 'none' : '';
+    } catch(_) {}
     if (active && gwIp) {
         // Wasserzeichen abschalten — Body-Schema reverse-engineered aus Apexel-App
         // ETFClient.setOSDStatus(int) → JSONObject{"time":{"visible":<0|1>}}
@@ -2311,8 +2320,14 @@ function confirmPointer() {
         const angle = Math.atan2(calibPt2.y - calibPt1.y, calibPt2.x - calibPt1.x);
         // pxPerMm aus geometrischem Mittel (stimmt mit strokeRing-Formel überein)
         const pxPerMm = Math.sqrt(a * b) / disc.outer_mm;
-        calib = { cx: calibPt1.x, cy: calibPt1.y, a, b, angle, pxPerMm };
-        try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(_calibToSrc(calib))); } catch(e) {}
+        calib = { cx: calibPt1.x, cy: calibPt1.y, a, b, angle, pxPerMm, locked: true };
+        // v2.3.171: manuelle Kalib bekommt locked:true. Auto-Kalib + Stream-Restart
+        // respektieren das → die manuelle Kalib wird nicht mehr stillschweigend überschrieben.
+        try {
+            const src = _calibToSrc(calib);
+            src.locked = true;
+            localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(src));
+        } catch(e) {}
         calibPt2 = null;
         appState = 'CALIBRATED';
         manualPointer = null;
@@ -2695,17 +2710,50 @@ function drawOverlay() {
         }
     });
 
-    // Zentrum-Kreuz (klein, transparent)
+    // v2.3.171: Zentrum-Kreuz DEUTLICH sichtbar — User soll auf einen Blick sehen
+    // ob die Kalibrierung am richtigen Punkt sitzt.
+    // Farbe: 🔒 grün = locked (manuell geschützt), gelb = locked + Tap-Edit, rot = pxPerMm-Warn
+    const isLocked = (typeof calib.locked !== 'undefined' && calib.locked);
+    const inCalibEdit = (typeof calibTapEditMode !== 'undefined' && calibTapEditMode);
+    let crossColor, dotColor;
+    if (inCalibEdit) { crossColor = 'rgba(255,200,0,0.95)'; dotColor = 'rgba(255,200,0,1.0)'; }
+    else if (!ppmOk || manualMode) { crossColor = 'rgba(232,60,50,0.90)'; dotColor = 'rgba(255,80,60,1.0)'; }
+    else if (isLocked) { crossColor = 'rgba(40,200,90,0.95)'; dotColor = 'rgba(60,255,110,1.0)'; }
+    else { crossColor = 'rgba(120,220,140,0.80)'; dotColor = 'rgba(140,240,160,1.0)'; }
+
     ctx.save();
-    ctx.strokeStyle = isGreen ? 'rgba(40,185,80,0.70)' : 'rgba(220,60,50,0.75)';
-    ctx.lineWidth = 1.5;
-    const cs = Math.max(10, (a || 50) * 0.06);
+    ctx.strokeStyle = crossColor;
+    ctx.lineWidth = 2.5;
+    const cs = Math.max(18, (a || 50) * 0.10);
     ctx.beginPath();
     ctx.moveTo(cx - cs, cy); ctx.lineTo(cx + cs, cy);
     ctx.moveTo(cx, cy - cs); ctx.lineTo(cx, cy + cs);
     ctx.stroke();
+    // Mittel-Punkt als gefüllter Kreis
+    ctx.fillStyle = dotColor;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.fill();
+    // Mini-Lock-Symbol oben-rechts wenn locked
+    if (isLocked) {
+        ctx.font = "bold 14px 'Share Tech Mono', monospace";
+        ctx.fillStyle = crossColor;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🔒', cx + cs + 4, cy - cs - 4);
+    }
+    if (inCalibEdit) {
+        ctx.font = "bold 12px 'Share Tech Mono', monospace";
+        ctx.fillStyle = crossColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText('TAP zum Verschieben', cx, cy + cs + 6);
+    }
     ctx.restore();
 }
+
+// v2.3.171: Tap-to-correct Kalibrierungs-Modus
+let calibTapEditMode = false;
 
 // --- Auto-Kalibrierung mit Ellipsen-Fitting ---
 // Hilfsfunktion: Kreis durch 3 Punkte (für RANSAC)
@@ -2817,6 +2865,25 @@ function _refineEllipse(pts, cx_est, cy_est) {
 }
 
 async function autoCalib() {
+    // v2.3.171: Falls aktuelle Kalibrierung locked ist (= manuell vom User gesetzt),
+    // Auto-Kalib explizit verweigern. Sonst überschreibt sie still die manuelle.
+    if (calib && calib.locked) {
+        if (!confirm('Manuelle Kalibrierung ist aktiv und geschützt.\nAuto-Kalibrierung würde sie überschreiben.\nWirklich überschreiben?')) {
+            setMsg('Auto-Kalib abgebrochen — manuelle Kalib bleibt aktiv');
+            setStatus('Kalibrierung geschützt', 'ok');
+            return;
+        }
+        // User hat bestätigt — lock entfernen
+        calib.locked = false;
+        try {
+            const disc0 = DISCS[document.getElementById('discSel').value];
+            const saved = localStorage.getItem('tp_calib_' + disc0.id);
+            if (saved) {
+                const s = JSON.parse(saved); s.locked = false;
+                localStorage.setItem('tp_calib_' + disc0.id, JSON.stringify(s));
+            }
+        } catch(_) {}
+    }
     // Falls manuelle Kalibrierung aktiv: zurücksetzen + D-Pad ausblenden.
     // Sonst bleibt der Manuell-Modus stuck wenn der User zwischendurch Auto-Erkennung klickt.
     manualPointer = null;
@@ -2953,10 +3020,15 @@ async function autoCalib() {
             const disc = DISCS[document.getElementById('discSel').value];
             const pxPerMm = Math.sqrt(a * b) / disc.outer_mm;
 
-            calib = { cx, cy, a, b, angle, pxPerMm };
+            calib = { cx, cy, a, b, angle, pxPerMm, locked: false };
 
             // Persistent speichern — Spektiv steht fest, selbe Kalibrierung beim nächsten App-Start
-            try { localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(_calibToSrc(calib))); } catch(e) {}
+            // v2.3.171: locked=false explizit setzen, damit manuelle Kalib (locked=true) erkennbar bleibt
+            try {
+                const src = _calibToSrc(calib);
+                src.locked = false;
+                localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(src));
+            } catch(e) {}
 
             appState = 'CALIBRATED';
             const inlierRate = edgePixels.length > 0 ? inliers.length / edgePixels.length : 0;
@@ -3008,6 +3080,30 @@ canvas.addEventListener('click', e => {
         const p = getCanvasPointer(e);
         manualPointer = { x: p.x, y: p.y };
         confirmPointer();
+        return;
+    }
+    // v2.3.171: Tap-to-correct-Kalibrierung — verschiebt nur cx/cy, behält a/b/angle/pxPerMm
+    if (calibTapEditMode && calib) {
+        const p = getCanvasPointer(e);
+        const oldCx = calib.cx, oldCy = calib.cy;
+        calib.cx = p.x;
+        calib.cy = p.y;
+        // Persistieren (mit Lock — Tap-Korrektur ist auch eine manuelle Aktion)
+        calib.locked = true;
+        try {
+            const disc = DISCS[document.getElementById('discSel').value];
+            const src = _calibToSrc(calib);
+            src.locked = true;
+            localStorage.setItem('tp_calib_' + disc.id, JSON.stringify(src));
+        } catch(_) {}
+        // Modus verlassen
+        calibTapEditMode = false;
+        const btn = document.getElementById('btnCalibTap');
+        if (btn) { btn.classList.remove('btn-active'); btn.textContent = '📍 Mitte verschieben (Tap)'; }
+        const dx = (p.x - oldCx).toFixed(0), dy = (p.y - oldCy).toFixed(0);
+        setMsg(`✓ Zentrum verschoben (Δ${dx},${dy}px) · 🔒 geschützt`);
+        setStatus('Kalibrierung korrigiert', 'ok');
+        // Referenzframe wird durch das verschobene Zentrum nicht ungültig — kein resetWarmup nötig
         return;
     }
     // v2.3.168: Bestätigungs-Modus — Canvas-Tap commit den pendenden Treffer
@@ -3307,10 +3403,27 @@ function commitHit(payload) {
 
 // Banner-Logik
 function showConfirmBanner(payload) {
-    // Vorigen Pending (noch nicht beantwortet) verwerfen, falls Hit dichter kam als 5s
-    if (confirmPending && confirmPending.timeoutId) clearTimeout(confirmPending.timeoutId);
+    // v2.3.171: BUG-FIX. Wenn ein vorher angezeigter Banner noch nicht beantwortet
+    // wurde und ein neuer Hit kommt, war der alte vorher STILL überschrieben →
+    // weder commit noch user_discarded geloggt → unsichtbare FPs.
+    // Jetzt: alten Banner explizit als user_discarded loggen + ihn schließen.
+    if (confirmPending) {
+        const old = confirmPending;
+        if (old.timeoutId) clearTimeout(old.timeoutId);
+        try {
+            logRejected('banner_replaced', {
+                x: Math.round(old.payload.cx), y: Math.round(old.payload.cy),
+                ring: old.payload.ringDec,
+                distMm: parseFloat(old.payload.distMm.toFixed(1))
+            });
+        } catch(_) {}
+        confirmPending = null;
+    }
     const TIMEOUT_MS = 5000;
     confirmPending = { payload, expiresAt: performance.now() + TIMEOUT_MS, timeoutId: null };
+    // v2.3.171: solange Banner offen ist, Detection-Loop blockieren (cooldown)
+    // → keine neuen 3-Frame-Confirms während User klicken muss.
+    cooldown = Math.max(cooldown, Math.round(displayFps * (TIMEOUT_MS / 1000)) || 300);
     let banner = document.getElementById('confirmBanner');
     if (!banner) {
         banner = document.createElement('div');
@@ -3349,6 +3462,9 @@ function resolveConfirm(commit) {
     confirmPending = null;
     const banner = document.getElementById('confirmBanner');
     if (banner) banner.style.display = 'none';
+    // v2.3.171: cooldown war künstlich auf TIMEOUT verlängert solange Banner offen.
+    // Jetzt zurück auf normalen Wert.
+    cooldown = Math.min(cooldown, Math.round(displayFps * 1.5) || 40);
     if (commit) {
         commitHit(p);
     } else {
@@ -4047,9 +4163,10 @@ function stopAllActiveStreams() {
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
     try { if (window.tpBridge && window.tpBridge.stopRtsp) window.tpBridge.stopRtsp(); } catch(e) {}
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    // RTSP-Side-Channels (4-Hz-Snapshot-Loop + 30-s-KeepAlive)
+    // RTSP-Side-Channels (4-Hz-Snapshot-Loop + 30-s-KeepAlive + REC-Watchdog)
     try { stopRtspSnapshotLoop(); } catch(e) {}
     try { stopEtfKeepAlive(); } catch(e) {}
+    try { stopRecVerifyWatchdog(); } catch(e) {}
     // SurfaceView-Modus-Marker zurücksetzen (body.rtsp-live → transparent BG)
     try { document.body.classList.remove('rtsp-live'); } catch(e) {}
     // Detection-State: kein "Pending-Confirm-Banner" über Mode-Wechsel hinweg
@@ -4410,10 +4527,11 @@ function applyDiscPresets() {
             calib = _calibFromSrc(JSON.parse(saved));  // Quell→Canvas-Koordinaten (aktueller Zoom)
             appState = 'CALIBRATED';
             document.getElementById('btnDetect').disabled = false;
+            const lockIcon = calib.locked ? '🔒 ' : '';   // v2.3.171: locked-Anzeige
             document.getElementById('calibStatus').textContent =
-                `✓ Gespeichert · ${disc.name} · r=${(calib.a||0).toFixed(0)}px · ${(calib.pxPerMm||0).toFixed(2)} px/mm`;
-            setStatus('Kalibrierung geladen', 'ok');
-            setMsg('Gespeicherte Kalibrierung geladen — Referenzframe setzen oder neu kalibrieren');
+                `${lockIcon}✓ Gespeichert · ${disc.name} · r=${(calib.a||0).toFixed(0)}px · ${(calib.pxPerMm||0).toFixed(2)} px/mm`;
+            setStatus(calib.locked ? 'Manuelle Kalibrierung geladen (geschützt)' : 'Kalibrierung geladen', 'ok');
+            setMsg(calib.locked ? '🔒 Manuelle Kalib aktiv — Auto-Kalib würde nachfragen' : 'Gespeicherte Kalibrierung geladen — Referenzframe setzen oder neu kalibrieren');
         } catch(e) {
             calib = null;
             document.getElementById('calibStatus').textContent = 'Nicht kalibriert';
@@ -4462,6 +4580,25 @@ function _calibToSrc(c) {
 }
 
 function applySwZoom(v) {
+    // v2.3.171: Im SurfaceView-Modus skaliert SW-Zoom nur das Canvas-Overlay,
+    // nicht das HW-Overlay-Video → optisch verwirrend. Hier explizit no-op +
+    // Hinweis im Status. UI-Element ist zwar versteckt aber Pinch-Geste oder
+    // Slider-Trigger könnten trotzdem hier ankommen.
+    if (typeof isNativeSurfaceRtspMode === 'function' && isNativeSurfaceRtspMode()) {
+        // Werte zurückstellen damit User-UI nicht "stehen bleibt"
+        try {
+            const el  = document.getElementById('swZoom');
+            const elQ = document.getElementById('swZoomQ');
+            if (el)  el.value = '1.0';
+            if (elQ) elQ.value = '1.0';
+            const v1 = document.getElementById('swZoomVal');
+            const v2 = document.getElementById('swZoomQVal');
+            if (v1) v1.textContent = '1.0×';
+            if (v2) v2.textContent = '1.0×';
+        } catch(_) {}
+        setMsg('ℹ Zoom in RTSP/SurfaceView-Modus nicht verfügbar — am Spektiv/an der Cam zoomen');
+        return;
+    }
     // Kalibrierung mitziehen: calib.cx/cy/a/b sind Canvas-Koordinaten (zoom-abhängig).
     // Transformationsformel: canvas_x = (src_x - W/2) * sz + W/2
     // → Beim Zoom-Wechsel: new_canvas_x = (old_canvas_x - W/2) * (v/old) + W/2
@@ -4495,9 +4632,11 @@ document.getElementById('swZoomQ').addEventListener('input', e => applySwZoom(pa
 
 // v2.3.119: Pinch-to-Zoom auf dem Kamerabild (zwei Finger spreizen/zusammenziehen)
 // Ändert softwareZoom stufenlos. Tablet-native Geste, kein Button nötig.
+// v2.3.171: Im SurfaceView-Modus deaktiviert (wirkt sonst nur auf Overlay-Ringe).
 {
     let _pinchDist = 0, _pinchZoom = 1.0;
     canvas.addEventListener('touchstart', e => {
+        if (typeof isNativeSurfaceRtspMode === 'function' && isNativeSurfaceRtspMode()) return;
         if (e.touches.length === 2) {
             _pinchDist = Math.hypot(
                 e.touches[0].clientX - e.touches[1].clientX,
@@ -4508,6 +4647,7 @@ document.getElementById('swZoomQ').addEventListener('input', e => applySwZoom(pa
         }
     }, { passive: false });
     canvas.addEventListener('touchmove', e => {
+        if (typeof isNativeSurfaceRtspMode === 'function' && isNativeSurfaceRtspMode()) return;
         if (e.touches.length !== 2) return;
         const dist = Math.hypot(
             e.touches[0].clientX - e.touches[1].clientX,
@@ -4528,6 +4668,28 @@ document.getElementById('btnEnumCam').addEventListener('click', enumCameras);
 document.getElementById('btnAutoCalib').addEventListener('click', () => { void autoCalib(); });
 document.getElementById('btnCalib').addEventListener('click', startCalib);
 document.getElementById('btnRef').addEventListener('click', setRef);
+
+// v2.3.171: Tap-to-correct Kalibrierungs-Modus.
+// Toggle EIN: nächster Tap im Canvas verschiebt nur cx/cy (a/b/angle/pxPerMm bleiben).
+// Ideal wenn Auto-Kalib einen Off-Center-Fit produziert hat — Schnellkorrektur statt Neukalibrierung.
+const _btnCalibTap = document.getElementById('btnCalibTap');
+if (_btnCalibTap) {
+    _btnCalibTap.addEventListener('click', () => {
+        if (!calib) { setMsg('Erst kalibrieren'); return; }
+        calibTapEditMode = !calibTapEditMode;
+        if (calibTapEditMode) {
+            _btnCalibTap.classList.add('btn-active');
+            _btnCalibTap.textContent = '📍 TAP-Modus AKTIV — Tap auf Spiegelmitte';
+            setMsg('📍 Tippe auf die echte Spiegelmitte — Kalibrierungs-Zentrum wird verschoben');
+            setStatus('Kalibrierung: Mitte verschieben', 'warn');
+        } else {
+            _btnCalibTap.classList.remove('btn-active');
+            _btnCalibTap.textContent = '📍 Mitte verschieben (Tap)';
+            setMsg('Tap-Korrektur abgebrochen');
+            setStatus('Bereit', 'ok');
+        }
+    });
+}
 
 document.getElementById('btnDetect').addEventListener('click', () => {
     // v2.3.164: Codex' Option-A-Sperre entfernt — siehe setRef().
@@ -5370,13 +5532,21 @@ function etf150DateStr() {
 }
 
 async function findMaxVidNumber(baseUrl, dateStr) {
-    // Coarse-Skip-Suche: erst in 10er-Schritten, dann letzte 10 fein
+    // v2.3.171: KRITISCHER BUG-FIX. ETF150 antwortet auf HEAD-Requests immer mit
+    // 405 Method Not Allowed. Vorher (v2.3.146+): probe() nutzte HEAD → r.ok=false
+    // für ALLE Dateien → vidPaths blieb leer obwohl die Cam aufgenommen hatte.
+    // Beim Praxistest 2026-05-14 sind so 50 min Video (138 MB) "verloren" gegangen.
+    // Jetzt: GET mit Range: bytes=0-0 — 1 Byte laden, schließen. Schnell und funktioniert.
     const probe = async (n) => {
         const num = String(n).padStart(4, '0');
         try {
-            const r = await fetch(`${baseUrl}/roc/file/${dateStr}/VID${num}.mp4`,
-                { method: 'HEAD', cache: 'no-store' });
-            return r.ok;
+            const r = await fetch(`${baseUrl}/roc/file/${dateStr}/VID${num}.mp4`, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: { 'Range': 'bytes=0-0' }
+            });
+            // 200 (volle Antwort) ODER 206 (Partial Content, was wir mit Range erwarten)
+            return r.status === 200 || r.status === 206;
         } catch(e) { return false; }
     };
     let lastOk = 0;
@@ -5435,14 +5605,49 @@ async function sessionRecMaybeStart() {
         if (stEl) stEl.textContent = `🎬 REC läuft (VID${String(prevMax + 1).padStart(4, '0')}.mp4)`;
         // Save-Button erst nach Stop aktivierbar
         document.getElementById('btnSaveSession').disabled = true;
+
+        // v2.3.171: Live-Verifikation alle 10s. Wenn nach 25s die Cam keine neue
+        // VID erzeugt hat → User am Stand sofort warnen (statt 36 min später JSON-Export).
+        startRecVerifyWatchdog(baseUrl, prevMax, stEl);
     } catch(e) {
         if (stEl) stEl.textContent = '✗ REC: ' + e.message;
         recSession = null;
     }
 }
 
+// v2.3.171: REC-Watchdog. Checkt alle 10 s ob die ETF150 wirklich VIDs schreibt.
+// Wenn nicht (Cam meldet OK, schreibt aber nichts — am 2026-05-14 fast passiert
+// weil findMaxVidNumber HEAD nutzte), User sofort am Stand warnen.
+let recVerifyInterval = null;
+function startRecVerifyWatchdog(baseUrl, prevMax, stEl) {
+    if (recVerifyInterval) clearInterval(recVerifyInterval);
+    const startMs = Date.now();
+    let lastSeenMax = prevMax;
+    recVerifyInterval = setInterval(async () => {
+        if (!recSession) { stopRecVerifyWatchdog(); return; }
+        const elapsedSec = Math.floor((Date.now() - startMs) / 1000);
+        try {
+            const curMax = await findMaxVidNumber(baseUrl, recSession.dateStr);
+            if (curMax > lastSeenMax) {
+                // Wir sehen eine neue VID — alles gut
+                lastSeenMax = curMax;
+                if (stEl) stEl.textContent = `🎬 REC OK · ${curMax - prevMax} Clip${curMax-prevMax!==1?'s':''} · ${elapsedSec}s`;
+            } else if (elapsedSec >= 25 && curMax === prevMax) {
+                // Nach 25 s noch keine neue Datei → vermutlich silent fail
+                if (stEl) stEl.textContent = `⚠ REC: ${elapsedSec}s ohne neue VID — SD-Karte? Cam-State?`;
+                // Status-Bar (oberer Bereich) auch warnen, damit User es nicht übersieht
+                try { setStatus('⚠ Auto-REC schreibt keine Datei — SD prüfen', 'warn'); } catch(_){}
+            }
+        } catch(e) { /* Cam-Reachability-Fehler ignorieren (transient) */ }
+    }, 10000);
+}
+function stopRecVerifyWatchdog() {
+    if (recVerifyInterval) { clearInterval(recVerifyInterval); recVerifyInterval = null; }
+}
+
 async function sessionRecMaybeStop() {
     if (!recSession) return;
+    stopRecVerifyWatchdog();
     let gwIp = '192.168.10.1';
     const baseUrl = 'http://' + gwIp;
     const stEl = document.getElementById('sessionRecStatus');
@@ -5586,7 +5791,25 @@ document.getElementById('btnDebug').addEventListener('click', () => {
     if (di) di.style.display = debugMode ? '' : 'none';
     if (sor) sor.style.display = debugMode ? '' : 'none';
     if (!debugMode && dc) { const c = dc.getContext('2d'); c.clearRect(0,0,dc.width,dc.height); }
+    // v2.3.171: Dev-only UI nur im Debug-Modus zeigen — am Stand stört das sonst.
+    applyDevUiVisibility(debugMode);
 });
+
+// v2.3.171: zentrale Steuerung der Dev-/Test-UI
+function applyDevUiVisibility(devOn) {
+    const targets = ['tabTest', 'btnExport', 'btnExportTv', 'btnDemo', 'btnScanSubnet', 'btnAutoOpt'];
+    targets.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = devOn ? '' : 'none';
+    });
+    // Persistieren damit User-Wahl nach Reload bleibt
+    try { localStorage.setItem('tp_dev_ui', devOn ? '1' : '0'); } catch(_) {}
+}
+// Default beim Laden: aus (außer User hatte explizit AN)
+try {
+    const saved = localStorage.getItem('tp_dev_ui');
+    applyDevUiVisibility(saved === '1');
+} catch(_) { applyDevUiVisibility(false); }
 
 document.getElementById('btnReset').addEventListener('click', resetSession);
 
@@ -5594,16 +5817,9 @@ document.getElementById('btnAutoOpt').addEventListener('click', autoOptimizeCame
 
 document.getElementById('btnDemo').addEventListener('click', runDemo);
 
-// Buttons nur in Android-APK sichtbar
-(function() {
-    const inAndroidApp = typeof window.tpBridge !== 'undefined' &&
-        window.tpBridge.isAndroidApp && window.tpBridge.isAndroidApp();
-    if (inAndroidApp) {
-        document.getElementById('btnExport').style.display = '';
-        document.getElementById('btnExportTv').style.display = '';
-        document.getElementById('btnScanSubnet').style.display = '';
-    }
-})();
+// v2.3.171: Buttons früher in Android-APK direkt visible gesetzt — jetzt durch
+// applyDevUiVisibility() gesteuert (siehe btnDebug-Handler). Default: aus.
+// Damit die Dev-/Test-Buttons im Stand-Workflow nicht stören.
 document.getElementById('btnExportTv').addEventListener('click', () => {
     document.getElementById('btnExport').click();
 });
