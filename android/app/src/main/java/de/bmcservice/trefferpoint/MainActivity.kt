@@ -101,6 +101,14 @@ class MainActivity : AppCompatActivity() {
     private val captureLatestJpeg = java.util.concurrent.atomic.AtomicReference<ByteArray?>(null)
     private val captureInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    // v2.3.173 / Ebene-1-Diagnostik: Detection-Input-Capture.
+    // Speichert GENAU die PixelCopy-Frames die der Erkennung zugrunde liegen
+    // (nicht das separate ETF150-SD-Video). Dateiname = epoch-ms → 1:1-Abgleich
+    // mit JSON-Hit-Timestamps (session.start_ms + t_ms). Nur bei Diagnose-Modus.
+    @Volatile private var detCaptureDir: java.io.File? = null
+    @Volatile private var detCaptureCount: Int = 0
+    private var detLastSavedEpoch: Long = 0L
+
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
 
@@ -527,7 +535,23 @@ class MainActivity : AppCompatActivity() {
                             if (copyResult == PixelCopy.SUCCESS) {
                                 val out = java.io.ByteArrayOutputStream(width * height / 4)
                                 target.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                                captureLatestJpeg.set(out.toByteArray())
+                                val bytes = out.toByteArray()
+                                captureLatestJpeg.set(bytes)
+                                // Ebene-1-Diagnostik: Frame auf Tab sichern (max 4 Hz, throttled)
+                                val dir = detCaptureDir
+                                if (dir != null) {
+                                    val now = System.currentTimeMillis()
+                                    if (now - detLastSavedEpoch >= 240) {  // ~4 Hz Cap
+                                        detLastSavedEpoch = now
+                                        try {
+                                            java.io.File(dir, "df_$now.jpg")
+                                                .writeBytes(bytes)
+                                            detCaptureCount++
+                                        } catch (e: Exception) {
+                                            AppLog.e(TAG, "DetFrame-Write fehlgeschlagen", e)
+                                        }
+                                    }
+                                }
                             } else {
                                 AppLog.w(TAG, "PixelCopy fehlgeschlagen: code=$copyResult")
                             }
@@ -636,6 +660,43 @@ class MainActivity : AppCompatActivity() {
             val jpeg = captureRtspSurfaceJpeg() ?: return ""
             return Base64.encodeToString(jpeg, Base64.NO_WRAP)
         }
+
+        /**
+         * v2.3.173 / Ebene-1-Diagnostik: Detection-Input-Capture an/aus.
+         * enable=true → ab jetzt jeden PixelCopy-Frame (max 4 Hz) als
+         * /sdcard/Download/TrefferPoint/detframes/<tag>/df_<epochMs>.jpg sichern.
+         * Das sind GENAU die Bytes die die JS-Erkennung verarbeitet — echte
+         * Ground Truth, unabhängig vom separaten ETF150-SD-Video.
+         * Rückgabe: Verzeichnis-Pfad + bisherige Frame-Anzahl, oder "ERROR: ...".
+         */
+        @JavascriptInterface
+        fun setDetCapture(enable: Boolean, tag: String): String {
+            return try {
+                if (!enable) {
+                    val n = detCaptureCount
+                    val d = detCaptureDir
+                    detCaptureDir = null
+                    "OK: gestoppt nach $n Frames" + (if (d != null) " in ${d.absolutePath}" else "")
+                } else {
+                    val safeTag = tag.replace(Regex("[^A-Za-z0-9_-]"), "_").take(40)
+                    val base = java.io.File(
+                        android.os.Environment.getExternalStoragePublicDirectory(
+                            android.os.Environment.DIRECTORY_DOWNLOADS),
+                        "TrefferPoint/detframes/$safeTag")
+                    base.mkdirs()
+                    detCaptureCount = 0
+                    detLastSavedEpoch = 0L
+                    detCaptureDir = base
+                    "OK: ${base.absolutePath}"
+                }
+            } catch (e: Exception) {
+                detCaptureDir = null
+                "ERROR: ${e.message}"
+            }
+        }
+
+        @JavascriptInterface
+        fun getDetCaptureCount(): Int = detCaptureCount
 
         /**
          * v2.3.163: Speichert einen JSON-String direkt in /sdcard/Download/<filename>.

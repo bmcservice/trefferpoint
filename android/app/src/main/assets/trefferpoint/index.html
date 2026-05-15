@@ -1147,6 +1147,23 @@
                     <input type="checkbox" id="chkConfirmMode" style="margin:0">
                     ✋ Bestätigung erforderlich (Tap im Canvas innerhalb 5s)
                 </label>
+                <!-- v2.3.173: Frozen-Spot ist ab jetzt OPT-IN (Default aus —
+                     hat am 2026-05-15 die Erkennung erstickt: 28 Spots/10min) -->
+                <label style="font-size:11px;color:var(--text-dim);
+                    font-family:'Share Tech Mono',monospace;display:flex;align-items:center;gap:6px;margin-top:5px"
+                    title="Lernt feste Pseudo-Hit-Stellen und maskiert sie. ACHTUNG: kann bei falscher Kalibrierung die ganze Erkennung blockieren. Default aus.">
+                    <input type="checkbox" id="chkFrozenSpot" style="margin:0">
+                    🧊 Frozen-Spot-Maske (Opt-in, riskant)
+                </label>
+                <!-- v2.3.173 Ebene-1: Diagnose-Modus — roh erfassen, keine Heuristiken -->
+                <label style="font-size:11px;color:#ffb060;
+                    font-family:'Share Tech Mono',monospace;display:flex;align-items:center;gap:6px;margin-top:5px"
+                    title="Speichert JEDEN Detection-Input-Frame auf das Tablet (echte Ground Truth). Frozen-Spot + Bestätigung werden ignoriert. Für kontrollierte Mess-Session.">
+                    <input type="checkbox" id="chkDiagMode" style="margin:0">
+                    🔬 Diagnose-Modus (roh + Frame-Capture)
+                </label>
+                <div id="diagStatus" style="font-size:10px;color:var(--text-dim);
+                    font-family:'Share Tech Mono',monospace;margin-top:3px"></div>
             </div>
         </div>
 
@@ -1192,7 +1209,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.172';
+const APP_VERSION = '2.3.173';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2380,12 +2397,43 @@ function confirmPointer() {
         manualPointer = null;
         showDpad(false);
         const ar = (a / b).toFixed(2);
-        setMsg(`✓ Kalibriert (Ellipse ${ar}:1) — Referenzframe setzen, dann Erkennung starten`);
-        setStatus('Kalibriert', 'ok');
+        const warn = calibSanityCheck(calib, disc);
+        if (warn.length) {
+            setMsg('⚠ Kalib gesetzt, ABER: ' + warn.join(' · '));
+            setStatus('Kalibrierung fragwürdig — prüfen!', 'warn');
+        } else {
+            setMsg(`✓ Kalibriert (Ellipse ${ar}:1, plausibel) — Referenzframe setzen`);
+            setStatus('Kalibriert · Plausi-Check OK', 'ok');
+        }
         document.getElementById('calibStatus').textContent =
-            `✓ Manuell · ${disc.name} · ${pxPerMm.toFixed(1)} px/mm · ${ar}:1`;
+            `${warn.length?'⚠':'✓'} Manuell · ${disc.name} · ${pxPerMm.toFixed(1)} px/mm · ${ar}:1`;
         document.getElementById('btnDetect').disabled = false;
     }
+}
+
+// v2.3.173 Ebene-1: Sofortiger Kalib-Plausibilitäts-Check beim Setzen
+// (unabhängig von Trefferzahl — warnt BEVOR geschossen wird, nicht erst ab 3 Hits).
+function calibSanityCheck(c, disc) {
+    const w = [];
+    if (!c) return ['keine Kalibrierung'];
+    const W = canvas.width || 1920, H = canvas.height || 1080;
+    const ppm = c.pxPerMm || 0;
+    // pxPerMm-Bereich (zu klein = zu wenig Zoom, Rauschen überlebt; zu groß = Ausschnitt)
+    if (ppm < 1.0) w.push(`pxPerMm ${ppm.toFixed(2)} zu klein (mehr Zoom?)`);
+    else if (ppm > 4.0) w.push(`pxPerMm ${ppm.toFixed(2)} zu groß (rauszoomen?)`);
+    // Zentrum darf nicht am Bildrand kleben (Mis-Klick / falsche Mitte)
+    const mx = c.cx / W, my = c.cy / H;
+    if (mx < 0.08 || mx > 0.92 || my < 0.08 || my > 0.92)
+        w.push(`Zentrum am Bildrand (${(mx*100).toFixed(0)}%,${(my*100).toFixed(0)}%) — echte Spiegelmitte?`);
+    // Achsen-Verhältnis: stark elliptisch = schräge Optik oder Fehlklick
+    const ar = (c.a && c.b) ? (c.a / c.b) : 1;
+    if (ar > 1.5 || ar < 0.67)
+        w.push(`Ellipse ${ar.toFixed(2)}:1 stark verzerrt — Punkte korrekt?`);
+    // Radius plausibel zur Bildgröße (Spiegel sollte erkennbarer Teil des Frames sein)
+    const meanR = Math.sqrt((c.a||0)*(c.b||0));
+    if (meanR < H * 0.06) w.push(`Radius ${meanR.toFixed(0)}px sehr klein`);
+    else if (meanR > H * 0.75) w.push(`Radius ${meanR.toFixed(0)}px sehr groß`);
+    return w;
 }
 
 // D-Pad Button Events
@@ -3152,8 +3200,15 @@ async function autoCalib() {
                 setMsg(`✓ Auto-kalibriert (${fitLabel})` + qualityInfo + ' ⚠ Bitte Ring-Overlay auf Scheibe prüfen');
                 setStatus('Auto-kalibriert · bitte prüfen', 'warn');
             } else {
-                setMsg(`✓ Auto-kalibriert (${fitLabel})` + qualityInfo + ' — Referenzframe setzen, dann Erkennung starten');
-                setStatus('Auto-kalibriert', 'ok');
+                // v2.3.173: sofortiger Plausi-Check
+                const _aw = calibSanityCheck(calib, disc);
+                if (_aw.length) {
+                    setMsg(`Auto-kalibriert (${fitLabel}) · ⚠ ${_aw.join(' · ')}`);
+                    setStatus('Auto-Kalib fragwürdig — prüfen!', 'warn');
+                } else {
+                    setMsg(`✓ Auto-kalibriert (${fitLabel}, plausibel)` + qualityInfo + ' — Referenzframe setzen');
+                    setStatus('Auto-kalibriert · Plausi OK', 'ok');
+                }
             }
             calibOkFlashUntil = Date.now() + 3000;  // grüner Kreis-Flash 3s
             document.getElementById('calibStatus').textContent =
@@ -3208,8 +3263,14 @@ canvas.addEventListener('click', e => {
         const btn = document.getElementById('btnCalibTap');
         if (btn) { btn.classList.remove('btn-active'); btn.textContent = '📍 Mitte verschieben (Tap)'; }
         const dx = (p.x - oldCx).toFixed(0), dy = (p.y - oldCy).toFixed(0);
-        setMsg(`✓ Zentrum verschoben (Δ${dx},${dy}px) · 🔒 geschützt`);
-        setStatus('Kalibrierung korrigiert', 'ok');
+        const _tw = calibSanityCheck(calib, DISCS[document.getElementById('discSel').value]);
+        if (_tw.length) {
+            setMsg(`Zentrum verschoben (Δ${dx},${dy}px) · ⚠ ${_tw.join(' · ')}`);
+            setStatus('Kalib korrigiert — aber prüfen', 'warn');
+        } else {
+            setMsg(`✓ Zentrum verschoben (Δ${dx},${dy}px) · 🔒 · Plausi OK`);
+            setStatus('Kalibrierung korrigiert', 'ok');
+        }
         // Referenzframe wird durch das verschobene Zentrum nicht ungültig — kein resetWarmup nötig
         return;
     }
@@ -3388,11 +3449,24 @@ function runDetection() {
     const nowMs = performance.now();
 
     // v2.3.172-A: Frozen-Spot. Erst Tracker füttern (lernt), dann prüfen.
-    // Liegt der Kandidat in einem gelernten Frozen-Spot → sofort verwerfen,
-    // gar nicht erst in die 3-Frame-Bestätigung. Phase-2-Befund: solche
-    // Stellen produzieren 7-10 Pseudo-Hits aus dem Decode-Pfad.
+    // v2.3.173: Im Diagnose-Modus NUR tracken/loggen, NICHT blocken — wir wollen
+    // die rohe Detection sehen. Sonst (Praxis) blocken wie gehabt.
+    // Default ausserhalb Diagnose: Frozen-Spot ist ab v2.3.173 OPT-IN
+    // (chkFrozenSpot), weil die Maske am 2026-05-15 die Erkennung erstickt hat.
+    // v2.3.173 Ebene-1: ALLE Roh-Kandidaten loggen (vor 3-Frame/Spatial/Ring).
+    // Das ist der ungefilterte Detection-Strom — Basis für Szenario-Auswertung.
+    if (isDiagMode() && recSession) {
+        const bbW = (typeof maxX!=='undefined'&&typeof minX!=='undefined') ? (maxX-minX) : -1;
+        const bbH = (typeof maxY!=='undefined'&&typeof minY!=='undefined') ? (maxY-minY) : -1;
+        logRejected('raw_candidate', {
+            x: Math.round(candidateCx), y: Math.round(candidateCy),
+            pts: pts.length, bbW: bbW, bbH: bbH, gen: snapshotGen
+        });
+    }
+
     frozenSpotTrack(candidateCx, candidateCy);
-    if (frozenSpotCheck(candidateCx, candidateCy)) {
+    const _fsOn = !isDiagMode() && (function(){ const e=document.getElementById('chkFrozenSpot'); return e && e.checked; })();
+    if (_fsOn && frozenSpotCheck(candidateCx, candidateCy)) {
         logRejected('frozen_spot', { x: Math.round(candidateCx), y: Math.round(candidateCy) });
         pendingHit = null;
         return;
@@ -3487,6 +3561,9 @@ function runDetection() {
 // Bei Bestätigungs-Modus AN → Banner mit Tap/Auto-Discard-Timer; sonst direkt committen.
 let confirmPending = null;       // {payload, expiresAt, timeoutId}
 function tryCommitHit(payload) {
+    // v2.3.173: Im Diagnose-Modus IMMER direkt committen (roh, kein Banner) —
+    // wir wollen die ungefilterte Detection messen.
+    if (isDiagMode()) { commitHit(payload); return; }
     const cbEl = document.getElementById('chkConfirmMode');
     if (cbEl && cbEl.checked) showConfirmBanner(payload);
     else commitHit(payload);
@@ -4826,6 +4903,8 @@ document.getElementById('btnDetect').addEventListener('click', () => {
         spiegelBtn.disabled = false;
         // v2.3.146: Auto-REC starten falls aktiv und ETF150 verbunden
         try { sessionRecMaybeStart(); } catch(e) { console.warn(e); }
+        // v2.3.173 Ebene-1: bei Diagnose-Modus Detection-Input-Capture starten
+        try { startDetCaptureIfDiag(); } catch(e) { console.warn(e); }
     } else {
         btn.textContent = '⚡ Erkennung starten';
         btn.className = 'btn';
@@ -4834,8 +4913,47 @@ document.getElementById('btnDetect').addEventListener('click', () => {
         spiegelBtn.disabled = true;
         // v2.3.146: Auto-REC stoppen falls aktiv
         try { sessionRecMaybeStop(); } catch(e) { console.warn(e); }
+        // v2.3.173 Ebene-1: Detection-Input-Capture stoppen
+        try { stopDetCapture(); } catch(e) { console.warn(e); }
     }
 });
+
+// v2.3.173 Ebene-1: Diagnose-Modus — Detection-Input-Capture-Steuerung.
+// isDiagMode() entscheidet auch ob FP-Heuristiken (Frozen-Spot, Confirm) übergangen werden.
+function isDiagMode() {
+    const el = document.getElementById('chkDiagMode');
+    return !!(el && el.checked);
+}
+let _detCaptureActive = false;
+function startDetCaptureIfDiag() {
+    if (!isDiagMode()) return;
+    if (!(window.tpBridge && window.tpBridge.setDetCapture)) {
+        const ds = document.getElementById('diagStatus');
+        if (ds) ds.textContent = '⚠ Diagnose: Bridge fehlt (kein APK?)';
+        return;
+    }
+    // Tag = Session-Start-Zeit (epoch). JSON hat start_ms → 1:1-Abgleich.
+    const tag = (recSession && recSession.startMs ? recSession.startMs : Date.now()) + '_' +
+                (document.getElementById('discSel').value || 'kk25');
+    try {
+        const res = window.tpBridge.setDetCapture(true, String(tag));
+        _detCaptureActive = !String(res).startsWith('ERROR');
+        const ds = document.getElementById('diagStatus');
+        if (ds) ds.textContent = _detCaptureActive ? ('🔬 Capture: ' + res) : ('⚠ ' + res);
+    } catch(e) {
+        const ds = document.getElementById('diagStatus');
+        if (ds) ds.textContent = '⚠ Capture-Fehler: ' + e.message;
+    }
+}
+function stopDetCapture() {
+    if (!_detCaptureActive) return;
+    _detCaptureActive = false;
+    try {
+        const res = window.tpBridge.setDetCapture(false, '');
+        const ds = document.getElementById('diagStatus');
+        if (ds) ds.textContent = '⏹ ' + res;
+    } catch(e) { /* ignore */ }
+}
 
 document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
 
