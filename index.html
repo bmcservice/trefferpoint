@@ -1192,7 +1192,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.171';
+const APP_VERSION = '2.3.172';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1458,6 +1458,53 @@ function logRejected(reason, info) {
     // Soft-Cap gegen Memory bei langen Sessions (3000 Einträge ≈ 12 min @ 4Hz ohne Filter)
     if (rejectedCandidates.length > 3000) rejectedCandidates.splice(0, 1000);
 }
+
+// v2.3.172-A: Frozen-Spot-Maske. Phase-2-Befund 2026-05-14: an festen
+// Pixelstellen häuften sich 7-10 Pseudo-Hits über 40-90s (Ring 9-10, Bildmitte).
+// Ursache liegt im Live-Decode-Pfad (nicht in der Szene) → ursachenunabhängig
+// maskieren: wenn sich an einer Stelle Detektionen wiederholen, Spot sperren.
+// Lernt aus ALLEN Detektions-Events (committed + rejected), nicht nur user_discarded.
+let frozenSpots = [];            // [{x,y,r,hits,firstMs,lastMs}]
+const FROZEN_RADIUS = 35;        // px — Cluster-Radius
+const FROZEN_MIN_HITS = 4;       // so viele Events am selben Spot
+const FROZEN_MIN_SPAN_MS = 18000;// über mind. 18s verteilt (kein Burst → echter Treffer hätte Burst)
+let _spotTracker = [];           // [{x,y,times:[ms],n}]
+
+function frozenSpotCheck(cx, cy) {
+    // true wenn (cx,cy) in einem bereits gelernten Frozen-Spot liegt
+    for (const s of frozenSpots) {
+        if ((cx-s.x)**2 + (cy-s.y)**2 < s.r*s.r) return true;
+    }
+    return false;
+}
+function frozenSpotTrack(cx, cy) {
+    // jede Detektion (egal ob committed oder rejected) am Ort registrieren.
+    // Wenn ein Tracker FROZEN_MIN_HITS über FROZEN_MIN_SPAN_MS sammelt → Frozen-Spot.
+    const now = recSession ? (Date.now() - recSession.startMs) : performance.now();
+    let tr = null;
+    for (const t of _spotTracker) {
+        if ((cx-t.x)**2 + (cy-t.y)**2 < FROZEN_RADIUS*FROZEN_RADIUS) { tr = t; break; }
+    }
+    if (!tr) {
+        tr = { x: cx, y: cy, times: [now], n: 1 };
+        _spotTracker.push(tr);
+        if (_spotTracker.length > 200) _spotTracker.splice(0, 80);
+        return;
+    }
+    // laufender Mittelwert der Position + Zeit
+    tr.x = (tr.x * tr.n + cx) / (tr.n + 1);
+    tr.y = (tr.y * tr.n + cy) / (tr.n + 1);
+    tr.n++;
+    tr.times.push(now);
+    const span = tr.times[tr.times.length - 1] - tr.times[0];
+    if (tr.n >= FROZEN_MIN_HITS && span >= FROZEN_MIN_SPAN_MS && !frozenSpotCheck(tr.x, tr.y)) {
+        frozenSpots.push({ x: tr.x, y: tr.y, r: FROZEN_RADIUS, hits: tr.n,
+                           firstMs: tr.times[0], lastMs: tr.times[tr.times.length-1] });
+        try { logRejected('frozen_spot_learned', { x: Math.round(tr.x), y: Math.round(tr.y), n: tr.n, span_s: Math.round(span/1000) }); } catch(_){}
+        if (typeof setMsg === 'function') setMsg(`🧊 Frozen-Spot gelernt (${Math.round(tr.x)},${Math.round(tr.y)}) — wird ab jetzt ignoriert`);
+    }
+}
+function resetFrozenSpots() { frozenSpots = []; _spotTracker = []; }
 let speechEnabled = true;
 let debugMode = false;
 let debugCanvas = null, debugCtx = null;
@@ -2534,6 +2581,66 @@ function loop() {
     if (calib && overlayVisible) {
         drawOverlay();
         hits.forEach((h, i) => drawHit(h, i + 1, i === hits.length - 1));
+
+        // v2.3.172-D: Cal-Soll/Ist. Schwerpunkt der echten Treffer als 2. Marker.
+        // Phase-2-Befund: cal-Zentrum lag konsistent 50-90mm vom Treffer-Cluster
+        // weg → automatisch erkennbar und am Stand sofort sichtbar machen.
+        if (hits.length >= 3) {
+            const hx = hits.reduce((s,h)=>s+h.x,0) / hits.length;
+            const hy = hits.reduce((s,h)=>s+h.y,0) / hits.length;
+            const dpx = Math.hypot(hx - calib.cx, hy - calib.cy);
+            const dmm = calib.pxPerMm ? dpx / calib.pxPerMm : 0;
+            // Magenta-Kreuz = tatsächlicher Treffer-Schwerpunkt
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,60,200,0.9)';
+            ctx.lineWidth = 2;
+            const m = 14;
+            ctx.beginPath();
+            ctx.moveTo(hx-m,hy); ctx.lineTo(hx+m,hy);
+            ctx.moveTo(hx,hy-m); ctx.lineTo(hx,hy+m);
+            ctx.stroke();
+            // Verbindungslinie cal-Zentrum → Treffer-Schwerpunkt wenn Abweichung groß
+            if (dmm > 25) {
+                ctx.setLineDash([5,4]);
+                ctx.strokeStyle = 'rgba(255,60,200,0.6)';
+                ctx.beginPath();
+                ctx.moveTo(calib.cx, calib.cy); ctx.lineTo(hx, hy);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                // Warn-Banner oben
+                ctx.fillStyle = 'rgba(200,40,40,0.92)';
+                const txt = `⚠ Kalib prüfen: Treffer-Ø ${dmm.toFixed(0)}mm vom Zentrum`;
+                ctx.font = "bold 15px 'Share Tech Mono', monospace";
+                const tw = ctx.measureText(txt).width;
+                ctx.fillRect(canvas.width/2 - tw/2 - 8, 6, tw + 16, 24);
+                ctx.fillStyle = '#fff';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(txt, canvas.width/2, 18);
+            }
+            ctx.restore();
+        }
+    }
+
+    // v2.3.172-A: Frozen-Spots visualisieren (eisblaue gestrichelte Kreise)
+    if (typeof frozenSpots !== 'undefined' && frozenSpots.length) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(90,200,255,0.7)';
+        ctx.fillStyle = 'rgba(90,200,255,0.12)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4,3]);
+        for (const s of frozenSpots) {
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+            ctx.fill();
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(90,200,255,0.9)';
+        ctx.font = "10px 'Share Tech Mono', monospace";
+        ctx.textAlign = 'center';
+        if (frozenSpots.length) ctx.fillText('🧊', frozenSpots[0].x, frozenSpots[0].y - frozenSpots[0].r - 4);
+        ctx.restore();
     }
 
     // v2.3.170: Pending-Hit-Counter Overlay (visuelles Feedback der 3-Frame-Bestätigung)
@@ -3123,6 +3230,8 @@ function setRef() {
         ctx.getImageData(0, 0, 1, 1);
         refFrame = null;
         pendingHit = null;
+        // v2.3.172-A: neuer Referenzframe = neue Baseline → Frozen-Spot-Lernen neu starten
+        resetFrozenSpots();
         // v2.3.168: 6 s real-time Warmup, akkumuliert alle eintreffenden Frames
         refWarmupUntil = performance.now() + 6000;
         refAccum = null; refAccumSamples = 0;
@@ -3277,6 +3386,17 @@ function runDetection() {
     const candidateCx = sumX / pts.length;
     const candidateCy = sumY / pts.length;
     const nowMs = performance.now();
+
+    // v2.3.172-A: Frozen-Spot. Erst Tracker füttern (lernt), dann prüfen.
+    // Liegt der Kandidat in einem gelernten Frozen-Spot → sofort verwerfen,
+    // gar nicht erst in die 3-Frame-Bestätigung. Phase-2-Befund: solche
+    // Stellen produzieren 7-10 Pseudo-Hits aus dem Decode-Pfad.
+    frozenSpotTrack(candidateCx, candidateCy);
+    if (frozenSpotCheck(candidateCx, candidateCy)) {
+        logRejected('frozen_spot', { x: Math.round(candidateCx), y: Math.round(candidateCy) });
+        pendingHit = null;
+        return;
+    }
 
     // v2.3.168: 3-Frame-Bestätigung (vorher 2-Frame).
     // v2.3.170: KORREKTUR — Count nur erhöhen wenn snapshotGen neue Generation hat.
@@ -5590,8 +5710,16 @@ async function sessionRecMaybeStart() {
         const disc = document.getElementById('discSel').value;
         // v2.3.170: bei neuem REC den Rejected-Log resetten (vorige Session wäre stale)
         rejectedCandidates = [];
+        // v2.3.172-A: Frozen-Spots sind sessionspezifisch (Scheibe/Spektiv kann sich
+        // zwischen Sessions verschoben haben) → bei neuem REC neu lernen.
+        resetFrozenSpots();
         recSession = {
             startMs: Date.now(),
+            // v2.3.172-C: REC-Start-Wallclock + prevMax als Anker für späteren
+            // Video↔Session-Abgleich. Phase-2-Befund: ohne diesen Anker war die
+            // Zeitzuordnung der 138MB-Praxisvideos nicht eindeutig rekonstruierbar.
+            recStartIso: new Date().toISOString(),
+            recStartVidBase: prevMax,
             prevMaxVid: prevMax,
             dateStr: dateStr,
             hits: [],
@@ -5599,7 +5727,8 @@ async function sessionRecMaybeStart() {
             calib: calib ? {
                 cx: calib.cx, cy: calib.cy,
                 a: calib.a, b: calib.b,
-                angle: calib.angle, pxPerMm: calib.pxPerMm
+                angle: calib.angle, pxPerMm: calib.pxPerMm,
+                locked: !!calib.locked
             } : null
         };
         if (stEl) stEl.textContent = `🎬 REC läuft (VID${String(prevMax + 1).padStart(4, '0')}.mp4)`;
@@ -5687,6 +5816,9 @@ function saveSessionJson() {
         session: {
             start_ms: recSession.startMs,
             start_iso: new Date(recSession.startMs).toISOString(),
+            // v2.3.172-C: expliziter REC-Start-Anker für Video↔Session-Abgleich
+            rec_start_iso: recSession.recStartIso || new Date(recSession.startMs).toISOString(),
+            rec_start_vid_base: (typeof recSession.recStartVidBase === 'number') ? recSession.recStartVidBase : null,
             end_ms: recSession.endMs || Date.now(),
             duration_s: ((recSession.endMs || Date.now()) - recSession.startMs) / 1000
         },
@@ -5715,7 +5847,9 @@ function saveSessionJson() {
         rejected_candidates: rejectedCandidates,
         rejected_summary: rejectedCandidates.reduce((acc, r) => {
             acc[r.reason] = (acc[r.reason] || 0) + 1; return acc;
-        }, {})
+        }, {}),
+        // v2.3.172-A: gelernte Frozen-Spots (Decode-Pfad-Artefakte, ursachenunabhängig maskiert)
+        frozen_spots: (typeof frozenSpots !== 'undefined' ? frozenSpots : [])
     };
     const jsonText = JSON.stringify(data, null, 2);
     const ts = new Date(recSession.startMs).toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
