@@ -677,6 +677,9 @@
             <button class="view-tab" id="tabTreffer">📊 Treffer</button>
             <button class="view-tab" id="tabTest">🧪 Test</button>
         </div>
+        <button id="btnWizard" title="Geführter Diagnose-Test (Schritt für Schritt)"
+            style="background:#c8a84b;border:0;color:#000;font-size:13px;font-weight:bold;
+                   cursor:pointer;padding:5px 12px;border-radius:6px;line-height:1;min-height:32px">📋 Diagnose-Test</button>
         <button id="btnUpdateCheck" title="Nach Update suchen" onclick="manualUpdateCheck()"
             style="background:none;border:1px solid var(--border);color:var(--text-dim);
                    font-size:14px;cursor:pointer;padding:4px 8px;border-radius:6px;
@@ -691,6 +694,28 @@
                    line-height:1;opacity:0.8;min-height:32px">⛶</button>
     </div>
 </header>
+
+<!-- v2.3.174: Geführter Testplan-Wizard (kontrollierte Diagnose-Session am Stand) -->
+<div id="wizOverlay" style="display:none;position:fixed;inset:0;background:rgba(8,10,13,0.97);z-index:10001;padding:18px;box-sizing:border-box;font-family:'Share Tech Mono',monospace;color:#e8eef2">
+  <div style="max-width:640px;margin:24px auto 0;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:13px;letter-spacing:0.12em;color:#c8a84b">📋 GEFÜHRTER DIAGNOSE-TEST</div>
+      <button id="wizAbort" style="background:none;border:1px solid #555;color:#999;padding:5px 10px;cursor:pointer;border-radius:5px">Abbrechen</button>
+    </div>
+    <div id="wizProgress" style="font-size:11px;color:#7a8a99"></div>
+    <div id="wizCard" style="background:#11161c;border:2px solid #c8a84b;border-radius:10px;padding:20px;min-height:160px;display:flex;flex-direction:column;justify-content:center">
+      <div id="wizStepNo" style="font-size:11px;color:#7a8a99;margin-bottom:8px"></div>
+      <div id="wizText" style="font-size:17px;line-height:1.5;color:#fff"></div>
+      <div id="wizSub" style="font-size:13px;color:#9fb0bf;margin-top:10px"></div>
+      <div id="wizBusy" style="font-size:13px;color:#5ac8ff;margin-top:10px;display:none"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button id="wizPrev" style="flex:1;background:#23303a;border:1px solid #3a4a57;color:#cdd;padding:14px;font-size:15px;cursor:pointer;border-radius:8px">‹ Zurück</button>
+      <button id="wizNext" style="flex:2;background:#3a8;border:0;color:#000;padding:14px;font-size:17px;font-weight:bold;cursor:pointer;border-radius:8px">Weiter ›</button>
+    </div>
+    <div style="font-size:10px;color:#5a6a77;text-align:center">Diagnose-Test v2.3.174 · jeder Schritt entweder „du machst etwas" oder „App macht etwas automatisch"</div>
+  </div>
+</div>
 
 <!-- Test-Overlay (Batch-Workflows für reproduzierbare Tests am Schießstand) -->
 <div id="testOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;overflow:auto;padding:20px;box-sizing:border-box">
@@ -1209,7 +1234,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.173';
+const APP_VERSION = '2.3.174';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -4956,6 +4981,197 @@ function stopDetCapture() {
 }
 
 document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
+
+// ════════════════════════════════════════════════════════════════════════════
+//  v2.3.174 GEFÜHRTER DIAGNOSE-TEST-WIZARD
+//  Kontrollierte Mess-Session als „Weiter, Weiter, Weiter"-Ablauf.
+//  Steps: type 'info' = User tut etwas, bestätigt mit Weiter.
+//         type 'auto' = App führt run() aus, advanced selbst bei Erfolg.
+//  Setzt selbst alle Parameter (Diag-Modus, Auto-REC, Frozen-Spot aus …),
+//  damit die menschliche Fehlerquelle entfällt die bisher jede Session
+//  kontaminiert hat.
+// ════════════════════════════════════════════════════════════════════════════
+(function(){
+  const $ = id => document.getElementById(id);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  function ensureDetecting(on){
+    if (on && !detecting) $('btnDetect').click();
+    else if (!on && detecting) $('btnDetect').click();
+  }
+  function setChk(id, val){ const e=$(id); if(e){ e.checked=!!val; e.dispatchEvent(new Event('change')); } }
+
+  const STEPS = [
+    { type:'info', title:'Vorbereitung',
+      text:'Tablet im ETF150-WLAN. In der App „📡 WLAN-Cam" → „▶ RTSP-Stream starten". Live-Bild muss sichtbar sein (~1 s Verzögerung ist ok).',
+      sub:'Weiter erst wenn das Live-Bild der Scheibe steht.' },
+
+    { type:'auto', title:'Kamera-Aufnahme wecken',
+      text:'Ich wecke jetzt die Kamera-Aufnahme (erste REC nach Standby schlägt sonst still fehl).',
+      run: async (ui)=>{
+        ui('Starte kurze Wach-Aufnahme…');
+        ensureDetecting(true); await sleep(5000);
+        ensureDetecting(false); await sleep(1500);
+        return {ok:true, msg:'Kamera-Aufnahme geweckt.'};
+      } },
+
+    { type:'info', title:'Disziplin wählen',
+      text:'Wähle oben die Disziplin die du schießt: KK25 (.22) oder GK25 (9 mm).',
+      sub:'Danach Weiter.' },
+
+    { type:'info', title:'Manuell kalibrieren',
+      text:'Drücke „✎ Manuell (3 Klicks)" und tippe so exakt wie möglich: 1) Spiegel-Mitte, 2) Rand bei 3 Uhr, 3) Rand bei 6 Uhr.',
+      sub:'Weiter wenn die 3 Klicks gesetzt sind.' },
+
+    { type:'auto', title:'Kalibrierung prüfen',
+      text:'Ich prüfe die Kalibrierung auf Plausibilität.',
+      run: async ()=>{
+        if (!calib) return {ok:false, msg:'Keine Kalibrierung erkannt. Zurück und Schritt „Manuell kalibrieren" wiederholen.'};
+        const disc = DISCS[$('discSel').value];
+        const w = (typeof calibSanityCheck==='function') ? calibSanityCheck(calib, disc) : [];
+        if (w.length) return {ok:false, msg:'⚠ '+w.join(' · ')+'  → Zurück und neu kalibrieren, oder „📍 Mitte verschieben".'};
+        return {ok:true, msg:'✓ Kalibrierung plausibel (pxPerMm/Zentrum/Geometrie ok).'};
+      } },
+
+    { type:'info', title:'Kalibrierung visuell prüfen',
+      text:'Sitzt das grüne 🔒-Kreuz exakt auf der Spiegelmitte und liegen die Ringe auf den echten Ringen?',
+      sub:'Wenn nicht: „📍 Mitte verschieben" → 1 Tap auf die echte Mitte. Weiter wenn es sitzt.' },
+
+    { type:'auto', title:'Diagnose-Parameter setzen',
+      text:'Ich stelle die App auf saubere Roh-Messung.',
+      run: async ()=>{
+        setChk('chkFrozenSpot', false);
+        setChk('chkConfirmMode', false);
+        setChk('chkAutoRec', true);
+        setChk('chkDiagMode', true);
+        return {ok:true, msg:'Gesetzt: 🔬 Diagnose AN · Auto-REC AN · Frozen-Spot AUS · Bestätigung AUS.'};
+      } },
+
+    { type:'info', title:'Leere Scheibe',
+      text:'Hänge eine LEERE, unbeschossene Scheibe auf bzw. richte auf den unbeschossenen Spiegel. Bild muss ruhig stehen.',
+      sub:'Weiter → ich setze den Referenzframe (6 s Stabilisierung).' },
+
+    { type:'auto', title:'Referenzframe setzen',
+      text:'Ich setze den Referenzframe und warte die Stabilisierung ab.',
+      run: async (ui)=>{
+        setRef();
+        let s=8;
+        while (isWarmupActive() && s>0){ ui('Stabilisiere Referenz… '+s+' s'); await sleep(1000); s--; }
+        await sleep(500);
+        if (isWarmupActive()) return {ok:false, msg:'Warmup nicht fertig — Bild unruhig? Nochmal versuchen.'};
+        return {ok:true, msg:'✓ Referenzframe gesetzt.'};
+      } },
+
+    { type:'auto', title:'Messung starten',
+      text:'Ich starte Erkennung + Detection-Frame-Capture + Auto-REC.',
+      run: async (ui)=>{
+        ensureDetecting(true);
+        await sleep(1500);
+        const cap = (typeof _detCaptureActive!=='undefined' && _detCaptureActive);
+        if (!cap) return {ok:false, msg:'⚠ Frame-Capture nicht aktiv (Diagnose-Modus/Bridge?). Nochmal.'};
+        let n=0; try{ n = window.tpBridge.getDetCaptureCount(); }catch(_){}
+        return {ok:true, msg:'✓ Erkennung + Capture läuft (Frames bisher: '+n+').'};
+      } },
+
+    { type:'info', title:'JETZT 5 Schüsse',
+      text:'Gib EXAKT 5 Schüsse ab — langsam, einzeln gezielt, Richtung Zentrum, ca. 5 s Abstand.',
+      sub:'Notiere für jeden Schuss grob die Lage (z. B. „Mitte", „9 auf 6 Uhr"). Weiter ERST nach dem 5. Schuss.' },
+
+    { type:'auto', title:'Messung beenden + speichern',
+      text:'Ich lasse 10 s nachlaufen, stoppe dann und speichere die Session.',
+      run: async (ui)=>{
+        for (let s=10;s>0;s--){ ui('Nachlauf… '+s+' s'); await sleep(1000); }
+        ensureDetecting(false);
+        await sleep(800);
+        let saved='(Session-Log bitte manuell „💾 Session-Log speichern")';
+        try { if (typeof saveSessionJson==='function'){ saveSessionJson(); saved='✓ Session-Log gespeichert.'; } } catch(e){ saved='⚠ Save: '+e.message; }
+        let n=0; try{ n = window.tpBridge.getDetCaptureCount(); }catch(_){}
+        return {ok:true, msg: saved+' · Detection-Frames: '+n};
+      } },
+
+    { type:'info', title:'Fertig ✓',
+      text:'Test abgeschlossen. Session-Log + Detection-Frames sind auf dem Tablet gesichert.',
+      sub:'WICHTIG aufschreiben: wie viele Schüsse real abgegeben + grobe Lage jedes Schusses. Dann „Abbrechen" zum Beenden.' },
+  ];
+
+  let idx = 0, busy = false;
+
+  function render(){
+    const st = STEPS[idx];
+    $('wizProgress').textContent = `Schritt ${idx+1} / ${STEPS.length}` + (st.type==='auto' ? ' · App-Aktion' : ' · du bist dran');
+    $('wizStepNo').textContent = st.title.toUpperCase();
+    $('wizText').textContent = st.text;
+    $('wizSub').textContent = st.sub || '';
+    $('wizBusy').style.display = 'none';
+    $('wizBusy').textContent = '';
+    $('wizPrev').disabled = (idx===0) || busy;
+    $('wizPrev').style.opacity = $('wizPrev').disabled ? 0.4 : 1;
+    const nx = $('wizNext');
+    if (st.type==='auto'){
+      nx.textContent = busy ? 'läuft…' : '▶ Ausführen';
+    } else {
+      nx.textContent = (idx===STEPS.length-1) ? 'Fertig' : 'Weiter ›';
+    }
+    nx.disabled = busy;
+    nx.style.opacity = busy ? 0.6 : 1;
+  }
+
+  async function runAuto(){
+    const st = STEPS[idx];
+    busy = true; render();
+    const ui = (txt)=>{ const b=$('wizBusy'); b.style.display='block'; b.textContent=txt; };
+    ui('Arbeite…');
+    let res;
+    try { res = await st.run(ui); } catch(e){ res = {ok:false, msg:'Fehler: '+e.message}; }
+    busy = false;
+    if (res && res.ok){
+      $('wizBusy').style.display='block';
+      $('wizBusy').style.color = '#6f6';
+      $('wizBusy').textContent = res.msg || '✓ ok';
+      await sleep(1400);
+      $('wizBusy').style.color = '#5ac8ff';
+      if (idx < STEPS.length-1){ idx++; render(); if (STEPS[idx].type==='auto') runAuto(); }
+      else render();
+    } else {
+      $('wizBusy').style.display='block';
+      $('wizBusy').style.color = '#f96';
+      $('wizBusy').textContent = (res && res.msg) || '⚠ fehlgeschlagen';
+      const nx=$('wizNext'); nx.textContent='⟳ Nochmal'; nx.disabled=false; nx.style.opacity=1;
+      render._retry = true;
+    }
+  }
+
+  function next(){
+    if (busy) return;
+    const st = STEPS[idx];
+    if (st.type==='auto'){
+      runAuto();
+      return;
+    }
+    if (idx < STEPS.length-1){
+      idx++; render();
+      if (STEPS[idx].type==='auto') runAuto();
+    } else {
+      close();
+    }
+  }
+  function prev(){ if (busy) return; if (idx>0){ idx--; render(); } }
+  function open(){
+    idx=0; busy=false;
+    $('wizOverlay').style.display='block';
+    render();
+    if (STEPS[0].type==='auto') runAuto();
+  }
+  function close(){
+    if (busy && !confirm('Eine App-Aktion läuft noch. Wirklich abbrechen?')) return;
+    $('wizOverlay').style.display='none';
+  }
+
+  $('btnWizard').addEventListener('click', open);
+  $('wizNext').addEventListener('click', next);
+  $('wizPrev').addEventListener('click', prev);
+  $('wizAbort').addEventListener('click', close);
+})();
 
 // ── VERGLEICHS-MODUS ──────────────────────────────────────────────────────────
 // Eigene Test-/Auswertungs-Logik unabhängig von der Live-Erkennung:
