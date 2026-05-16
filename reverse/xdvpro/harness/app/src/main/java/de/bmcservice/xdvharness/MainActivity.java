@@ -112,50 +112,45 @@ public class MainActivity extends Activity {
             String useUid = (lanUid != null) ? lanUid : uid;
             log("connect uid = " + useUid + (lanUid != null ? " (from LAN)" : " (fallback static)"));
 
-            for (int attempt = 1; attempt <= 6 && sid < 0; attempt++) {
-                sid = IOTCAPIs.IOTC_Connect_ByUID(useUid);
-                log("IOTC_Connect_ByUID try" + attempt + " = " + sid);
-                if (sid < 0) {
-                    int psid = IOTCAPIs.IOTC_Get_SessionID();
-                    if (psid >= 0) {
-                        int pr = IOTCAPIs.IOTC_Connect_ByUID_Parallel(useUid, psid);
-                        log("  IOTC_Connect_ByUID_Parallel(sid=" + psid + ") = " + pr);
-                        if (pr >= 0) sid = pr;
+            // it5: pro Versuch FRISCHE IOTC-Session (sonst stale -> -20011-Timeout).
+            String u6 = useUid.length() >= 6 ? useUid.substring(useUid.length() - 6) : useUid;
+            String[] accts = { accs, "admin", "", "user" };
+            String[] tryPw = { "", "admin", "8888", "6666", "888888", "666666",
+                "123456", "12345678", "000000", "123", "1234", "0000", "111111",
+                "admin123", "12345", "default", "123456789", "20150602",
+                u6, u6.toLowerCase(), u6.toUpperCase() };
+            String okAcc = null;
+            outer:
+            for (String acc : accts) {
+                for (String pw : tryPw) {
+                    int s = -1;
+                    for (int c = 0; c < 3 && s < 0; c++) {
+                        s = IOTCAPIs.IOTC_Connect_ByUID(useUid);
+                        if (s < 0) Thread.sleep(700);
                     }
-                }
-                if (sid < 0) Thread.sleep(1500);
-            }
-            if (sid < 0) { log("CONNECT FAILED sid=" + sid); finishLog(); return; }
-
-            // IOTC_Session_Check (St_SInfo) ABI ist versionssensibel + optional -> weggelassen.
-            final String facc = accs;
-            for (String pw : pws) {
-                for (int variant = 0; variant < 2 && avx < 0; variant++) {
-                    final int fsid = sid; final String fpw = pw; final int fv = variant;
+                    if (s < 0) { log("connect fail acc='" + acc + "' pw='" + pw + "' s=" + s); continue; }
+                    final int fs = s; final String fa = acc, fp = pw;
                     final int[] res = { -999 };
                     Thread w = new Thread(() -> {
-                        try {
-                            int[] st = new int[1];
-                            if (fv == 0) res[0] = AVAPIs.avClientStart(fsid, facc, fpw, 10, st, 0);
-                            else { int[] rs = new int[1];
-                                   res[0] = AVAPIs.avClientStart2(fsid, facc, fpw, 10, st, 0, rs); }
+                        try { int[] st = new int[1];
+                              res[0] = AVAPIs.avClientStart(fs, fa, fp, 8, st, 0);
                         } catch (Throwable t) { res[0] = -888; }
                     });
-                    log("avClientStart" + (fv == 1 ? "2" : "") + " try pw='" + pw + "' ...");
                     w.start();
-                    w.join(13000);
+                    w.join(11000);
                     if (w.isAlive()) {
-                        log("  pw='" + pw + "' v" + fv + " TIMEOUT(13s) -> skip");
+                        log("acc='" + acc + "' pw='" + pw + "' sid=" + s + " TIMEOUT");
                         w.interrupt();
                     } else {
-                        log("  pw='" + pw + "' v" + fv + " = " + res[0]);
-                        if (res[0] >= 0) { avx = res[0]; okPw = pw; }
+                        log("acc='" + acc + "' pw='" + pw + "' sid=" + s + " avClientStart=" + res[0]);
+                        if (res[0] >= 0) { avx = res[0]; sid = s; okPw = pw; okAcc = acc; break outer; }
                     }
+                    try { IOTCAPIs.IOTC_Session_Close(s); } catch (Throwable t) {}
+                    Thread.sleep(150);
                 }
-                if (avx >= 0) break;
             }
-            if (avx < 0) { log("ALL PW FAILED (sid ok=" + sid + ")"); finishLog(); return; }
-            log("AV CLIENT OK avIndex=" + avx + " pw='" + okPw + "'");
+            if (avx < 0) { log("ALL acc/pw FAILED"); finishLog(); return; }
+            log("AV CLIENT OK avIndex=" + avx + " acc='" + okAcc + "' pw='" + okPw + "'");
 
             int rc = AVAPIs.avSendIOCtrl(avx, IOTYPE_USER_IPCAM_START, new byte[8], 8);
             log("avSendIOCtrl(START 0x1FF) = " + rc);
