@@ -6,6 +6,7 @@ import android.util.Log;
 
 import com.tutk.IOTC.AVAPIs;
 import com.tutk.IOTC.IOTCAPIs;
+import com.tutk.IOTC.st_LanSearchInfo2;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -85,9 +86,42 @@ public class MainActivity extends Activity {
             int ra = AVAPIs.avInitialize(3);
             log("avInitialize(3) = " + ra);
 
+            // --- LAN-Search: Cam lokal finden (kein Cloud-Master noetig) ---
+            String lanUid = null;
+            for (int ls = 1; ls <= 4 && lanUid == null; ls++) {
+                try {
+                    int[] arrNum = new int[1];
+                    st_LanSearchInfo2[] found = IOTCAPIs.IOTC_Lan_Search2(arrNum, 3000);
+                    int n = arrNum[0];
+                    log("IOTC_Lan_Search2 try" + ls + " num=" + n
+                        + " arrLen=" + (found == null ? -1 : found.length));
+                    if (found != null) {
+                        for (st_LanSearchInfo2 d : found) {
+                            if (d == null) continue;
+                            String u = bz(d.UID), ip = bz(d.IP), nm = bz(d.DeviceName);
+                            log("  LAN dev UID=" + u + " IP=" + ip + " port=" + d.port + " name=" + nm);
+                            if (lanUid == null && u.length() >= 8) lanUid = u;
+                        }
+                    }
+                } catch (Throwable t) {
+                    log("LanSearch2 EXC " + t);
+                }
+                if (lanUid == null) Thread.sleep(1200);
+            }
+            String useUid = (lanUid != null) ? lanUid : uid;
+            log("connect uid = " + useUid + (lanUid != null ? " (from LAN)" : " (fallback static)"));
+
             for (int attempt = 1; attempt <= 6 && sid < 0; attempt++) {
-                sid = IOTCAPIs.IOTC_Connect_ByUID(uid);
+                sid = IOTCAPIs.IOTC_Connect_ByUID(useUid);
                 log("IOTC_Connect_ByUID try" + attempt + " = " + sid);
+                if (sid < 0) {
+                    int psid = IOTCAPIs.IOTC_Get_SessionID();
+                    if (psid >= 0) {
+                        int pr = IOTCAPIs.IOTC_Connect_ByUID_Parallel(useUid, psid);
+                        log("  IOTC_Connect_ByUID_Parallel(sid=" + psid + ") = " + pr);
+                        if (pr >= 0) sid = pr;
+                    }
+                }
                 if (sid < 0) Thread.sleep(1500);
             }
             if (sid < 0) { log("CONNECT FAILED sid=" + sid); finishLog(); return; }
@@ -144,6 +178,13 @@ public class MainActivity extends Activity {
             for (int i = 0; i < Math.min(6, st.length); i++) log("  at " + st[i]);
         }
         finishLog();
+    }
+
+    static String bz(byte[] b) {
+        if (b == null) return "";
+        int n = 0;
+        while (n < b.length && b[n] != 0) n++;
+        return new String(b, 0, n).trim();
     }
 
     void finishLog() {
