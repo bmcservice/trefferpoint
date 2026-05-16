@@ -17,9 +17,24 @@ android {
         }
     }
 
+    signingConfigs {
+        debugFixed {
+            def ks = file("xdvharness.keystore")
+            if (ks.exists()) {
+                storeFile ks
+                storePassword "xdvh12345"
+                keyAlias "xdvh"
+                keyPassword "xdvh12345"
+            }
+        }
+    }
+
     buildTypes {
         debug {
             minifyEnabled false
+            if (file("xdvharness.keystore").exists()) {
+                signingConfig signingConfigs.debugFixed
+            }
         }
     }
 

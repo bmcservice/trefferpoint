@@ -7,6 +7,7 @@ import android.util.Log;
 import com.tutk.IOTC.AVAPIs;
 import com.tutk.IOTC.IOTCAPIs;
 import com.tutk.IOTC.st_LanSearchInfo2;
+import com.tutk.IOTC.St_SInfo;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -126,11 +127,37 @@ public class MainActivity extends Activity {
             }
             if (sid < 0) { log("CONNECT FAILED sid=" + sid); finishLog(); return; }
 
+            try {
+                St_SInfo si = new St_SInfo();
+                int sc = IOTCAPIs.IOTC_Session_Check(sid, si);
+                log("IOTC_Session_Check = " + sc + " Mode=" + si.Mode + " CorD=" + si.CorD
+                    + " UID=" + bz(si.UID) + " IP=" + bz(si.RemoteIP) + " NAT=" + si.NatType);
+            } catch (Throwable t) { log("Session_Check EXC " + t); }
+
             for (String pw : pws) {
-                long[] servType = new long[1];
-                int v = AVAPIs.avClientStart(sid, accs, pw, 8, servType, 0);
-                log("avClientStart acc=" + accs + " pw='" + pw + "' = " + v + " servType=" + servType[0]);
-                if (v >= 0) { avx = v; okPw = pw; break; }
+                for (int variant = 0; variant < 2 && avx < 0; variant++) {
+                    final int fsid = sid; final String fpw = pw; final int fv = variant;
+                    final int[] res = { -999 };
+                    Thread w = new Thread(() -> {
+                        try {
+                            long[] st = new long[1];
+                            if (fv == 0) res[0] = AVAPIs.avClientStart(fsid, accs, fpw, 10, st, 0);
+                            else { int[] rs = new int[1];
+                                   res[0] = AVAPIs.avClientStart2(fsid, accs, fpw, 10, st, 0, rs); }
+                        } catch (Throwable t) { res[0] = -888; }
+                    });
+                    log("avClientStart" + (fv == 1 ? "2" : "") + " try pw='" + pw + "' ...");
+                    w.start();
+                    w.join(13000);
+                    if (w.isAlive()) {
+                        log("  pw='" + pw + "' v" + fv + " TIMEOUT(13s) -> skip");
+                        w.interrupt();
+                    } else {
+                        log("  pw='" + pw + "' v" + fv + " = " + res[0]);
+                        if (res[0] >= 0) { avx = res[0]; okPw = pw; }
+                    }
+                }
+                if (avx >= 0) break;
             }
             if (avx < 0) { log("ALL PW FAILED (sid ok=" + sid + ")"); finishLog(); return; }
             log("AV CLIENT OK avIndex=" + avx + " pw='" + okPw + "'");
