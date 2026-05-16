@@ -1,0 +1,16 @@
+# F&E-Rohartefakte NICHT committen (Repo-Bloat). Nur harness/ + Doku.
+*.apk
+!harness/**
+*.pcap
+samples/
+extracted/
+*_out.txt
+uic*.xml
+uixdv.xml
+media_config.lua
+__pycache__/
+# harness/-Build-Output
+harness/.gradle/
+harness/app/build/
+harness/build/
+harness/local.properties
