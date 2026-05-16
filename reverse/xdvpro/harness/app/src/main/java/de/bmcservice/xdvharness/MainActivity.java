@@ -127,13 +127,7 @@ public class MainActivity extends Activity {
             }
             if (sid < 0) { log("CONNECT FAILED sid=" + sid); finishLog(); return; }
 
-            try {
-                St_SInfo si = new St_SInfo();
-                int sc = IOTCAPIs.IOTC_Session_Check(sid, si);
-                log("IOTC_Session_Check = " + sc + " Mode=" + si.Mode + " CorD=" + si.CorD
-                    + " UID=" + bz(si.UID) + " IP=" + bz(si.RemoteIP) + " NAT=" + si.NatType);
-            } catch (Throwable t) { log("Session_Check EXC " + t); }
-
+            // IOTC_Session_Check (St_SInfo) ABI ist versionssensibel + optional -> weggelassen.
             final String facc = accs;
             for (String pw : pws) {
                 for (int variant = 0; variant < 2 && avx < 0; variant++) {
@@ -141,7 +135,7 @@ public class MainActivity extends Activity {
                     final int[] res = { -999 };
                     Thread w = new Thread(() -> {
                         try {
-                            long[] st = new long[1];
+                            int[] st = new int[1];
                             if (fv == 0) res[0] = AVAPIs.avClientStart(fsid, facc, fpw, 10, st, 0);
                             else { int[] rs = new int[1];
                                    res[0] = AVAPIs.avClientStart2(fsid, facc, fpw, 10, st, 0, rs); }

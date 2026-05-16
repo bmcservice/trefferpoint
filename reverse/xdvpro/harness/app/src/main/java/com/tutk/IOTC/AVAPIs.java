@@ -134,8 +134,8 @@ public class AVAPIs {
 	public native static int  avSendAudioData(int avIndex, byte[]data,int dataSize, byte[] pFrmInfo,int FrmInfoSize);
 	
 	//Client Side
-	public native static int  avClientStart(int nSID,String viewAcc,String viewPwd, long timeout_sec,long[]pservType,int ChID);
-	public native static int  avClientStart2(int nSID,String viewAcc,String viewPwd, long timeout_sec,long[]pservType,int ChID, int[] bResend);
+	public native static int  avClientStart(int nSID,String viewAcc,String viewPwd, int timeout_sec,int[]pservType,int ChID);
+	public native static int  avClientStart2(int nSID,String viewAcc,String viewPwd, int timeout_sec,int[]pservType,int ChID, int[] bResend);
 	public native static void avClientStop(int avIndex);
 	public native static void avClientExit(int nSID, int ChID);
 	public native static int  avRecvFrameData(int avIndex,byte[] buf, int bufMaxSize,
