@@ -134,6 +134,7 @@ public class MainActivity extends Activity {
                     + " UID=" + bz(si.UID) + " IP=" + bz(si.RemoteIP) + " NAT=" + si.NatType);
             } catch (Throwable t) { log("Session_Check EXC " + t); }
 
+            final String facc = accs;
             for (String pw : pws) {
                 for (int variant = 0; variant < 2 && avx < 0; variant++) {
                     final int fsid = sid; final String fpw = pw; final int fv = variant;
@@ -141,9 +142,9 @@ public class MainActivity extends Activity {
                     Thread w = new Thread(() -> {
                         try {
                             long[] st = new long[1];
-                            if (fv == 0) res[0] = AVAPIs.avClientStart(fsid, accs, fpw, 10, st, 0);
+                            if (fv == 0) res[0] = AVAPIs.avClientStart(fsid, facc, fpw, 10, st, 0);
                             else { int[] rs = new int[1];
-                                   res[0] = AVAPIs.avClientStart2(fsid, accs, fpw, 10, st, 0, rs); }
+                                   res[0] = AVAPIs.avClientStart2(fsid, facc, fpw, 10, st, 0, rs); }
                         } catch (Throwable t) { res[0] = -888; }
                     });
                     log("avClientStart" + (fv == 1 ? "2" : "") + " try pw='" + pw + "' ...");
