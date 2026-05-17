@@ -1,0 +1,3544 @@
+{
+  "version": "2.3.174",
+  "device": "Apexel ETF150",
+  "camera": {
+    "ip": "192.168.10.1"
+  },
+  "session": {
+    "start_ms": 1779017384007,
+    "start_iso": "2026-05-17T11:29:44.007Z",
+    "rec_start_iso": "2026-05-17T11:29:44.007Z",
+    "rec_start_vid_base": 0,
+    "end_ms": 1779017490562,
+    "duration_s": 106.555
+  },
+  "rec": {
+    "video_paths": [],
+    "video_urls": [],
+    "video_path": null,
+    "video_url": null,
+    "cover_url": null,
+    "adb_pull_cmd": null,
+    "adb_pull_all": null
+  },
+  "discipline": "kk25",
+  "calibration": {
+    "cx": 998,
+    "cy": 483,
+    "a": 309,
+    "b": 309,
+    "angle": 0,
+    "pxPerMm": 3.09,
+    "locked": true
+  },
+  "hits": [
+    {
+      "n": 1,
+      "t_ms": 69559,
+      "x": 738,
+      "y": 614,
+      "ring": 7.3,
+      "distMm": 94.1,
+      "deg": 243
+    },
+    {
+      "n": 2,
+      "t_ms": 75281,
+      "x": 704,
+      "y": 625,
+      "ring": 6.9,
+      "distMm": 105.7,
+      "deg": 244
+    },
+    {
+      "n": 3,
+      "t_ms": 80744,
+      "x": 798,
+      "y": 561,
+      "ring": 8.3,
+      "distMm": 69.7,
+      "deg": 249
+    },
+    {
+      "n": 4,
+      "t_ms": 89275,
+      "x": 761,
+      "y": 649,
+      "ring": 7.4,
+      "distMm": 93.8,
+      "deg": 235
+    },
+    {
+      "n": 5,
+      "t_ms": 94295,
+      "x": 881,
+      "y": 540,
+      "ring": 9.4,
+      "distMm": 42.2,
+      "deg": 244
+    },
+    {
+      "n": 6,
+      "t_ms": 98076,
+      "x": 853,
+      "y": 502,
+      "ring": 9.2,
+      "distMm": 47.3,
+      "deg": 263
+    }
+  ],
+  "rejected_candidates": [
+    {
+      "t_ms": 21143,
+      "reason": "pts_out_of_range",
+      "pts": 4910
+    },
+    {
+      "t_ms": 21198,
+      "reason": "pts_out_of_range",
+      "pts": 4910
+    },
+    {
+      "t_ms": 21268,
+      "reason": "pts_out_of_range",
+      "pts": 4910
+    },
+    {
+      "t_ms": 21326,
+      "reason": "pts_out_of_range",
+      "pts": 4929
+    },
+    {
+      "t_ms": 21363,
+      "reason": "pts_out_of_range",
+      "pts": 4929
+    },
+    {
+      "t_ms": 21450,
+      "reason": "pts_out_of_range",
+      "pts": 4929
+    },
+    {
+      "t_ms": 21517,
+      "reason": "pts_out_of_range",
+      "pts": 5001
+    },
+    {
+      "t_ms": 21580,
+      "reason": "pts_out_of_range",
+      "pts": 5001
+    },
+    {
+      "t_ms": 21619,
+      "reason": "pts_out_of_range",
+      "pts": 5001
+    },
+    {
+      "t_ms": 21734,
+      "reason": "pts_out_of_range",
+      "pts": 5001
+    },
+    {
+      "t_ms": 21793,
+      "reason": "pts_out_of_range",
+      "pts": 5030
+    },
+    {
+      "t_ms": 21849,
+      "reason": "pts_out_of_range",
+      "pts": 5030
+    },
+    {
+      "t_ms": 21947,
+      "reason": "pts_out_of_range",
+      "pts": 5030
+    },
+    {
+      "t_ms": 22009,
+      "reason": "pts_out_of_range",
+      "pts": 5040
+    },
+    {
+      "t_ms": 22047,
+      "reason": "pts_out_of_range",
+      "pts": 5040
+    },
+    {
+      "t_ms": 22088,
+      "reason": "pts_out_of_range",
+      "pts": 5040
+    },
+    {
+      "t_ms": 22165,
+      "reason": "pts_out_of_range",
+      "pts": 5040
+    },
+    {
+      "t_ms": 22226,
+      "reason": "pts_out_of_range",
+      "pts": 5124
+    },
+    {
+      "t_ms": 22266,
+      "reason": "pts_out_of_range",
+      "pts": 5124
+    },
+    {
+      "t_ms": 22325,
+      "reason": "pts_out_of_range",
+      "pts": 5124
+    },
+    {
+      "t_ms": 22362,
+      "reason": "pts_out_of_range",
+      "pts": 5124
+    },
+    {
+      "t_ms": 22445,
+      "reason": "pts_out_of_range",
+      "pts": 5124
+    },
+    {
+      "t_ms": 22502,
+      "reason": "pts_out_of_range",
+      "pts": 5177
+    },
+    {
+      "t_ms": 22539,
+      "reason": "pts_out_of_range",
+      "pts": 5177
+    },
+    {
+      "t_ms": 22579,
+      "reason": "pts_out_of_range",
+      "pts": 5177
+    },
+    {
+      "t_ms": 22615,
+      "reason": "pts_out_of_range",
+      "pts": 5177
+    },
+    {
+      "t_ms": 22652,
+      "reason": "pts_out_of_range",
+      "pts": 5177
+    },
+    {
+      "t_ms": 22760,
+      "reason": "pts_out_of_range",
+      "pts": 5177
+    },
+    {
+      "t_ms": 22823,
+      "reason": "pts_out_of_range",
+      "pts": 5176
+    },
+    {
+      "t_ms": 22859,
+      "reason": "pts_out_of_range",
+      "pts": 5176
+    },
+    {
+      "t_ms": 22939,
+      "reason": "pts_out_of_range",
+      "pts": 5176
+    },
+    {
+      "t_ms": 22999,
+      "reason": "pts_out_of_range",
+      "pts": 5240
+    },
+    {
+      "t_ms": 23034,
+      "reason": "pts_out_of_range",
+      "pts": 5240
+    },
+    {
+      "t_ms": 23070,
+      "reason": "pts_out_of_range",
+      "pts": 5240
+    },
+    {
+      "t_ms": 23105,
+      "reason": "pts_out_of_range",
+      "pts": 5240
+    },
+    {
+      "t_ms": 23189,
+      "reason": "pts_out_of_range",
+      "pts": 5240
+    },
+    {
+      "t_ms": 23253,
+      "reason": "pts_out_of_range",
+      "pts": 5226
+    },
+    {
+      "t_ms": 23302,
+      "reason": "pts_out_of_range",
+      "pts": 5226
+    },
+    {
+      "t_ms": 23338,
+      "reason": "pts_out_of_range",
+      "pts": 5226
+    },
+    {
+      "t_ms": 23375,
+      "reason": "pts_out_of_range",
+      "pts": 5226
+    },
+    {
+      "t_ms": 23482,
+      "reason": "pts_out_of_range",
+      "pts": 5226
+    },
+    {
+      "t_ms": 23542,
+      "reason": "pts_out_of_range",
+      "pts": 5259
+    },
+    {
+      "t_ms": 23580,
+      "reason": "pts_out_of_range",
+      "pts": 5259
+    },
+    {
+      "t_ms": 23614,
+      "reason": "pts_out_of_range",
+      "pts": 5259
+    },
+    {
+      "t_ms": 23648,
+      "reason": "pts_out_of_range",
+      "pts": 5259
+    },
+    {
+      "t_ms": 23738,
+      "reason": "pts_out_of_range",
+      "pts": 5259
+    },
+    {
+      "t_ms": 23798,
+      "reason": "pts_out_of_range",
+      "pts": 5326
+    },
+    {
+      "t_ms": 23836,
+      "reason": "pts_out_of_range",
+      "pts": 5326
+    },
+    {
+      "t_ms": 23913,
+      "reason": "pts_out_of_range",
+      "pts": 5326
+    },
+    {
+      "t_ms": 23975,
+      "reason": "pts_out_of_range",
+      "pts": 5334
+    },
+    {
+      "t_ms": 24013,
+      "reason": "pts_out_of_range",
+      "pts": 5334
+    },
+    {
+      "t_ms": 24049,
+      "reason": "pts_out_of_range",
+      "pts": 5334
+    },
+    {
+      "t_ms": 24086,
+      "reason": "pts_out_of_range",
+      "pts": 5334
+    },
+    {
+      "t_ms": 24175,
+      "reason": "pts_out_of_range",
+      "pts": 5334
+    },
+    {
+      "t_ms": 24236,
+      "reason": "pts_out_of_range",
+      "pts": 5342
+    },
+    {
+      "t_ms": 24282,
+      "reason": "pts_out_of_range",
+      "pts": 5342
+    },
+    {
+      "t_ms": 24323,
+      "reason": "pts_out_of_range",
+      "pts": 5342
+    },
+    {
+      "t_ms": 24360,
+      "reason": "pts_out_of_range",
+      "pts": 5342
+    },
+    {
+      "t_ms": 24398,
+      "reason": "pts_out_of_range",
+      "pts": 5342
+    },
+    {
+      "t_ms": 24466,
+      "reason": "pts_out_of_range",
+      "pts": 5342
+    },
+    {
+      "t_ms": 24524,
+      "reason": "pts_out_of_range",
+      "pts": 5395
+    },
+    {
+      "t_ms": 24560,
+      "reason": "pts_out_of_range",
+      "pts": 5395
+    },
+    {
+      "t_ms": 24596,
+      "reason": "pts_out_of_range",
+      "pts": 5395
+    },
+    {
+      "t_ms": 24668,
+      "reason": "pts_out_of_range",
+      "pts": 5395
+    },
+    {
+      "t_ms": 24726,
+      "reason": "pts_out_of_range",
+      "pts": 5452
+    },
+    {
+      "t_ms": 24763,
+      "reason": "pts_out_of_range",
+      "pts": 5452
+    },
+    {
+      "t_ms": 24806,
+      "reason": "pts_out_of_range",
+      "pts": 5452
+    },
+    {
+      "t_ms": 24842,
+      "reason": "pts_out_of_range",
+      "pts": 5452
+    },
+    {
+      "t_ms": 24917,
+      "reason": "pts_out_of_range",
+      "pts": 5452
+    },
+    {
+      "t_ms": 24977,
+      "reason": "pts_out_of_range",
+      "pts": 5446
+    },
+    {
+      "t_ms": 25012,
+      "reason": "pts_out_of_range",
+      "pts": 5446
+    },
+    {
+      "t_ms": 25047,
+      "reason": "pts_out_of_range",
+      "pts": 5446
+    },
+    {
+      "t_ms": 25084,
+      "reason": "pts_out_of_range",
+      "pts": 5446
+    },
+    {
+      "t_ms": 25129,
+      "reason": "pts_out_of_range",
+      "pts": 5446
+    },
+    {
+      "t_ms": 25164,
+      "reason": "pts_out_of_range",
+      "pts": 5446
+    },
+    {
+      "t_ms": 25239,
+      "reason": "pts_out_of_range",
+      "pts": 5446
+    },
+    {
+      "t_ms": 25301,
+      "reason": "pts_out_of_range",
+      "pts": 5412
+    },
+    {
+      "t_ms": 25336,
+      "reason": "pts_out_of_range",
+      "pts": 5412
+    },
+    {
+      "t_ms": 25421,
+      "reason": "pts_out_of_range",
+      "pts": 5412
+    },
+    {
+      "t_ms": 25482,
+      "reason": "pts_out_of_range",
+      "pts": 5485
+    },
+    {
+      "t_ms": 25516,
+      "reason": "pts_out_of_range",
+      "pts": 5485
+    },
+    {
+      "t_ms": 25552,
+      "reason": "pts_out_of_range",
+      "pts": 5485
+    },
+    {
+      "t_ms": 25592,
+      "reason": "pts_out_of_range",
+      "pts": 5485
+    },
+    {
+      "t_ms": 25681,
+      "reason": "pts_out_of_range",
+      "pts": 5485
+    },
+    {
+      "t_ms": 25746,
+      "reason": "pts_out_of_range",
+      "pts": 5511
+    },
+    {
+      "t_ms": 25787,
+      "reason": "pts_out_of_range",
+      "pts": 5511
+    },
+    {
+      "t_ms": 25824,
+      "reason": "pts_out_of_range",
+      "pts": 5511
+    },
+    {
+      "t_ms": 25860,
+      "reason": "pts_out_of_range",
+      "pts": 5511
+    },
+    {
+      "t_ms": 25959,
+      "reason": "pts_out_of_range",
+      "pts": 5511
+    },
+    {
+      "t_ms": 26017,
+      "reason": "pts_out_of_range",
+      "pts": 5543
+    },
+    {
+      "t_ms": 26054,
+      "reason": "pts_out_of_range",
+      "pts": 5543
+    },
+    {
+      "t_ms": 69035,
+      "reason": "raw_candidate",
+      "x": 744,
+      "y": 612,
+      "pts": 656,
+      "bbW": 1878,
+      "bbH": 1074,
+      "gen": 405
+    },
+    {
+      "t_ms": 69125,
+      "reason": "raw_candidate",
+      "x": 744,
+      "y": 612,
+      "pts": 656,
+      "bbW": 1878,
+      "bbH": 1074,
+      "gen": 405
+    },
+    {
+      "t_ms": 69198,
+      "reason": "raw_candidate",
+      "x": 744,
+      "y": 612,
+      "pts": 656,
+      "bbW": 1878,
+      "bbH": 1074,
+      "gen": 405
+    },
+    {
+      "t_ms": 69323,
+      "reason": "raw_candidate",
+      "x": 744,
+      "y": 612,
+      "pts": 656,
+      "bbW": 1878,
+      "bbH": 1074,
+      "gen": 405
+    },
+    {
+      "t_ms": 69405,
+      "reason": "raw_candidate",
+      "x": 737,
+      "y": 613,
+      "pts": 762,
+      "bbW": 1854,
+      "bbH": 1074,
+      "gen": 406
+    },
+    {
+      "t_ms": 69490,
+      "reason": "raw_candidate",
+      "x": 737,
+      "y": 613,
+      "pts": 762,
+      "bbW": 1854,
+      "bbH": 1074,
+      "gen": 406
+    },
+    {
+      "t_ms": 69558,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 616,
+      "pts": 798,
+      "bbW": 1878,
+      "bbH": 1074,
+      "gen": 407
+    },
+    {
+      "t_ms": 73491,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 615,
+      "pts": 135,
+      "bbW": 1224,
+      "bbH": 1065,
+      "gen": 423
+    },
+    {
+      "t_ms": 73557,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 615,
+      "pts": 135,
+      "bbW": 1224,
+      "bbH": 1065,
+      "gen": 423
+    },
+    {
+      "t_ms": 73633,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 615,
+      "pts": 135,
+      "bbW": 1224,
+      "bbH": 1065,
+      "gen": 423
+    },
+    {
+      "t_ms": 73712,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 615,
+      "pts": 135,
+      "bbW": 1224,
+      "bbH": 1065,
+      "gen": 423
+    },
+    {
+      "t_ms": 73813,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 615,
+      "pts": 135,
+      "bbW": 1224,
+      "bbH": 1065,
+      "gen": 423
+    },
+    {
+      "t_ms": 73884,
+      "reason": "raw_candidate",
+      "x": 725,
+      "y": 629,
+      "pts": 149,
+      "bbW": 1344,
+      "bbH": 1065,
+      "gen": 424
+    },
+    {
+      "t_ms": 73972,
+      "reason": "raw_candidate",
+      "x": 725,
+      "y": 629,
+      "pts": 149,
+      "bbW": 1344,
+      "bbH": 1065,
+      "gen": 424
+    },
+    {
+      "t_ms": 74042,
+      "reason": "raw_candidate",
+      "x": 716,
+      "y": 625,
+      "pts": 232,
+      "bbW": 1347,
+      "bbH": 1065,
+      "gen": 425
+    },
+    {
+      "t_ms": 74128,
+      "reason": "raw_candidate",
+      "x": 716,
+      "y": 625,
+      "pts": 232,
+      "bbW": 1347,
+      "bbH": 1065,
+      "gen": 425
+    },
+    {
+      "t_ms": 74234,
+      "reason": "raw_candidate",
+      "x": 716,
+      "y": 625,
+      "pts": 232,
+      "bbW": 1347,
+      "bbH": 1065,
+      "gen": 425
+    },
+    {
+      "t_ms": 74320,
+      "reason": "raw_candidate",
+      "x": 706,
+      "y": 624,
+      "pts": 260,
+      "bbW": 1347,
+      "bbH": 1074,
+      "gen": 426
+    },
+    {
+      "t_ms": 74320,
+      "reason": "spatial_exclusion",
+      "x": 716,
+      "y": 626,
+      "ring": 7,
+      "distMm": 102.5
+    },
+    {
+      "t_ms": 74376,
+      "reason": "raw_candidate",
+      "x": 706,
+      "y": 624,
+      "pts": 260,
+      "bbW": 1347,
+      "bbH": 1074,
+      "gen": 426
+    },
+    {
+      "t_ms": 74468,
+      "reason": "raw_candidate",
+      "x": 706,
+      "y": 624,
+      "pts": 260,
+      "bbW": 1347,
+      "bbH": 1074,
+      "gen": 426
+    },
+    {
+      "t_ms": 74544,
+      "reason": "raw_candidate",
+      "x": 708,
+      "y": 620,
+      "pts": 298,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 427
+    },
+    {
+      "t_ms": 74596,
+      "reason": "raw_candidate",
+      "x": 708,
+      "y": 620,
+      "pts": 298,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 427
+    },
+    {
+      "t_ms": 74644,
+      "reason": "raw_candidate",
+      "x": 708,
+      "y": 620,
+      "pts": 298,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 427
+    },
+    {
+      "t_ms": 74736,
+      "reason": "raw_candidate",
+      "x": 708,
+      "y": 620,
+      "pts": 298,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 427
+    },
+    {
+      "t_ms": 74808,
+      "reason": "raw_candidate",
+      "x": 707,
+      "y": 630,
+      "pts": 346,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 428
+    },
+    {
+      "t_ms": 74808,
+      "reason": "spatial_exclusion",
+      "x": 707,
+      "y": 625,
+      "ring": 6,
+      "distMm": 104.7
+    },
+    {
+      "t_ms": 74879,
+      "reason": "raw_candidate",
+      "x": 707,
+      "y": 630,
+      "pts": 346,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 428
+    },
+    {
+      "t_ms": 74943,
+      "reason": "raw_candidate",
+      "x": 707,
+      "y": 630,
+      "pts": 346,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 428
+    },
+    {
+      "t_ms": 75048,
+      "reason": "raw_candidate",
+      "x": 707,
+      "y": 630,
+      "pts": 346,
+      "bbW": 1347,
+      "bbH": 1077,
+      "gen": 428
+    },
+    {
+      "t_ms": 75127,
+      "reason": "raw_candidate",
+      "x": 695,
+      "y": 629,
+      "pts": 396,
+      "bbW": 1407,
+      "bbH": 1077,
+      "gen": 429
+    },
+    {
+      "t_ms": 75211,
+      "reason": "raw_candidate",
+      "x": 695,
+      "y": 629,
+      "pts": 396,
+      "bbW": 1407,
+      "bbH": 1077,
+      "gen": 429
+    },
+    {
+      "t_ms": 75280,
+      "reason": "raw_candidate",
+      "x": 709,
+      "y": 617,
+      "pts": 464,
+      "bbW": 1854,
+      "bbH": 1077,
+      "gen": 430
+    },
+    {
+      "t_ms": 77420,
+      "reason": "pts_out_of_range",
+      "pts": 6
+    },
+    {
+      "t_ms": 77483,
+      "reason": "pts_out_of_range",
+      "pts": 6
+    },
+    {
+      "t_ms": 77571,
+      "reason": "pts_out_of_range",
+      "pts": 6
+    },
+    {
+      "t_ms": 77664,
+      "reason": "pts_out_of_range",
+      "pts": 6
+    },
+    {
+      "t_ms": 77751,
+      "reason": "pts_out_of_range",
+      "pts": 6
+    },
+    {
+      "t_ms": 77825,
+      "reason": "pts_out_of_range",
+      "pts": 14
+    },
+    {
+      "t_ms": 77874,
+      "reason": "pts_out_of_range",
+      "pts": 14
+    },
+    {
+      "t_ms": 77960,
+      "reason": "pts_out_of_range",
+      "pts": 14
+    },
+    {
+      "t_ms": 78029,
+      "reason": "pts_out_of_range",
+      "pts": 12
+    },
+    {
+      "t_ms": 78079,
+      "reason": "pts_out_of_range",
+      "pts": 12
+    },
+    {
+      "t_ms": 78160,
+      "reason": "pts_out_of_range",
+      "pts": 12
+    },
+    {
+      "t_ms": 78232,
+      "reason": "raw_candidate",
+      "x": 984,
+      "y": 533,
+      "pts": 16,
+      "bbW": 504,
+      "bbH": 213,
+      "gen": 442
+    },
+    {
+      "t_ms": 78285,
+      "reason": "raw_candidate",
+      "x": 984,
+      "y": 533,
+      "pts": 16,
+      "bbW": 504,
+      "bbH": 213,
+      "gen": 442
+    },
+    {
+      "t_ms": 78338,
+      "reason": "raw_candidate",
+      "x": 984,
+      "y": 533,
+      "pts": 16,
+      "bbW": 504,
+      "bbH": 213,
+      "gen": 442
+    },
+    {
+      "t_ms": 78435,
+      "reason": "raw_candidate",
+      "x": 984,
+      "y": 533,
+      "pts": 16,
+      "bbW": 504,
+      "bbH": 213,
+      "gen": 442
+    },
+    {
+      "t_ms": 78506,
+      "reason": "raw_candidate",
+      "x": 923,
+      "y": 514,
+      "pts": 17,
+      "bbW": 810,
+      "bbH": 300,
+      "gen": 443
+    },
+    {
+      "t_ms": 78555,
+      "reason": "raw_candidate",
+      "x": 923,
+      "y": 514,
+      "pts": 17,
+      "bbW": 810,
+      "bbH": 300,
+      "gen": 443
+    },
+    {
+      "t_ms": 78605,
+      "reason": "raw_candidate",
+      "x": 923,
+      "y": 514,
+      "pts": 17,
+      "bbW": 810,
+      "bbH": 300,
+      "gen": 443
+    },
+    {
+      "t_ms": 78655,
+      "reason": "raw_candidate",
+      "x": 923,
+      "y": 514,
+      "pts": 17,
+      "bbW": 810,
+      "bbH": 300,
+      "gen": 443
+    },
+    {
+      "t_ms": 78738,
+      "reason": "raw_candidate",
+      "x": 923,
+      "y": 514,
+      "pts": 17,
+      "bbW": 810,
+      "bbH": 300,
+      "gen": 443
+    },
+    {
+      "t_ms": 78809,
+      "reason": "raw_candidate",
+      "x": 915,
+      "y": 511,
+      "pts": 35,
+      "bbW": 633,
+      "bbH": 345,
+      "gen": 444
+    },
+    {
+      "t_ms": 78865,
+      "reason": "raw_candidate",
+      "x": 915,
+      "y": 511,
+      "pts": 35,
+      "bbW": 633,
+      "bbH": 345,
+      "gen": 444
+    },
+    {
+      "t_ms": 78969,
+      "reason": "raw_candidate",
+      "x": 915,
+      "y": 511,
+      "pts": 35,
+      "bbW": 633,
+      "bbH": 345,
+      "gen": 444
+    },
+    {
+      "t_ms": 79045,
+      "reason": "raw_candidate",
+      "x": 915,
+      "y": 541,
+      "pts": 58,
+      "bbW": 810,
+      "bbH": 396,
+      "gen": 445
+    },
+    {
+      "t_ms": 79045,
+      "reason": "spatial_jitter",
+      "x": 919,
+      "y": 512,
+      "x_new": 915,
+      "y_new": 541,
+      "jitter_px": 29,
+      "count_before": 2
+    },
+    {
+      "t_ms": 79112,
+      "reason": "raw_candidate",
+      "x": 915,
+      "y": 541,
+      "pts": 58,
+      "bbW": 810,
+      "bbH": 396,
+      "gen": 445
+    },
+    {
+      "t_ms": 79176,
+      "reason": "raw_candidate",
+      "x": 915,
+      "y": 541,
+      "pts": 58,
+      "bbW": 810,
+      "bbH": 396,
+      "gen": 445
+    },
+    {
+      "t_ms": 79268,
+      "reason": "raw_candidate",
+      "x": 915,
+      "y": 541,
+      "pts": 58,
+      "bbW": 810,
+      "bbH": 396,
+      "gen": 445
+    },
+    {
+      "t_ms": 79349,
+      "reason": "raw_candidate",
+      "x": 891,
+      "y": 556,
+      "pts": 89,
+      "bbW": 1137,
+      "bbH": 756,
+      "gen": 446
+    },
+    {
+      "t_ms": 79398,
+      "reason": "raw_candidate",
+      "x": 891,
+      "y": 556,
+      "pts": 89,
+      "bbW": 1137,
+      "bbH": 756,
+      "gen": 446
+    },
+    {
+      "t_ms": 79497,
+      "reason": "raw_candidate",
+      "x": 891,
+      "y": 556,
+      "pts": 89,
+      "bbW": 1137,
+      "bbH": 756,
+      "gen": 446
+    },
+    {
+      "t_ms": 79569,
+      "reason": "raw_candidate",
+      "x": 869,
+      "y": 560,
+      "pts": 93,
+      "bbW": 1056,
+      "bbH": 711,
+      "gen": 447
+    },
+    {
+      "t_ms": 79623,
+      "reason": "raw_candidate",
+      "x": 869,
+      "y": 560,
+      "pts": 93,
+      "bbW": 1056,
+      "bbH": 711,
+      "gen": 447
+    },
+    {
+      "t_ms": 79671,
+      "reason": "raw_candidate",
+      "x": 869,
+      "y": 560,
+      "pts": 93,
+      "bbW": 1056,
+      "bbH": 711,
+      "gen": 447
+    },
+    {
+      "t_ms": 79759,
+      "reason": "raw_candidate",
+      "x": 869,
+      "y": 560,
+      "pts": 93,
+      "bbW": 1056,
+      "bbH": 711,
+      "gen": 447
+    },
+    {
+      "t_ms": 79841,
+      "reason": "raw_candidate",
+      "x": 836,
+      "y": 566,
+      "pts": 108,
+      "bbW": 1065,
+      "bbH": 801,
+      "gen": 448
+    },
+    {
+      "t_ms": 79841,
+      "reason": "spatial_jitter",
+      "x": 880,
+      "y": 558,
+      "x_new": 836,
+      "y_new": 566,
+      "jitter_px": 45,
+      "count_before": 2
+    },
+    {
+      "t_ms": 79894,
+      "reason": "raw_candidate",
+      "x": 836,
+      "y": 566,
+      "pts": 108,
+      "bbW": 1065,
+      "bbH": 801,
+      "gen": 448
+    },
+    {
+      "t_ms": 79984,
+      "reason": "raw_candidate",
+      "x": 836,
+      "y": 566,
+      "pts": 108,
+      "bbW": 1065,
+      "bbH": 801,
+      "gen": 448
+    },
+    {
+      "t_ms": 80054,
+      "reason": "raw_candidate",
+      "x": 825,
+      "y": 555,
+      "pts": 137,
+      "bbW": 1083,
+      "bbH": 1071,
+      "gen": 449
+    },
+    {
+      "t_ms": 80105,
+      "reason": "raw_candidate",
+      "x": 825,
+      "y": 555,
+      "pts": 137,
+      "bbW": 1083,
+      "bbH": 1071,
+      "gen": 449
+    },
+    {
+      "t_ms": 80193,
+      "reason": "raw_candidate",
+      "x": 825,
+      "y": 555,
+      "pts": 137,
+      "bbW": 1083,
+      "bbH": 1071,
+      "gen": 449
+    },
+    {
+      "t_ms": 80270,
+      "reason": "raw_candidate",
+      "x": 794,
+      "y": 570,
+      "pts": 169,
+      "bbW": 1131,
+      "bbH": 960,
+      "gen": 450
+    },
+    {
+      "t_ms": 80270,
+      "reason": "spatial_jitter",
+      "x": 831,
+      "y": 561,
+      "x_new": 794,
+      "y_new": 570,
+      "jitter_px": 38,
+      "count_before": 2
+    },
+    {
+      "t_ms": 80318,
+      "reason": "raw_candidate",
+      "x": 794,
+      "y": 570,
+      "pts": 169,
+      "bbW": 1131,
+      "bbH": 960,
+      "gen": 450
+    },
+    {
+      "t_ms": 80371,
+      "reason": "raw_candidate",
+      "x": 794,
+      "y": 570,
+      "pts": 169,
+      "bbW": 1131,
+      "bbH": 960,
+      "gen": 450
+    },
+    {
+      "t_ms": 80463,
+      "reason": "raw_candidate",
+      "x": 794,
+      "y": 570,
+      "pts": 169,
+      "bbW": 1131,
+      "bbH": 960,
+      "gen": 450
+    },
+    {
+      "t_ms": 80540,
+      "reason": "raw_candidate",
+      "x": 808,
+      "y": 560,
+      "pts": 205,
+      "bbW": 1275,
+      "bbH": 1077,
+      "gen": 451
+    },
+    {
+      "t_ms": 80589,
+      "reason": "raw_candidate",
+      "x": 808,
+      "y": 560,
+      "pts": 205,
+      "bbW": 1275,
+      "bbH": 1077,
+      "gen": 451
+    },
+    {
+      "t_ms": 80674,
+      "reason": "raw_candidate",
+      "x": 808,
+      "y": 560,
+      "pts": 205,
+      "bbW": 1275,
+      "bbH": 1077,
+      "gen": 451
+    },
+    {
+      "t_ms": 80743,
+      "reason": "raw_candidate",
+      "x": 791,
+      "y": 554,
+      "pts": 262,
+      "bbW": 1341,
+      "bbH": 1077,
+      "gen": 452
+    },
+    {
+      "t_ms": 83315,
+      "reason": "raw_candidate",
+      "x": 905,
+      "y": 498,
+      "pts": 23,
+      "bbW": 630,
+      "bbH": 420,
+      "gen": 462
+    },
+    {
+      "t_ms": 83365,
+      "reason": "raw_candidate",
+      "x": 905,
+      "y": 498,
+      "pts": 23,
+      "bbW": 630,
+      "bbH": 420,
+      "gen": 462
+    },
+    {
+      "t_ms": 83453,
+      "reason": "raw_candidate",
+      "x": 905,
+      "y": 498,
+      "pts": 23,
+      "bbW": 630,
+      "bbH": 420,
+      "gen": 462
+    },
+    {
+      "t_ms": 83522,
+      "reason": "raw_candidate",
+      "x": 900,
+      "y": 527,
+      "pts": 27,
+      "bbW": 630,
+      "bbH": 399,
+      "gen": 463
+    },
+    {
+      "t_ms": 83575,
+      "reason": "raw_candidate",
+      "x": 900,
+      "y": 527,
+      "pts": 27,
+      "bbW": 630,
+      "bbH": 399,
+      "gen": 463
+    },
+    {
+      "t_ms": 83628,
+      "reason": "raw_candidate",
+      "x": 900,
+      "y": 527,
+      "pts": 27,
+      "bbW": 630,
+      "bbH": 399,
+      "gen": 463
+    },
+    {
+      "t_ms": 83713,
+      "reason": "raw_candidate",
+      "x": 900,
+      "y": 527,
+      "pts": 27,
+      "bbW": 630,
+      "bbH": 399,
+      "gen": 463
+    },
+    {
+      "t_ms": 83782,
+      "reason": "raw_candidate",
+      "x": 863,
+      "y": 567,
+      "pts": 47,
+      "bbW": 984,
+      "bbH": 774,
+      "gen": 464
+    },
+    {
+      "t_ms": 83843,
+      "reason": "raw_candidate",
+      "x": 863,
+      "y": 567,
+      "pts": 47,
+      "bbW": 984,
+      "bbH": 774,
+      "gen": 464
+    },
+    {
+      "t_ms": 83894,
+      "reason": "raw_candidate",
+      "x": 863,
+      "y": 567,
+      "pts": 47,
+      "bbW": 984,
+      "bbH": 774,
+      "gen": 464
+    },
+    {
+      "t_ms": 83976,
+      "reason": "raw_candidate",
+      "x": 863,
+      "y": 567,
+      "pts": 47,
+      "bbW": 984,
+      "bbH": 774,
+      "gen": 464
+    },
+    {
+      "t_ms": 84044,
+      "reason": "raw_candidate",
+      "x": 850,
+      "y": 542,
+      "pts": 60,
+      "bbW": 987,
+      "bbH": 1029,
+      "gen": 465
+    },
+    {
+      "t_ms": 84093,
+      "reason": "raw_candidate",
+      "x": 850,
+      "y": 542,
+      "pts": 60,
+      "bbW": 987,
+      "bbH": 1029,
+      "gen": 465
+    },
+    {
+      "t_ms": 84141,
+      "reason": "raw_candidate",
+      "x": 850,
+      "y": 542,
+      "pts": 60,
+      "bbW": 987,
+      "bbH": 1029,
+      "gen": 465
+    },
+    {
+      "t_ms": 84226,
+      "reason": "raw_candidate",
+      "x": 850,
+      "y": 542,
+      "pts": 60,
+      "bbW": 987,
+      "bbH": 1029,
+      "gen": 465
+    },
+    {
+      "t_ms": 84297,
+      "reason": "raw_candidate",
+      "x": 821,
+      "y": 552,
+      "pts": 77,
+      "bbW": 990,
+      "bbH": 1071,
+      "gen": 466
+    },
+    {
+      "t_ms": 84354,
+      "reason": "raw_candidate",
+      "x": 821,
+      "y": 552,
+      "pts": 77,
+      "bbW": 990,
+      "bbH": 1071,
+      "gen": 466
+    },
+    {
+      "t_ms": 84433,
+      "reason": "raw_candidate",
+      "x": 821,
+      "y": 552,
+      "pts": 77,
+      "bbW": 990,
+      "bbH": 1071,
+      "gen": 466
+    },
+    {
+      "t_ms": 84503,
+      "reason": "raw_candidate",
+      "x": 779,
+      "y": 582,
+      "pts": 105,
+      "bbW": 1053,
+      "bbH": 1071,
+      "gen": 467
+    },
+    {
+      "t_ms": 84562,
+      "reason": "raw_candidate",
+      "x": 779,
+      "y": 582,
+      "pts": 105,
+      "bbW": 1053,
+      "bbH": 1071,
+      "gen": 467
+    },
+    {
+      "t_ms": 84611,
+      "reason": "raw_candidate",
+      "x": 779,
+      "y": 582,
+      "pts": 105,
+      "bbW": 1053,
+      "bbH": 1071,
+      "gen": 467
+    },
+    {
+      "t_ms": 84693,
+      "reason": "raw_candidate",
+      "x": 779,
+      "y": 582,
+      "pts": 105,
+      "bbW": 1053,
+      "bbH": 1071,
+      "gen": 467
+    },
+    {
+      "t_ms": 84764,
+      "reason": "raw_candidate",
+      "x": 745,
+      "y": 613,
+      "pts": 132,
+      "bbW": 1128,
+      "bbH": 1029,
+      "gen": 468
+    },
+    {
+      "t_ms": 84812,
+      "reason": "raw_candidate",
+      "x": 745,
+      "y": 613,
+      "pts": 132,
+      "bbW": 1128,
+      "bbH": 1029,
+      "gen": 468
+    },
+    {
+      "t_ms": 84861,
+      "reason": "raw_candidate",
+      "x": 745,
+      "y": 613,
+      "pts": 132,
+      "bbW": 1128,
+      "bbH": 1029,
+      "gen": 468
+    },
+    {
+      "t_ms": 84912,
+      "reason": "raw_candidate",
+      "x": 745,
+      "y": 613,
+      "pts": 132,
+      "bbW": 1128,
+      "bbH": 1029,
+      "gen": 468
+    },
+    {
+      "t_ms": 85010,
+      "reason": "raw_candidate",
+      "x": 745,
+      "y": 613,
+      "pts": 132,
+      "bbW": 1128,
+      "bbH": 1029,
+      "gen": 468
+    },
+    {
+      "t_ms": 85080,
+      "reason": "raw_candidate",
+      "x": 731,
+      "y": 598,
+      "pts": 188,
+      "bbW": 1254,
+      "bbH": 1071,
+      "gen": 469
+    },
+    {
+      "t_ms": 85162,
+      "reason": "raw_candidate",
+      "x": 731,
+      "y": 598,
+      "pts": 188,
+      "bbW": 1254,
+      "bbH": 1071,
+      "gen": 469
+    },
+    {
+      "t_ms": 85230,
+      "reason": "raw_candidate",
+      "x": 736,
+      "y": 591,
+      "pts": 273,
+      "bbW": 1326,
+      "bbH": 1071,
+      "gen": 470
+    },
+    {
+      "t_ms": 85230,
+      "reason": "spatial_exclusion",
+      "x": 737,
+      "y": 600,
+      "ring": 7,
+      "distMm": 92.6
+    },
+    {
+      "t_ms": 85278,
+      "reason": "raw_candidate",
+      "x": 736,
+      "y": 591,
+      "pts": 273,
+      "bbW": 1326,
+      "bbH": 1071,
+      "gen": 470
+    },
+    {
+      "t_ms": 85327,
+      "reason": "raw_candidate",
+      "x": 736,
+      "y": 591,
+      "pts": 273,
+      "bbW": 1326,
+      "bbH": 1071,
+      "gen": 470
+    },
+    {
+      "t_ms": 85374,
+      "reason": "raw_candidate",
+      "x": 736,
+      "y": 591,
+      "pts": 273,
+      "bbW": 1326,
+      "bbH": 1071,
+      "gen": 470
+    },
+    {
+      "t_ms": 85463,
+      "reason": "raw_candidate",
+      "x": 736,
+      "y": 591,
+      "pts": 273,
+      "bbW": 1326,
+      "bbH": 1071,
+      "gen": 470
+    },
+    {
+      "t_ms": 85534,
+      "reason": "raw_candidate",
+      "x": 722,
+      "y": 604,
+      "pts": 305,
+      "bbW": 1374,
+      "bbH": 1071,
+      "gen": 471
+    },
+    {
+      "t_ms": 85596,
+      "reason": "raw_candidate",
+      "x": 722,
+      "y": 604,
+      "pts": 305,
+      "bbW": 1374,
+      "bbH": 1071,
+      "gen": 471
+    },
+    {
+      "t_ms": 85650,
+      "reason": "raw_candidate",
+      "x": 722,
+      "y": 604,
+      "pts": 305,
+      "bbW": 1374,
+      "bbH": 1071,
+      "gen": 471
+    },
+    {
+      "t_ms": 85738,
+      "reason": "raw_candidate",
+      "x": 722,
+      "y": 604,
+      "pts": 305,
+      "bbW": 1374,
+      "bbH": 1071,
+      "gen": 471
+    },
+    {
+      "t_ms": 85817,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 609,
+      "pts": 345,
+      "bbW": 1794,
+      "bbH": 1074,
+      "gen": 472
+    },
+    {
+      "t_ms": 85817,
+      "reason": "spatial_exclusion",
+      "x": 728,
+      "y": 601,
+      "ring": 7,
+      "distMm": 95.3
+    },
+    {
+      "t_ms": 85866,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 609,
+      "pts": 345,
+      "bbW": 1794,
+      "bbH": 1074,
+      "gen": 472
+    },
+    {
+      "t_ms": 85916,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 609,
+      "pts": 345,
+      "bbW": 1794,
+      "bbH": 1074,
+      "gen": 472
+    },
+    {
+      "t_ms": 85997,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 609,
+      "pts": 345,
+      "bbW": 1794,
+      "bbH": 1074,
+      "gen": 472
+    },
+    {
+      "t_ms": 86064,
+      "reason": "raw_candidate",
+      "x": 716,
+      "y": 617,
+      "pts": 397,
+      "bbW": 1794,
+      "bbH": 1077,
+      "gen": 473
+    },
+    {
+      "t_ms": 86112,
+      "reason": "raw_candidate",
+      "x": 716,
+      "y": 617,
+      "pts": 397,
+      "bbW": 1794,
+      "bbH": 1077,
+      "gen": 473
+    },
+    {
+      "t_ms": 86162,
+      "reason": "raw_candidate",
+      "x": 716,
+      "y": 617,
+      "pts": 397,
+      "bbW": 1794,
+      "bbH": 1077,
+      "gen": 473
+    },
+    {
+      "t_ms": 86247,
+      "reason": "raw_candidate",
+      "x": 716,
+      "y": 617,
+      "pts": 397,
+      "bbW": 1794,
+      "bbH": 1077,
+      "gen": 473
+    },
+    {
+      "t_ms": 86319,
+      "reason": "raw_candidate",
+      "x": 709,
+      "y": 615,
+      "pts": 445,
+      "bbW": 1371,
+      "bbH": 1077,
+      "gen": 474
+    },
+    {
+      "t_ms": 86322,
+      "reason": "spatial_exclusion",
+      "x": 718,
+      "y": 614,
+      "ring": 7,
+      "distMm": 100.1
+    },
+    {
+      "t_ms": 86374,
+      "reason": "raw_candidate",
+      "x": 709,
+      "y": 615,
+      "pts": 445,
+      "bbW": 1371,
+      "bbH": 1077,
+      "gen": 474
+    },
+    {
+      "t_ms": 86462,
+      "reason": "raw_candidate",
+      "x": 709,
+      "y": 615,
+      "pts": 445,
+      "bbW": 1371,
+      "bbH": 1077,
+      "gen": 474
+    },
+    {
+      "t_ms": 86542,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 616,
+      "pts": 502,
+      "bbW": 1344,
+      "bbH": 1077,
+      "gen": 475
+    },
+    {
+      "t_ms": 86595,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 616,
+      "pts": 502,
+      "bbW": 1344,
+      "bbH": 1077,
+      "gen": 475
+    },
+    {
+      "t_ms": 86644,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 616,
+      "pts": 502,
+      "bbW": 1344,
+      "bbH": 1077,
+      "gen": 475
+    },
+    {
+      "t_ms": 86730,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 616,
+      "pts": 502,
+      "bbW": 1344,
+      "bbH": 1077,
+      "gen": 475
+    },
+    {
+      "t_ms": 86800,
+      "reason": "raw_candidate",
+      "x": 721,
+      "y": 621,
+      "pts": 559,
+      "bbW": 1797,
+      "bbH": 1077,
+      "gen": 476
+    },
+    {
+      "t_ms": 86801,
+      "reason": "spatial_exclusion",
+      "x": 713,
+      "y": 618,
+      "ring": 7,
+      "distMm": 102
+    },
+    {
+      "t_ms": 86851,
+      "reason": "raw_candidate",
+      "x": 721,
+      "y": 621,
+      "pts": 559,
+      "bbW": 1797,
+      "bbH": 1077,
+      "gen": 476
+    },
+    {
+      "t_ms": 86900,
+      "reason": "raw_candidate",
+      "x": 721,
+      "y": 621,
+      "pts": 559,
+      "bbW": 1797,
+      "bbH": 1077,
+      "gen": 476
+    },
+    {
+      "t_ms": 86989,
+      "reason": "raw_candidate",
+      "x": 721,
+      "y": 621,
+      "pts": 559,
+      "bbW": 1797,
+      "bbH": 1077,
+      "gen": 476
+    },
+    {
+      "t_ms": 87063,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 613,
+      "bbW": 1860,
+      "bbH": 1077,
+      "gen": 477
+    },
+    {
+      "t_ms": 87063,
+      "reason": "frozen_spot_learned",
+      "x": 725,
+      "y": 615,
+      "n": 67,
+      "span_s": 18
+    },
+    {
+      "t_ms": 87121,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 613,
+      "bbW": 1860,
+      "bbH": 1077,
+      "gen": 477
+    },
+    {
+      "t_ms": 87190,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 613,
+      "bbW": 1860,
+      "bbH": 1077,
+      "gen": 477
+    },
+    {
+      "t_ms": 87274,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 613,
+      "bbW": 1860,
+      "bbH": 1077,
+      "gen": 477
+    },
+    {
+      "t_ms": 87345,
+      "reason": "raw_candidate",
+      "x": 743,
+      "y": 620,
+      "pts": 702,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 478
+    },
+    {
+      "t_ms": 87346,
+      "reason": "spatial_exclusion",
+      "x": 732,
+      "y": 620,
+      "ring": 7,
+      "distMm": 96.7
+    },
+    {
+      "t_ms": 87438,
+      "reason": "raw_candidate",
+      "x": 743,
+      "y": 620,
+      "pts": 702,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 478
+    },
+    {
+      "t_ms": 87507,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 618,
+      "pts": 765,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 479
+    },
+    {
+      "t_ms": 87556,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 618,
+      "pts": 765,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 479
+    },
+    {
+      "t_ms": 87608,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 618,
+      "pts": 765,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 479
+    },
+    {
+      "t_ms": 87693,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 618,
+      "pts": 765,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 479
+    },
+    {
+      "t_ms": 87769,
+      "reason": "raw_candidate",
+      "x": 747,
+      "y": 619,
+      "pts": 789,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 480
+    },
+    {
+      "t_ms": 87770,
+      "reason": "spatial_exclusion",
+      "x": 747,
+      "y": 619,
+      "ring": 7,
+      "distMm": 92.5
+    },
+    {
+      "t_ms": 87822,
+      "reason": "raw_candidate",
+      "x": 747,
+      "y": 619,
+      "pts": 789,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 480
+    },
+    {
+      "t_ms": 87881,
+      "reason": "raw_candidate",
+      "x": 747,
+      "y": 619,
+      "pts": 789,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 480
+    },
+    {
+      "t_ms": 87964,
+      "reason": "raw_candidate",
+      "x": 747,
+      "y": 619,
+      "pts": 789,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 480
+    },
+    {
+      "t_ms": 88035,
+      "reason": "raw_candidate",
+      "x": 751,
+      "y": 628,
+      "pts": 839,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 481
+    },
+    {
+      "t_ms": 88084,
+      "reason": "raw_candidate",
+      "x": 751,
+      "y": 628,
+      "pts": 839,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 481
+    },
+    {
+      "t_ms": 88133,
+      "reason": "raw_candidate",
+      "x": 751,
+      "y": 628,
+      "pts": 839,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 481
+    },
+    {
+      "t_ms": 88218,
+      "reason": "raw_candidate",
+      "x": 751,
+      "y": 628,
+      "pts": 839,
+      "bbW": 1869,
+      "bbH": 1077,
+      "gen": 481
+    },
+    {
+      "t_ms": 88290,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 630,
+      "pts": 897,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 482
+    },
+    {
+      "t_ms": 88290,
+      "reason": "spatial_exclusion",
+      "x": 753,
+      "y": 625,
+      "ring": 7,
+      "distMm": 91.7
+    },
+    {
+      "t_ms": 88358,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 630,
+      "pts": 897,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 482
+    },
+    {
+      "t_ms": 88409,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 630,
+      "pts": 897,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 482
+    },
+    {
+      "t_ms": 88495,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 630,
+      "pts": 897,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 482
+    },
+    {
+      "t_ms": 88567,
+      "reason": "raw_candidate",
+      "x": 757,
+      "y": 636,
+      "pts": 930,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 483
+    },
+    {
+      "t_ms": 88625,
+      "reason": "raw_candidate",
+      "x": 757,
+      "y": 636,
+      "pts": 930,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 483
+    },
+    {
+      "t_ms": 88716,
+      "reason": "raw_candidate",
+      "x": 757,
+      "y": 636,
+      "pts": 930,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 483
+    },
+    {
+      "t_ms": 88786,
+      "reason": "raw_candidate",
+      "x": 759,
+      "y": 644,
+      "pts": 1004,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 484
+    },
+    {
+      "t_ms": 88786,
+      "reason": "spatial_exclusion",
+      "x": 759,
+      "y": 636,
+      "ring": 7,
+      "distMm": 91.9
+    },
+    {
+      "t_ms": 88836,
+      "reason": "raw_candidate",
+      "x": 759,
+      "y": 644,
+      "pts": 1004,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 484
+    },
+    {
+      "t_ms": 88933,
+      "reason": "raw_candidate",
+      "x": 759,
+      "y": 644,
+      "pts": 1004,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 484
+    },
+    {
+      "t_ms": 89003,
+      "reason": "raw_candidate",
+      "x": 762,
+      "y": 648,
+      "pts": 1041,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 485
+    },
+    {
+      "t_ms": 89059,
+      "reason": "raw_candidate",
+      "x": 762,
+      "y": 648,
+      "pts": 1041,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 485
+    },
+    {
+      "t_ms": 89113,
+      "reason": "raw_candidate",
+      "x": 762,
+      "y": 648,
+      "pts": 1041,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 485
+    },
+    {
+      "t_ms": 89193,
+      "reason": "raw_candidate",
+      "x": 762,
+      "y": 648,
+      "pts": 1041,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 485
+    },
+    {
+      "t_ms": 89274,
+      "reason": "raw_candidate",
+      "x": 760,
+      "y": 655,
+      "pts": 1131,
+      "bbW": 1875,
+      "bbH": 1077,
+      "gen": 486
+    },
+    {
+      "t_ms": 93078,
+      "reason": "pts_out_of_range",
+      "pts": 9
+    },
+    {
+      "t_ms": 93128,
+      "reason": "pts_out_of_range",
+      "pts": 9
+    },
+    {
+      "t_ms": 93227,
+      "reason": "pts_out_of_range",
+      "pts": 9
+    },
+    {
+      "t_ms": 93300,
+      "reason": "raw_candidate",
+      "x": 920,
+      "y": 565,
+      "pts": 29,
+      "bbW": 984,
+      "bbH": 1029,
+      "gen": 502
+    },
+    {
+      "t_ms": 93369,
+      "reason": "raw_candidate",
+      "x": 920,
+      "y": 565,
+      "pts": 29,
+      "bbW": 984,
+      "bbH": 1029,
+      "gen": 502
+    },
+    {
+      "t_ms": 93428,
+      "reason": "raw_candidate",
+      "x": 920,
+      "y": 565,
+      "pts": 29,
+      "bbW": 984,
+      "bbH": 1029,
+      "gen": 502
+    },
+    {
+      "t_ms": 93521,
+      "reason": "raw_candidate",
+      "x": 920,
+      "y": 565,
+      "pts": 29,
+      "bbW": 984,
+      "bbH": 1029,
+      "gen": 502
+    },
+    {
+      "t_ms": 93600,
+      "reason": "raw_candidate",
+      "x": 874,
+      "y": 587,
+      "pts": 22,
+      "bbW": 936,
+      "bbH": 684,
+      "gen": 503
+    },
+    {
+      "t_ms": 93650,
+      "reason": "raw_candidate",
+      "x": 874,
+      "y": 587,
+      "pts": 22,
+      "bbW": 936,
+      "bbH": 684,
+      "gen": 503
+    },
+    {
+      "t_ms": 93744,
+      "reason": "raw_candidate",
+      "x": 874,
+      "y": 587,
+      "pts": 22,
+      "bbW": 936,
+      "bbH": 684,
+      "gen": 503
+    },
+    {
+      "t_ms": 93819,
+      "reason": "raw_candidate",
+      "x": 890,
+      "y": 547,
+      "pts": 33,
+      "bbW": 651,
+      "bbH": 1074,
+      "gen": 504
+    },
+    {
+      "t_ms": 93870,
+      "reason": "raw_candidate",
+      "x": 890,
+      "y": 547,
+      "pts": 33,
+      "bbW": 651,
+      "bbH": 1074,
+      "gen": 504
+    },
+    {
+      "t_ms": 93979,
+      "reason": "raw_candidate",
+      "x": 890,
+      "y": 547,
+      "pts": 33,
+      "bbW": 651,
+      "bbH": 1074,
+      "gen": 504
+    },
+    {
+      "t_ms": 94050,
+      "reason": "raw_candidate",
+      "x": 875,
+      "y": 535,
+      "pts": 48,
+      "bbW": 708,
+      "bbH": 1074,
+      "gen": 505
+    },
+    {
+      "t_ms": 94102,
+      "reason": "raw_candidate",
+      "x": 875,
+      "y": 535,
+      "pts": 48,
+      "bbW": 708,
+      "bbH": 1074,
+      "gen": 505
+    },
+    {
+      "t_ms": 94224,
+      "reason": "raw_candidate",
+      "x": 875,
+      "y": 535,
+      "pts": 48,
+      "bbW": 708,
+      "bbH": 1074,
+      "gen": 505
+    },
+    {
+      "t_ms": 94294,
+      "reason": "raw_candidate",
+      "x": 877,
+      "y": 538,
+      "pts": 52,
+      "bbW": 855,
+      "bbH": 1029,
+      "gen": 506
+    },
+    {
+      "t_ms": 96817,
+      "reason": "pts_out_of_range",
+      "pts": 8
+    },
+    {
+      "t_ms": 96895,
+      "reason": "pts_out_of_range",
+      "pts": 8
+    },
+    {
+      "t_ms": 96967,
+      "reason": "pts_out_of_range",
+      "pts": 8
+    },
+    {
+      "t_ms": 97084,
+      "reason": "pts_out_of_range",
+      "pts": 8
+    },
+    {
+      "t_ms": 97200,
+      "reason": "pts_out_of_range",
+      "pts": 10
+    },
+    {
+      "t_ms": 97268,
+      "reason": "raw_candidate",
+      "x": 902,
+      "y": 522,
+      "pts": 29,
+      "bbW": 507,
+      "bbH": 738,
+      "gen": 518
+    },
+    {
+      "t_ms": 97269,
+      "reason": "frozen_spot_learned",
+      "x": 912,
+      "y": 519,
+      "n": 20,
+      "span_s": 19
+    },
+    {
+      "t_ms": 97322,
+      "reason": "raw_candidate",
+      "x": 902,
+      "y": 522,
+      "pts": 29,
+      "bbW": 507,
+      "bbH": 738,
+      "gen": 518
+    },
+    {
+      "t_ms": 97374,
+      "reason": "raw_candidate",
+      "x": 902,
+      "y": 522,
+      "pts": 29,
+      "bbW": 507,
+      "bbH": 738,
+      "gen": 518
+    },
+    {
+      "t_ms": 97424,
+      "reason": "raw_candidate",
+      "x": 902,
+      "y": 522,
+      "pts": 29,
+      "bbW": 507,
+      "bbH": 738,
+      "gen": 518
+    },
+    {
+      "t_ms": 97504,
+      "reason": "raw_candidate",
+      "x": 902,
+      "y": 522,
+      "pts": 29,
+      "bbW": 507,
+      "bbH": 738,
+      "gen": 518
+    },
+    {
+      "t_ms": 97575,
+      "reason": "raw_candidate",
+      "x": 848,
+      "y": 498,
+      "pts": 26,
+      "bbW": 456,
+      "bbH": 306,
+      "gen": 519
+    },
+    {
+      "t_ms": 97627,
+      "reason": "raw_candidate",
+      "x": 848,
+      "y": 498,
+      "pts": 26,
+      "bbW": 456,
+      "bbH": 306,
+      "gen": 519
+    },
+    {
+      "t_ms": 97681,
+      "reason": "raw_candidate",
+      "x": 848,
+      "y": 498,
+      "pts": 26,
+      "bbW": 456,
+      "bbH": 306,
+      "gen": 519
+    },
+    {
+      "t_ms": 97772,
+      "reason": "raw_candidate",
+      "x": 848,
+      "y": 498,
+      "pts": 26,
+      "bbW": 456,
+      "bbH": 306,
+      "gen": 519
+    },
+    {
+      "t_ms": 97856,
+      "reason": "raw_candidate",
+      "x": 847,
+      "y": 507,
+      "pts": 38,
+      "bbW": 456,
+      "bbH": 372,
+      "gen": 520
+    },
+    {
+      "t_ms": 97918,
+      "reason": "raw_candidate",
+      "x": 847,
+      "y": 507,
+      "pts": 38,
+      "bbW": 456,
+      "bbH": 372,
+      "gen": 520
+    },
+    {
+      "t_ms": 98002,
+      "reason": "raw_candidate",
+      "x": 847,
+      "y": 507,
+      "pts": 38,
+      "bbW": 456,
+      "bbH": 372,
+      "gen": 520
+    },
+    {
+      "t_ms": 98076,
+      "reason": "raw_candidate",
+      "x": 865,
+      "y": 501,
+      "pts": 48,
+      "bbW": 750,
+      "bbH": 381,
+      "gen": 521
+    },
+    {
+      "t_ms": 100862,
+      "reason": "pts_out_of_range",
+      "pts": 5
+    },
+    {
+      "t_ms": 100916,
+      "reason": "pts_out_of_range",
+      "pts": 5
+    },
+    {
+      "t_ms": 101002,
+      "reason": "pts_out_of_range",
+      "pts": 5
+    },
+    {
+      "t_ms": 101078,
+      "reason": "raw_candidate",
+      "x": 849,
+      "y": 518,
+      "pts": 17,
+      "bbW": 798,
+      "bbH": 288,
+      "gen": 533
+    },
+    {
+      "t_ms": 101192,
+      "reason": "raw_candidate",
+      "x": 849,
+      "y": 518,
+      "pts": 17,
+      "bbW": 798,
+      "bbH": 288,
+      "gen": 533
+    },
+    {
+      "t_ms": 101262,
+      "reason": "raw_candidate",
+      "x": 821,
+      "y": 531,
+      "pts": 42,
+      "bbW": 795,
+      "bbH": 738,
+      "gen": 534
+    },
+    {
+      "t_ms": 101263,
+      "reason": "frozen_spot_learned",
+      "x": 820,
+      "y": 556,
+      "n": 14,
+      "span_s": 21
+    },
+    {
+      "t_ms": 101322,
+      "reason": "raw_candidate",
+      "x": 821,
+      "y": 531,
+      "pts": 42,
+      "bbW": 795,
+      "bbH": 738,
+      "gen": 534
+    },
+    {
+      "t_ms": 101374,
+      "reason": "raw_candidate",
+      "x": 821,
+      "y": 531,
+      "pts": 42,
+      "bbW": 795,
+      "bbH": 738,
+      "gen": 534
+    },
+    {
+      "t_ms": 101478,
+      "reason": "raw_candidate",
+      "x": 821,
+      "y": 531,
+      "pts": 42,
+      "bbW": 795,
+      "bbH": 738,
+      "gen": 534
+    },
+    {
+      "t_ms": 101552,
+      "reason": "raw_candidate",
+      "x": 806,
+      "y": 542,
+      "pts": 48,
+      "bbW": 1131,
+      "bbH": 687,
+      "gen": 535
+    },
+    {
+      "t_ms": 101603,
+      "reason": "raw_candidate",
+      "x": 806,
+      "y": 542,
+      "pts": 48,
+      "bbW": 1131,
+      "bbH": 687,
+      "gen": 535
+    },
+    {
+      "t_ms": 101689,
+      "reason": "raw_candidate",
+      "x": 806,
+      "y": 542,
+      "pts": 48,
+      "bbW": 1131,
+      "bbH": 687,
+      "gen": 535
+    },
+    {
+      "t_ms": 101768,
+      "reason": "raw_candidate",
+      "x": 813,
+      "y": 544,
+      "pts": 54,
+      "bbW": 1131,
+      "bbH": 726,
+      "gen": 536
+    },
+    {
+      "t_ms": 101769,
+      "reason": "spatial_exclusion",
+      "x": 813,
+      "y": 539,
+      "ring": 8,
+      "distMm": 62.5
+    },
+    {
+      "t_ms": 101820,
+      "reason": "raw_candidate",
+      "x": 813,
+      "y": 544,
+      "pts": 54,
+      "bbW": 1131,
+      "bbH": 726,
+      "gen": 536
+    },
+    {
+      "t_ms": 101874,
+      "reason": "raw_candidate",
+      "x": 813,
+      "y": 544,
+      "pts": 54,
+      "bbW": 1131,
+      "bbH": 726,
+      "gen": 536
+    },
+    {
+      "t_ms": 101954,
+      "reason": "raw_candidate",
+      "x": 813,
+      "y": 544,
+      "pts": 54,
+      "bbW": 1131,
+      "bbH": 726,
+      "gen": 536
+    },
+    {
+      "t_ms": 102027,
+      "reason": "raw_candidate",
+      "x": 813,
+      "y": 548,
+      "pts": 63,
+      "bbW": 1134,
+      "bbH": 900,
+      "gen": 537
+    },
+    {
+      "t_ms": 102089,
+      "reason": "raw_candidate",
+      "x": 813,
+      "y": 548,
+      "pts": 63,
+      "bbW": 1134,
+      "bbH": 900,
+      "gen": 537
+    },
+    {
+      "t_ms": 102172,
+      "reason": "raw_candidate",
+      "x": 813,
+      "y": 548,
+      "pts": 63,
+      "bbW": 1134,
+      "bbH": 900,
+      "gen": 537
+    },
+    {
+      "t_ms": 102246,
+      "reason": "raw_candidate",
+      "x": 805,
+      "y": 556,
+      "pts": 75,
+      "bbW": 1134,
+      "bbH": 810,
+      "gen": 538
+    },
+    {
+      "t_ms": 102246,
+      "reason": "spatial_exclusion",
+      "x": 810,
+      "y": 549,
+      "ring": 8,
+      "distMm": 64.4
+    },
+    {
+      "t_ms": 102299,
+      "reason": "raw_candidate",
+      "x": 805,
+      "y": 556,
+      "pts": 75,
+      "bbW": 1134,
+      "bbH": 810,
+      "gen": 538
+    },
+    {
+      "t_ms": 102352,
+      "reason": "raw_candidate",
+      "x": 805,
+      "y": 556,
+      "pts": 75,
+      "bbW": 1134,
+      "bbH": 810,
+      "gen": 538
+    },
+    {
+      "t_ms": 102402,
+      "reason": "raw_candidate",
+      "x": 805,
+      "y": 556,
+      "pts": 75,
+      "bbW": 1134,
+      "bbH": 810,
+      "gen": 538
+    },
+    {
+      "t_ms": 102496,
+      "reason": "raw_candidate",
+      "x": 805,
+      "y": 556,
+      "pts": 75,
+      "bbW": 1134,
+      "bbH": 810,
+      "gen": 538
+    },
+    {
+      "t_ms": 102570,
+      "reason": "raw_candidate",
+      "x": 779,
+      "y": 570,
+      "pts": 93,
+      "bbW": 1137,
+      "bbH": 819,
+      "gen": 539
+    },
+    {
+      "t_ms": 102570,
+      "reason": "frozen_spot_learned",
+      "x": 786,
+      "y": 575,
+      "n": 9,
+      "span_s": 22
+    },
+    {
+      "t_ms": 102626,
+      "reason": "raw_candidate",
+      "x": 779,
+      "y": 570,
+      "pts": 93,
+      "bbW": 1137,
+      "bbH": 819,
+      "gen": 539
+    },
+    {
+      "t_ms": 102707,
+      "reason": "raw_candidate",
+      "x": 779,
+      "y": 570,
+      "pts": 93,
+      "bbW": 1137,
+      "bbH": 819,
+      "gen": 539
+    },
+    {
+      "t_ms": 102778,
+      "reason": "raw_candidate",
+      "x": 769,
+      "y": 602,
+      "pts": 132,
+      "bbW": 1155,
+      "bbH": 894,
+      "gen": 540
+    },
+    {
+      "t_ms": 102830,
+      "reason": "raw_candidate",
+      "x": 769,
+      "y": 602,
+      "pts": 132,
+      "bbW": 1155,
+      "bbH": 894,
+      "gen": 540
+    },
+    {
+      "t_ms": 102911,
+      "reason": "raw_candidate",
+      "x": 769,
+      "y": 602,
+      "pts": 132,
+      "bbW": 1155,
+      "bbH": 894,
+      "gen": 540
+    },
+    {
+      "t_ms": 102984,
+      "reason": "raw_candidate",
+      "x": 752,
+      "y": 629,
+      "pts": 151,
+      "bbW": 1137,
+      "bbH": 972,
+      "gen": 541
+    },
+    {
+      "t_ms": 103035,
+      "reason": "raw_candidate",
+      "x": 752,
+      "y": 629,
+      "pts": 151,
+      "bbW": 1137,
+      "bbH": 972,
+      "gen": 541
+    },
+    {
+      "t_ms": 103088,
+      "reason": "raw_candidate",
+      "x": 752,
+      "y": 629,
+      "pts": 151,
+      "bbW": 1137,
+      "bbH": 972,
+      "gen": 541
+    },
+    {
+      "t_ms": 103139,
+      "reason": "raw_candidate",
+      "x": 752,
+      "y": 629,
+      "pts": 151,
+      "bbW": 1137,
+      "bbH": 972,
+      "gen": 541
+    },
+    {
+      "t_ms": 103224,
+      "reason": "raw_candidate",
+      "x": 752,
+      "y": 629,
+      "pts": 151,
+      "bbW": 1137,
+      "bbH": 972,
+      "gen": 541
+    },
+    {
+      "t_ms": 103294,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 637,
+      "pts": 224,
+      "bbW": 1746,
+      "bbH": 1038,
+      "gen": 542
+    },
+    {
+      "t_ms": 103344,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 637,
+      "pts": 224,
+      "bbW": 1746,
+      "bbH": 1038,
+      "gen": 542
+    },
+    {
+      "t_ms": 103397,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 637,
+      "pts": 224,
+      "bbW": 1746,
+      "bbH": 1038,
+      "gen": 542
+    },
+    {
+      "t_ms": 103487,
+      "reason": "raw_candidate",
+      "x": 750,
+      "y": 637,
+      "pts": 224,
+      "bbW": 1746,
+      "bbH": 1038,
+      "gen": 542
+    },
+    {
+      "t_ms": 103561,
+      "reason": "raw_candidate",
+      "x": 732,
+      "y": 636,
+      "pts": 247,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 543
+    },
+    {
+      "t_ms": 103561,
+      "reason": "spatial_exclusion",
+      "x": 745,
+      "y": 634,
+      "ring": 7,
+      "distMm": 95.4
+    },
+    {
+      "t_ms": 103612,
+      "reason": "raw_candidate",
+      "x": 732,
+      "y": 636,
+      "pts": 247,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 543
+    },
+    {
+      "t_ms": 103663,
+      "reason": "raw_candidate",
+      "x": 732,
+      "y": 636,
+      "pts": 247,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 543
+    },
+    {
+      "t_ms": 103756,
+      "reason": "raw_candidate",
+      "x": 732,
+      "y": 636,
+      "pts": 247,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 543
+    },
+    {
+      "t_ms": 103833,
+      "reason": "raw_candidate",
+      "x": 721,
+      "y": 643,
+      "pts": 270,
+      "bbW": 1797,
+      "bbH": 1038,
+      "gen": 544
+    },
+    {
+      "t_ms": 103883,
+      "reason": "raw_candidate",
+      "x": 721,
+      "y": 643,
+      "pts": 270,
+      "bbW": 1797,
+      "bbH": 1038,
+      "gen": 544
+    },
+    {
+      "t_ms": 104000,
+      "reason": "raw_candidate",
+      "x": 721,
+      "y": 643,
+      "pts": 270,
+      "bbW": 1797,
+      "bbH": 1038,
+      "gen": 544
+    },
+    {
+      "t_ms": 104080,
+      "reason": "raw_candidate",
+      "x": 717,
+      "y": 637,
+      "pts": 300,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 545
+    },
+    {
+      "t_ms": 104080,
+      "reason": "spatial_exclusion",
+      "x": 723,
+      "y": 639,
+      "ring": 7,
+      "distMm": 102.3
+    },
+    {
+      "t_ms": 104130,
+      "reason": "raw_candidate",
+      "x": 717,
+      "y": 637,
+      "pts": 300,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 545
+    },
+    {
+      "t_ms": 104239,
+      "reason": "raw_candidate",
+      "x": 717,
+      "y": 637,
+      "pts": 300,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 545
+    },
+    {
+      "t_ms": 104315,
+      "reason": "raw_candidate",
+      "x": 714,
+      "y": 644,
+      "pts": 319,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 546
+    },
+    {
+      "t_ms": 104366,
+      "reason": "raw_candidate",
+      "x": 714,
+      "y": 644,
+      "pts": 319,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 546
+    },
+    {
+      "t_ms": 104444,
+      "reason": "raw_candidate",
+      "x": 714,
+      "y": 644,
+      "pts": 319,
+      "bbW": 1755,
+      "bbH": 1038,
+      "gen": 546
+    },
+    {
+      "t_ms": 104515,
+      "reason": "raw_candidate",
+      "x": 711,
+      "y": 653,
+      "pts": 344,
+      "bbW": 1794,
+      "bbH": 1035,
+      "gen": 547
+    },
+    {
+      "t_ms": 104515,
+      "reason": "spatial_exclusion",
+      "x": 714,
+      "y": 645,
+      "ring": 6,
+      "distMm": 105.9
+    },
+    {
+      "t_ms": 104566,
+      "reason": "raw_candidate",
+      "x": 711,
+      "y": 653,
+      "pts": 344,
+      "bbW": 1794,
+      "bbH": 1035,
+      "gen": 547
+    },
+    {
+      "t_ms": 104622,
+      "reason": "raw_candidate",
+      "x": 711,
+      "y": 653,
+      "pts": 344,
+      "bbW": 1794,
+      "bbH": 1035,
+      "gen": 547
+    },
+    {
+      "t_ms": 104717,
+      "reason": "raw_candidate",
+      "x": 711,
+      "y": 653,
+      "pts": 344,
+      "bbW": 1794,
+      "bbH": 1035,
+      "gen": 547
+    },
+    {
+      "t_ms": 104792,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 652,
+      "pts": 363,
+      "bbW": 1797,
+      "bbH": 1068,
+      "gen": 548
+    },
+    {
+      "t_ms": 104846,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 652,
+      "pts": 363,
+      "bbW": 1797,
+      "bbH": 1068,
+      "gen": 548
+    },
+    {
+      "t_ms": 104895,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 652,
+      "pts": 363,
+      "bbW": 1797,
+      "bbH": 1068,
+      "gen": 548
+    },
+    {
+      "t_ms": 104976,
+      "reason": "raw_candidate",
+      "x": 710,
+      "y": 652,
+      "pts": 363,
+      "bbW": 1797,
+      "bbH": 1068,
+      "gen": 548
+    },
+    {
+      "t_ms": 105048,
+      "reason": "raw_candidate",
+      "x": 708,
+      "y": 656,
+      "pts": 388,
+      "bbW": 1803,
+      "bbH": 1068,
+      "gen": 549
+    },
+    {
+      "t_ms": 105048,
+      "reason": "spatial_exclusion",
+      "x": 710,
+      "y": 654,
+      "ring": 6,
+      "distMm": 108.5
+    },
+    {
+      "t_ms": 105100,
+      "reason": "raw_candidate",
+      "x": 708,
+      "y": 656,
+      "pts": 388,
+      "bbW": 1803,
+      "bbH": 1068,
+      "gen": 549
+    },
+    {
+      "t_ms": 105195,
+      "reason": "raw_candidate",
+      "x": 708,
+      "y": 656,
+      "pts": 388,
+      "bbW": 1803,
+      "bbH": 1068,
+      "gen": 549
+    },
+    {
+      "t_ms": 105268,
+      "reason": "raw_candidate",
+      "x": 726,
+      "y": 624,
+      "pts": 478,
+      "bbW": 1815,
+      "bbH": 1077,
+      "gen": 550
+    },
+    {
+      "t_ms": 105325,
+      "reason": "raw_candidate",
+      "x": 726,
+      "y": 624,
+      "pts": 478,
+      "bbW": 1815,
+      "bbH": 1077,
+      "gen": 550
+    },
+    {
+      "t_ms": 105377,
+      "reason": "raw_candidate",
+      "x": 726,
+      "y": 624,
+      "pts": 478,
+      "bbW": 1815,
+      "bbH": 1077,
+      "gen": 550
+    },
+    {
+      "t_ms": 105466,
+      "reason": "raw_candidate",
+      "x": 726,
+      "y": 624,
+      "pts": 478,
+      "bbW": 1815,
+      "bbH": 1077,
+      "gen": 550
+    },
+    {
+      "t_ms": 105538,
+      "reason": "raw_candidate",
+      "x": 729,
+      "y": 621,
+      "pts": 461,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 551
+    },
+    {
+      "t_ms": 105589,
+      "reason": "raw_candidate",
+      "x": 729,
+      "y": 621,
+      "pts": 461,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 551
+    },
+    {
+      "t_ms": 105639,
+      "reason": "raw_candidate",
+      "x": 729,
+      "y": 621,
+      "pts": 461,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 551
+    },
+    {
+      "t_ms": 105724,
+      "reason": "raw_candidate",
+      "x": 729,
+      "y": 621,
+      "pts": 461,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 551
+    },
+    {
+      "t_ms": 105803,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 619,
+      "pts": 488,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 552
+    },
+    {
+      "t_ms": 105803,
+      "reason": "spatial_exclusion",
+      "x": 727,
+      "y": 621,
+      "ring": 7,
+      "distMm": 98.4
+    },
+    {
+      "t_ms": 105862,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 619,
+      "pts": 488,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 552
+    },
+    {
+      "t_ms": 105914,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 619,
+      "pts": 488,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 552
+    },
+    {
+      "t_ms": 106015,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 619,
+      "pts": 488,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 552
+    },
+    {
+      "t_ms": 106092,
+      "reason": "raw_candidate",
+      "x": 732,
+      "y": 615,
+      "pts": 512,
+      "bbW": 1824,
+      "bbH": 1077,
+      "gen": 553
+    },
+    {
+      "t_ms": 106192,
+      "reason": "raw_candidate",
+      "x": 732,
+      "y": 615,
+      "pts": 512,
+      "bbW": 1824,
+      "bbH": 1077,
+      "gen": 553
+    },
+    {
+      "t_ms": 106265,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 550,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 554
+    },
+    {
+      "t_ms": 106265,
+      "reason": "spatial_exclusion",
+      "x": 731,
+      "y": 617,
+      "ring": 7,
+      "distMm": 96.7
+    },
+    {
+      "t_ms": 106317,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 550,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 554
+    },
+    {
+      "t_ms": 106365,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 550,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 554
+    },
+    {
+      "t_ms": 106443,
+      "reason": "raw_candidate",
+      "x": 734,
+      "y": 619,
+      "pts": 550,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 554
+    },
+    {
+      "t_ms": 106515,
+      "reason": "raw_candidate",
+      "x": 727,
+      "y": 625,
+      "pts": 581,
+      "bbW": 1821,
+      "bbH": 1077,
+      "gen": 555
+    }
+  ],
+  "rejected_summary": {
+    "pts_out_of_range": 113,
+    "raw_candidate": 264,
+    "spatial_exclusion": 18,
+    "spatial_jitter": 3,
+    "frozen_spot_learned": 4
+  },
+  "frozen_spots": [
+    {
+      "x": 724.8904808769036,
+      "y": 614.7750240228252,
+      "r": 35,
+      "hits": 67,
+      "firstMs": 69035,
+      "lastMs": 87063
+    },
+    {
+      "x": 911.8938993808421,
+      "y": 519.3264604532468,
+      "r": 35,
+      "hits": 20,
+      "firstMs": 78506,
+      "lastMs": 97268
+    },
+    {
+      "x": 820.1790122476625,
+      "y": 556.2318790780911,
+      "r": 35,
+      "hits": 14,
+      "firstMs": 79841,
+      "lastMs": 101263
+    },
+    {
+      "x": 785.5686793493246,
+      "y": 575.0074350793953,
+      "r": 35,
+      "hits": 9,
+      "firstMs": 80270,
+      "lastMs": 102570
+    }
+  ]
+}

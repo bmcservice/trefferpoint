@@ -695,25 +695,33 @@
     </div>
 </header>
 
-<!-- v2.3.174: Geführter Testplan-Wizard (kontrollierte Diagnose-Session am Stand) -->
-<div id="wizOverlay" style="display:none;position:fixed;inset:0;background:rgba(8,10,13,0.97);z-index:10001;padding:18px;box-sizing:border-box;font-family:'Share Tech Mono',monospace;color:#e8eef2">
-  <div style="max-width:640px;margin:24px auto 0;display:flex;flex-direction:column;gap:14px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <div style="font-size:13px;letter-spacing:0.12em;color:#c8a84b">📋 GEFÜHRTER DIAGNOSE-TEST</div>
-      <button id="wizAbort" style="background:none;border:1px solid #555;color:#999;padding:5px 10px;cursor:pointer;border-radius:5px">Abbrechen</button>
+<!-- v2.3.175: Wizard als NICHT-deckendes Panel unten. BUGFIX 2026-05-17:
+     vorher position:inset:0 opak → verdeckte Kamerabild bei Kalib-Sicht-Check
+     und während des Schießens (Schütze blind). Jetzt: Wrapper pointer-events:none
+     (Kamera/Canvas-Taps gehen durch → Kalibrieren/Tap-Korrektur möglich),
+     nur das schmale Panel unten ist sichtbar/klickbar. Kamera+Kreuz+Ringe immer sichtbar. -->
+<div id="wizOverlay" style="display:none;position:fixed;inset:0;z-index:10001;
+     pointer-events:none;font-family:'Share Tech Mono',monospace;color:#e8eef2">
+  <div id="wizPanel" style="pointer-events:auto;position:absolute;left:0;right:0;bottom:0;
+       background:rgba(10,13,18,0.93);border-top:2px solid #c8a84b;
+       padding:10px 14px;box-sizing:border-box;display:flex;flex-direction:column;gap:8px;
+       max-height:46vh;overflow:auto;box-shadow:0 -4px 18px rgba(0,0,0,0.6)">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div style="font-size:12px;letter-spacing:0.1em;color:#c8a84b;white-space:nowrap">📋 DIAGNOSE-TEST</div>
+      <div id="wizProgress" style="font-size:11px;color:#7a8a99;flex:1;text-align:center"></div>
+      <button id="wizAbort" style="background:none;border:1px solid #555;color:#999;padding:4px 9px;cursor:pointer;border-radius:5px;font-size:12px">✕</button>
     </div>
-    <div id="wizProgress" style="font-size:11px;color:#7a8a99"></div>
-    <div id="wizCard" style="background:#11161c;border:2px solid #c8a84b;border-radius:10px;padding:20px;min-height:160px;display:flex;flex-direction:column;justify-content:center">
-      <div id="wizStepNo" style="font-size:11px;color:#7a8a99;margin-bottom:8px"></div>
-      <div id="wizText" style="font-size:17px;line-height:1.5;color:#fff"></div>
-      <div id="wizSub" style="font-size:13px;color:#9fb0bf;margin-top:10px"></div>
-      <div id="wizBusy" style="font-size:13px;color:#5ac8ff;margin-top:10px;display:none"></div>
+    <div id="wizCard" style="display:flex;flex-direction:column;gap:4px">
+      <div id="wizStepNo" style="font-size:11px;color:#7a8a99"></div>
+      <div id="wizText" style="font-size:15px;line-height:1.4;color:#fff"></div>
+      <div id="wizSub" style="font-size:12px;color:#9fb0bf"></div>
+      <div id="wizBusy" style="font-size:12px;color:#5ac8ff;display:none"></div>
     </div>
-    <div style="display:flex;gap:10px">
-      <button id="wizPrev" style="flex:1;background:#23303a;border:1px solid #3a4a57;color:#cdd;padding:14px;font-size:15px;cursor:pointer;border-radius:8px">‹ Zurück</button>
-      <button id="wizNext" style="flex:2;background:#3a8;border:0;color:#000;padding:14px;font-size:17px;font-weight:bold;cursor:pointer;border-radius:8px">Weiter ›</button>
+    <div style="display:flex;gap:8px">
+      <button id="wizPrev" style="flex:1;background:#23303a;border:1px solid #3a4a57;color:#cdd;padding:11px;font-size:14px;cursor:pointer;border-radius:7px">‹ Zurück</button>
+      <button id="wizNext" style="flex:2;background:#3a8;border:0;color:#000;padding:11px;font-size:16px;font-weight:bold;cursor:pointer;border-radius:7px">Weiter ›</button>
     </div>
-    <div style="font-size:10px;color:#5a6a77;text-align:center">Diagnose-Test v2.3.174 · jeder Schritt entweder „du machst etwas" oder „App macht etwas automatisch"</div>
+    <div style="font-size:10px;color:#5a6a77;text-align:center">v2.3.175 · Kamera bleibt sichtbar — Kreuz/Ringe prüfen & Tippen möglich</div>
   </div>
 </div>
 
@@ -1234,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.174';
+const APP_VERSION = '2.3.175';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);

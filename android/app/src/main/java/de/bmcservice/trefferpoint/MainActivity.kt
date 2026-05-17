@@ -679,11 +679,20 @@ class MainActivity : AppCompatActivity() {
                     "OK: gestoppt nach $n Frames" + (if (d != null) " in ${d.absolutePath}" else "")
                 } else {
                     val safeTag = tag.replace(Regex("[^A-Za-z0-9_-]"), "_").take(40)
-                    val base = java.io.File(
-                        android.os.Environment.getExternalStoragePublicDirectory(
-                            android.os.Environment.DIRECTORY_DOWNLOADS),
-                        "TrefferPoint/detframes/$safeTag")
-                    base.mkdirs()
+                    // v2.3.175 BUGFIX: vorher Environment.getExternalStoragePublicDirectory(
+                    // DOWNLOADS) + File.writeBytes() — scheitert auf API 29 (Scoped Storage,
+                    // kein WRITE_EXTERNAL_STORAGE>28, kein Legacy-Flag) LAUTLOS → 0 detframes
+                    // beim Kontrolltest 2026-05-17. Jetzt app-privates externes Verzeichnis:
+                    // immer schreibbar OHNE Permission, adb-ziehbar unter
+                    // /sdcard/Android/data/de.bmcservice.trefferpoint/files/detframes/<tag>/
+                    val extRoot = getExternalFilesDir(null)
+                        ?: throw IllegalStateException("getExternalFilesDir==null")
+                    val base = java.io.File(extRoot, "detframes/$safeTag")
+                    if (!base.mkdirs() && !base.isDirectory)
+                        throw java.io.IOException("mkdirs fehlgeschlagen: ${base.absolutePath}")
+                    // Schreib-Probe (Scoped-Storage-Fallen sofort sichtbar machen statt
+                    // erst nach 900 s leerem Ergebnis)
+                    java.io.File(base, ".wtest").apply { writeBytes(byteArrayOf(1)); delete() }
                     detCaptureCount = 0
                     detLastSavedEpoch = 0L
                     detCaptureDir = base
