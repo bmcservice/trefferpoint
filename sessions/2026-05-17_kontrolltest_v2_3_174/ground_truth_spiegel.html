@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrefferPoint — Ground-Truth-Erfassung KK25 (2026-05-17)</title>
+<style>
+  :root{--bg:#0e1116;--fg:#e8eef2;--dim:#8a99a8;--acc:#c8a84b;--line:#2a3340}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:'Segoe UI',system-ui,sans-serif;font-size:15px}
+  header{padding:14px 18px;border-bottom:1px solid var(--line)}
+  h1{font-size:17px;margin:0 0 4px}
+  .sub{color:var(--dim);font-size:13px}
+  .wrap{display:flex;flex-wrap:wrap;gap:18px;padding:18px;align-items:flex-start}
+  .left{flex:0 0 auto}
+  .right{flex:1 1 320px;min-width:300px}
+  canvas{background:#000;border:1px solid var(--line);touch-action:none;cursor:crosshair;border-radius:6px}
+  .series-bar{display:flex;gap:8px;margin:0 0 10px}
+  .sbtn{flex:1;padding:10px;border:1px solid var(--line);background:#1a212b;color:var(--fg);
+        border-radius:6px;cursor:pointer;font-size:14px}
+  .sbtn.active{font-weight:bold;border-width:2px}
+  .sbtn[data-s="1"].active{border-color:#46c}
+  .sbtn[data-s="2"].active{border-color:#4a4}
+  .sbtn[data-s="3"].active{border-color:#d84}
+  .row{display:flex;gap:8px;margin:8px 0}
+  button.act{padding:9px 12px;border:1px solid var(--line);background:#1a212b;color:var(--fg);
+        border-radius:6px;cursor:pointer;font-size:13px}
+  button.act:hover{border-color:var(--acc)}
+  .hint{color:var(--dim);font-size:12px;line-height:1.5;margin:8px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+  th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+  th{color:var(--dim);font-weight:600}
+  textarea{width:100%;height:200px;background:#0a0d11;color:#cfe;border:1px solid var(--line);
+        border-radius:6px;font-family:'Consolas',monospace;font-size:12px;padding:8px;margin-top:8px}
+  .note-in{width:100%;background:#1a212b;color:var(--fg);border:1px solid var(--line);
+        border-radius:5px;padding:7px;font-size:13px;margin-top:4px}
+  .big{background:var(--acc);color:#000;font-weight:bold;border:0;padding:11px;border-radius:6px;
+        cursor:pointer;font-size:14px;width:100%;margin-top:10px}
+  .legend{font-size:12px;color:var(--dim);margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>◎ Ground-Truth-Erfassung — KK25 Kontrolltest 2026-05-17</h1>
+  <div class="sub">Markiere pro Serie die <b>tatsächlichen</b> Einschüsse auf dem mitgebrachten Spiegel.
+  Maßstabsgetreue DSB-Sportpistole-25m-Scheibe (Krüger 3100S). Klick = Treffer setzen · Klick auf Treffer = entfernen.</div>
+</header>
+
+<div class="wrap">
+  <div class="left">
+    <div class="series-bar">
+      <button class="sbtn active" data-s="1">Serie 1</button>
+      <button class="sbtn" data-s="2">Serie 2</button>
+      <button class="sbtn" data-s="3">Serie 3</button>
+    </div>
+    <canvas id="cv" width="620" height="620"></canvas>
+    <div class="legend">Schwarzer Spiegel = Ringe 7–10 (∅200&nbsp;mm). Außen weiß = Ringe 6–1.
+      Skala: 1&nbsp;mm = <span id="ppmm"></span>&nbsp;px. Zentrum = X.</div>
+  </div>
+
+  <div class="right">
+    <div class="row">
+      <button class="act" id="undo">↩ Letzten entfernen</button>
+      <button class="act" id="clearS">Serie leeren</button>
+      <button class="act" id="clearAll">Alles zurücksetzen</button>
+    </div>
+    <div class="hint">Pro Serie waren <b>5 Schuss</b> geplant. Setze genau die Löcher die du auf dem
+      Spiegel siehst — auch wenn es weniger/mehr als 5 sind (genau das ist die Ground Truth).
+      Reihenfolge egal. Zoome bei Bedarf mit Strg/+ den Browser.</div>
+
+    <div><b>Serie <span id="curS">1</span> — Treffer:</b></div>
+    <table id="tbl"><thead><tr><th>#</th><th>Ring</th><th>mm v. Mitte</th><th>Uhr</th><th>x,y mm</th></tr></thead>
+      <tbody id="tb"></tbody></table>
+
+    <div style="margin-top:10px"><b>Bemerkung zu Serie <span id="curS2">1</span></b> (optional):</div>
+    <input class="note-in" id="note" placeholder="z. B. 'Schuss 3 verrissen', 'Wind aufs Spektiv', …">
+
+    <button class="big" id="gen">▼ Ergebnis erzeugen (dann Textfeld kopieren & an Claude zurück)</button>
+    <textarea id="out" readonly placeholder="Klick auf den Button erzeugt hier den Block zum Kopieren…"></textarea>
+  </div>
+</div>
+
+<script>
+// ---- KK25 Geometrie (DSB Sportpistole 25m, Krüger 3100S) ----
+// Ring-Außenradien in mm (scoreDist). Spiegel (schwarz) = bis Ring 7 = r<=100mm.
+const RINGS=[{r:10,rad:25},{r:9,rad:50},{r:8,rad:75},{r:7,rad:100},
+             {r:6,rad:125},{r:5,rad:150},{r:4,rad:175},{r:3,rad:200},
+             {r:2,rad:225},{r:1,rad:250}];
+const MAXR=250;                 // Ring 1 Außenradius mm  → Scheibe ∅500mm
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const SIZE=cv.width, CX=SIZE/2, CY=SIZE/2, MARGIN=14;
+const PXMM=(SIZE/2-MARGIN)/MAXR;          // px pro mm
+document.getElementById('ppmm').textContent=PXMM.toFixed(2);
+
+let series={1:[],2:[],3:[]}, notes={1:'',2:'',3:''}, cur=1;
+
+function ringOf(distMm){ for(const x of RINGS){ if(distMm<=x.rad) return x.r; } return 0; }
+function clockOf(dxmm,dymm){ // 12 Uhr = oben; y nach unten positiv
+  let a=Math.atan2(dxmm,-dymm)*180/Math.PI; if(a<0)a+=360;
+  let h=Math.round(a/30); if(h===0)h=12; return h;
+}
+function draw(){
+  ctx.clearRect(0,0,SIZE,SIZE);
+  // weißer Außenbereich
+  ctx.fillStyle='#f3f0e8'; ctx.beginPath();
+  ctx.arc(CX,CY,250*PXMM,0,7); ctx.fill();
+  // schwarzer Spiegel (Ringe 7-10) r<=100mm
+  ctx.fillStyle='#111'; ctx.beginPath();
+  ctx.arc(CX,CY,100*PXMM,0,7); ctx.fill();
+  // Ringlinien
+  RINGS.forEach(rg=>{
+    const inBlack = rg.rad<=100;
+    ctx.strokeStyle = inBlack ? 'rgba(235,235,235,0.7)' : 'rgba(20,20,20,0.65)';
+    ctx.lineWidth = (rg.r===7)?2:1;
+    ctx.beginPath(); ctx.arc(CX,CY,rg.rad*PXMM,0,7); ctx.stroke();
+    // Ringzahl an 12-Uhr-Position (nur 9..1, 10 ist Mitte)
+    if(rg.r<=9){
+      ctx.fillStyle=inBlack?'#ddd':'#222';
+      ctx.font='11px monospace'; ctx.textAlign='center';
+      ctx.fillText(rg.r, CX, CY - (rg.rad-12)*PXMM);
+    }
+  });
+  // Mitte
+  ctx.strokeStyle='rgba(200,168,75,0.8)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(CX-7,CY);ctx.lineTo(CX+7,CY);
+  ctx.moveTo(CX,CY-7);ctx.lineTo(CX,CY+7);ctx.stroke();
+  // Treffer aller Serien (aktuelle hell, andere blass)
+  const col={1:'#5a8cff',2:'#48d048',3:'#ff8a3d'};
+  for(const s of [1,2,3]){
+    series[s].forEach((p,i)=>{
+      const X=CX+p.x*PXMM, Y=CY+p.y*PXMM, act=(s==cur);
+      ctx.globalAlpha=act?1:0.30;
+      ctx.fillStyle=col[s];
+      ctx.beginPath();ctx.arc(X,Y,act?7:5,0,7);ctx.fill();
+      ctx.fillStyle=act?'#000':'#222';ctx.font='bold 10px monospace';
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(i+1,X,Y);
+      ctx.globalAlpha=1;ctx.textBaseline='alphabetic';
+    });
+  }
+}
+function refreshTable(){
+  const tb=document.getElementById('tb'); tb.innerHTML='';
+  series[cur].forEach((p,i)=>{
+    const d=Math.hypot(p.x,p.y), rg=ringOf(d), cl=clockOf(p.x,p.y);
+    tb.insertAdjacentHTML('beforeend',
+      `<tr><td>${i+1}</td><td>${rg||'M'}</td><td>${d.toFixed(0)}</td><td>${cl}</td>
+       <td>${p.x.toFixed(0)}, ${p.y.toFixed(0)}</td></tr>`);
+  });
+  document.getElementById('curS').textContent=cur;
+  document.getElementById('curS2').textContent=cur;
+  document.getElementById('note').value=notes[cur]||'';
+}
+cv.addEventListener('click',e=>{
+  const r=cv.getBoundingClientRect();
+  const px=(e.clientX-r.left)*(cv.width/r.width);
+  const py=(e.clientY-r.top)*(cv.height/r.height);
+  const xmm=(px-CX)/PXMM, ymm=(py-CY)/PXMM;
+  // nahe an vorhandenem Treffer? → entfernen (Toggle)
+  for(let i=0;i<series[cur].length;i++){
+    const p=series[cur][i];
+    if(Math.hypot(p.x-xmm,p.y-ymm) < 9/PXMM*2){ series[cur].splice(i,1); draw();refreshTable();return; }
+  }
+  if(Math.hypot(xmm,ymm)>MAXR+5) return;       // außerhalb Scheibe ignorieren
+  series[cur].push({x:xmm,y:ymm});
+  draw();refreshTable();
+});
+document.querySelectorAll('.sbtn').forEach(b=>b.addEventListener('click',()=>{
+  notes[cur]=document.getElementById('note').value;
+  document.querySelectorAll('.sbtn').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active'); cur=+b.dataset.s; draw();refreshTable();
+}));
+document.getElementById('undo').onclick=()=>{series[cur].pop();draw();refreshTable();};
+document.getElementById('clearS').onclick=()=>{series[cur]=[];draw();refreshTable();};
+document.getElementById('clearAll').onclick=()=>{
+  if(!confirm('Alle 3 Serien löschen?'))return;
+  series={1:[],2:[],3:[]};notes={1:'',2:'',3:''};draw();refreshTable();
+};
+document.getElementById('note').addEventListener('input',e=>{notes[cur]=e.target.value;});
+document.getElementById('gen').onclick=()=>{
+  notes[cur]=document.getElementById('note').value;
+  const o={tool:'ground_truth_spiegel',disziplin:'kk25',datum:'2026-05-17',
+    geometrie:{spiegel_radius_mm:100,ring1_radius_mm:250,mm_pro_ring:25},
+    serien:{}};
+  for(const s of [1,2,3]){
+    o.serien['serie'+s]={
+      bemerkung:notes[s]||'',
+      anzahl:series[s].length,
+      treffer:series[s].map((p,i)=>{
+        const d=Math.hypot(p.x,p.y);
+        return {n:i+1,x_mm:+p.x.toFixed(1),y_mm:+p.y.toFixed(1),
+                dist_mm:+d.toFixed(1),ring:ringOf(d),uhr:clockOf(p.x,p.y)};
+      })
+    };
+  }
+  document.getElementById('out').value=
+    'GROUND_TRUTH_2026-05-17 <<<\n'+JSON.stringify(o,null,2)+'\n>>> GROUND_TRUTH';
+  document.getElementById('out').select();
+};
+draw();refreshTable();
+</script>
+</body>
+</html>
