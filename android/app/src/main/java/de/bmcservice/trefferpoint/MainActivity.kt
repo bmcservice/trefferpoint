@@ -107,7 +107,10 @@ class MainActivity : AppCompatActivity() {
     // mit JSON-Hit-Timestamps (session.start_ms + t_ms). Nur bei Diagnose-Modus.
     @Volatile private var detCaptureDir: java.io.File? = null
     @Volatile private var detCaptureCount: Int = 0
-    private var detLastSavedEpoch: Long = 0L
+    // v2.3.176 (Codex-Review): @Volatile — wird vom UI-Thread (setDetCapture
+    // reset) und vom captureHandler-Thread (Throttle) berührt. Ohne Volatile
+    // keine Sichtbarkeitsgarantie → sporadischer Throttle-Bypass.
+    @Volatile private var detLastSavedEpoch: Long = 0L
 
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false

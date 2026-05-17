@@ -1242,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.175';
+const APP_VERSION = '2.3.176';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3389,6 +3389,27 @@ function runDetection() {
         setStatus('Pixel-Zugriff blockiert — Handy per USB verbinden', 'warn');
         return;
     }
+    // v2.3.176: KRITISCHER GUARD (Codex-Review-Hypothese zu Szenario B).
+    // Wenn refFrame (im Warmup gemittelt) eine andere Auflösung hat als der
+    // aktuelle Frame (z.B. PixelCopy/Stream-Auflösung wechselt nach Reconnect/
+    // IDR: 960×540 ↔ 1920×1080), läuft der Diff-Loop refFrame.data[i] jenseits
+    // der Länge → undefined→0 → JEDER Pixel dort = „geändert" → 2500–12800 px
+    // Garbage-Flut (= das gemessene Symptom vom 2026-05-17). Hier hart fangen:
+    // loggen (Diagnose) UND Frame überspringen (Schutz), statt Müll zu erzeugen.
+    if (refFrame.width !== cur.width || refFrame.height !== cur.height) {
+        try { logRejected('size_mismatch', {
+            ref_w: refFrame.width, ref_h: refFrame.height,
+            cur_w: cur.width, cur_h: cur.height,
+            canvas_w: canvas.width, canvas_h: canvas.height
+        }); } catch(e) {}
+        if (debugMode) console.warn(`[v2.3.176] size_mismatch ref ${refFrame.width}x${refFrame.height} vs cur ${cur.width}x${cur.height} → Frame übersprungen, Referenz wird neu gesetzt`);
+        // Referenz invalidieren + Warmup neu: sonst bleibt der Mismatch dauerhaft
+        refFrame = null; pendingHit = null;
+        refWarmupUntil = performance.now() + 6000;
+        refAccum = null; refAccumSamples = 0;
+        setMsg('Auflösung gewechselt — Referenz wird neu stabilisiert (~6s)…');
+        return;
+    }
     const prev = refFrame.data;
     const next = cur.data;
     const threshold = parseInt(document.getElementById('sens').value);
@@ -5027,7 +5048,7 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
       text:'Wähle oben die Disziplin die du schießt: KK25 (.22) oder GK25 (9 mm).',
       sub:'Danach Weiter.' },
 
-    { type:'info', title:'Manuell kalibrieren',
+    { type:'info', title:'Manuell kalibrieren', camTap:true,
       text:'Drücke „✎ Manuell (3 Klicks)" und tippe so exakt wie möglich: 1) Spiegel-Mitte, 2) Rand bei 3 Uhr, 3) Rand bei 6 Uhr.',
       sub:'Weiter wenn die 3 Klicks gesetzt sind.' },
 
@@ -5041,7 +5062,7 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
         return {ok:true, msg:'✓ Kalibrierung plausibel (pxPerMm/Zentrum/Geometrie ok).'};
       } },
 
-    { type:'info', title:'Kalibrierung visuell prüfen',
+    { type:'info', title:'Kalibrierung visuell prüfen', camTap:true,
       text:'Sitzt das grüne 🔒-Kreuz exakt auf der Spiegelmitte und liegen die Ringe auf den echten Ringen?',
       sub:'Wenn nicht: „📍 Mitte verschieben" → 1 Tap auf die echte Mitte. Weiter wenn es sitzt.' },
 
@@ -5075,8 +5096,19 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
       run: async (ui)=>{
         ensureDetecting(true);
         await sleep(1500);
+        // v2.3.176 (Codex-Befund): wenn Erkennung beim Wizard-Start schon lief,
+        // hat ensureDetecting(true) btnDetect NICHT geklickt → der Click-Handler
+        // (und damit startDetCaptureIfDiag) wurde nie gerufen → 0 detframes.
+        // Hier explizit nachziehen, falls Capture trotz Diag-Modus nicht aktiv.
+        if (typeof _detCaptureActive!=='undefined' && !_detCaptureActive
+            && typeof isDiagMode==='function' && isDiagMode()
+            && typeof startDetCaptureIfDiag==='function') {
+          ui('Capture war nicht aktiv — starte explizit…');
+          try { startDetCaptureIfDiag(); } catch(e){}
+          await sleep(800);
+        }
         const cap = (typeof _detCaptureActive!=='undefined' && _detCaptureActive);
-        if (!cap) return {ok:false, msg:'⚠ Frame-Capture nicht aktiv (Diagnose-Modus/Bridge?). Nochmal.'};
+        if (!cap) return {ok:false, msg:'⚠ Frame-Capture nicht aktiv (Diagnose-Modus/Bridge/Storage?). Nochmal.'};
         let n=0; try{ n = window.tpBridge.getDetCaptureCount(); }catch(_){}
         return {ok:true, msg:'✓ Erkennung + Capture läuft (Frames bisher: '+n+').'};
       } },
@@ -5106,7 +5138,20 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
 
   function render(){
     const st = STEPS[idx];
-    $('wizProgress').textContent = `Schritt ${idx+1} / ${STEPS.length}` + (st.type==='auto' ? ' · App-Aktion' : ' · du bist dran');
+    // v2.3.176 (Codex-Befund): bei Schritten wo der Schütze auf den Canvas
+    // tippt (Kalibrieren, Tap-Korrektur) darf das Bottom-Panel die untere
+    // Scheiben-/6-Uhr-Klickzone NICHT überdecken. Dann: kompakter Top-Streifen.
+    const wp = $('wizPanel');
+    if (st.camTap) {
+      wp.style.bottom='auto'; wp.style.top='0';
+      wp.style.maxHeight='17vh'; wp.style.borderTop='0';
+      wp.style.borderBottom='2px solid #c8a84b';
+    } else {
+      wp.style.top='auto'; wp.style.bottom='0';
+      wp.style.maxHeight='46vh'; wp.style.borderBottom='0';
+      wp.style.borderTop='2px solid #c8a84b';
+    }
+    $('wizProgress').textContent = `Schritt ${idx+1} / ${STEPS.length}` + (st.type==='auto' ? ' · App-Aktion' : ' · du bist dran') + (st.camTap ? ' · Canvas frei zum Tippen' : '');
     $('wizStepNo').textContent = st.title.toUpperCase();
     $('wizText').textContent = st.text;
     $('wizSub').textContent = st.sub || '';
