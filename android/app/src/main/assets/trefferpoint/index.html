@@ -721,7 +721,7 @@
       <button id="wizPrev" style="flex:1;background:#23303a;border:1px solid #3a4a57;color:#cdd;padding:11px;font-size:14px;cursor:pointer;border-radius:7px">‹ Zurück</button>
       <button id="wizNext" style="flex:2;background:#3a8;border:0;color:#000;padding:11px;font-size:16px;font-weight:bold;cursor:pointer;border-radius:7px">Weiter ›</button>
     </div>
-    <div style="font-size:10px;color:#5a6a77;text-align:center">v2.3.175 · Kamera bleibt sichtbar — Kreuz/Ringe prüfen & Tippen möglich</div>
+    <div id="wizFooter" style="font-size:10px;color:#5a6a77;text-align:center">Kamera bleibt sichtbar — Kreuz/Ringe prüfen & Tippen möglich</div>
   </div>
 </div>
 
@@ -1242,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.176';
+const APP_VERSION = '2.3.177';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -5141,15 +5141,28 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
     // v2.3.176 (Codex-Befund): bei Schritten wo der Schütze auf den Canvas
     // tippt (Kalibrieren, Tap-Korrektur) darf das Bottom-Panel die untere
     // Scheiben-/6-Uhr-Klickzone NICHT überdecken. Dann: kompakter Top-Streifen.
+    // v2.3.177 BUGFIX: camTap-Streifen war max-height:17vh + overflow:auto →
+    // nach den 3 Kalibrier-Klicks war der „Weiter"-Button abgeschnitten/
+    // weggescrollt = nicht erreichbar (User-Bericht 2026-05-18). Jetzt:
+    // Top-Streifen OHNE Höhen-Clipping (max-height:none, overflow:visible) +
+    // Ballast (StepNo/Sub/Progress/Footer) ausgeblendet → kompakte Bar ~90px,
+    // Weiter IMMER sichtbar, unterer Canvas (Mitte/3-Uhr/6-Uhr) frei.
     const wp = $('wizPanel');
-    if (st.camTap) {
+    const camTap = !!st.camTap;
+    const showAux = camTap ? 'none' : '';
+    ['wizStepNo','wizSub','wizProgress','wizFooter'].forEach(id=>{
+      const e=$(id); if(e) e.style.display = showAux;
+    });
+    if (camTap) {
       wp.style.bottom='auto'; wp.style.top='0';
-      wp.style.maxHeight='17vh'; wp.style.borderTop='0';
-      wp.style.borderBottom='2px solid #c8a84b';
+      wp.style.maxHeight='none'; wp.style.overflow='visible';
+      wp.style.borderTop='0'; wp.style.borderBottom='2px solid #c8a84b';
+      wp.style.padding='8px 14px';
     } else {
       wp.style.top='auto'; wp.style.bottom='0';
-      wp.style.maxHeight='46vh'; wp.style.borderBottom='0';
-      wp.style.borderTop='2px solid #c8a84b';
+      wp.style.maxHeight='46vh'; wp.style.overflow='auto';
+      wp.style.borderBottom='0'; wp.style.borderTop='2px solid #c8a84b';
+      wp.style.padding='10px 14px';
     }
     $('wizProgress').textContent = `Schritt ${idx+1} / ${STEPS.length}` + (st.type==='auto' ? ' · App-Aktion' : ' · du bist dran') + (st.camTap ? ' · Canvas frei zum Tippen' : '');
     $('wizStepNo').textContent = st.title.toUpperCase();
