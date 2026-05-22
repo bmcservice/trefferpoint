@@ -1242,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.177';
+const APP_VERSION = '2.3.178';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1454,6 +1454,17 @@ function applyEtfMode(active, gwIp) {
             headers: { 'Content-Type': 'application/json' },
             cache: 'no-store',
             body: JSON.stringify({ time: { visible: 0 } })
+        }).catch(() => {});
+        // v2.3.178: AE-Lock — verhindert Auto-Belichtungs-Drift (BEFUND-Hauptkiller).
+        // Provokationstest 2026-05-20 bewies: PUT {"ae":{"enable":0}} an
+        // /roc/isp/param locked AE deterministisch (Mittelwert stürzt um 100 graylevel
+        // bei Dunkel-Stimulus und steht 8s lang -- Lehrbuch-Lock-Signatur).
+        // Schraube 2 vom BEFUND-Fixstrategie-Block. Recovery beim Stream-Stop.
+        fetch('http://' + gwIp + '/roc/isp/param', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            cache: 'no-store',
+            body: JSON.stringify({ ae: { enable: 0 } })
         }).catch(() => {});
     }
 }
@@ -4596,6 +4607,17 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
 
     // RTSP stoppen
     document.getElementById('btnRtspStop').addEventListener('click', () => {
+        // v2.3.178: AE-Lock aufheben VOR stopRtsp (sonst Cam in Lock-Zustand bis Power-Cycle).
+        // Body {"ae":{"enable":1,"mode":1}} = verifiziertes Clean-Recovery (Schema-Hunt
+        // 2026-05-20: delta vs baseline +1.14 = innerhalb Noise-Floor).
+        if (camIsEtf) {
+            fetch('http://192.168.10.1/roc/isp/param', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                cache: 'no-store',
+                body: JSON.stringify({ ae: { enable: 1, mode: 1 } })
+            }).catch(() => {});
+        }
         try { window.tpBridge.stopRtsp(); } catch(e) {}
         document.getElementById('btnRtspStop').style.display = 'none';
         // v2.3.161: HTML-Hintergrund wieder normal (für USB/MJPEG-Modi sichtbar)
