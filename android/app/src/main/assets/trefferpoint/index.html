@@ -1242,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.179';
+const APP_VERSION = '2.3.180';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -5283,7 +5283,7 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
 
     { type:'info', title:'JETZT 5 Schüsse',
       text:'Gib EXAKT 5 Schüsse ab — langsam, einzeln gezielt, Richtung Zentrum, ca. 5 s Abstand.',
-      sub:'Notiere für jeden Schuss grob die Lage (z. B. „Mitte", „9 auf 6 Uhr"). Weiter ERST nach dem 5. Schuss.' },
+      sub:'WICHTIG: Scheibe NACH der Serie INTAKT aufheben — die physischen Lochpositionen sind im Folgeschritt die Ground-Truth-Validierung gegen die App-Erkennung. Weiter ERST nach dem 5. Schuss.' },
 
     { type:'auto', title:'Messung beenden + speichern',
       text:'Ich lasse 10 s nachlaufen, stoppe dann und speichere die Session.',
@@ -5297,9 +5297,13 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
         return {ok:true, msg: saved+' · Detection-Frames: '+n};
       } },
 
+    { type:'info', title:'Ground-Truth festhalten',
+      text:'Scheibe vom Stand mitnehmen. Zuhause: 1) Foto mit Lineal als Maßstab (oder Lineal-Messung) jeder einzelnen Loch-Position relativ zum Spiegel-Mittelpunkt. 2) Tool ground_truth_spiegel.html öffnen, dort die Lochpositionen anklicken → JSON-Block kopieren.',
+      sub:'Diese physische Wahrheit ist die einzige unabhängige Validierung gegen die App-Erkennung (raw + v2.3.179-refined). Ohne sie ist jede Aussage „App erkennt richtig" zirkulär.' },
+
     { type:'info', title:'Fertig ✓',
-      text:'Test abgeschlossen. Session-Log + Detection-Frames sind auf dem Tablet gesichert.',
-      sub:'WICHTIG aufschreiben: wie viele Schüsse real abgegeben + grobe Lage jedes Schusses. Dann „Abbrechen" zum Beenden.' },
+      text:'Test abgeschlossen. Session-Log + Detection-Frames sind auf dem Tablet gesichert. Ground-Truth-JSON aus Schritt zuvor an Auswertung übergeben.',
+      sub:'Aufschreiben: Anzahl real abgegebener Schüsse, Lichtbedingungen (Vormittag/Nachmittag, hell/diffus), Cam-/Spektiv-Position-Notiz. Dann „Abbrechen" zum Beenden.' },
   ];
 
   let idx = 0, busy = false;
