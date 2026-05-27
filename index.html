@@ -1242,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.178';
+const APP_VERSION = '2.3.179';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3421,6 +3421,11 @@ function runDetection() {
         setMsg('Auflösung gewechselt — Referenz wird neu stabilisiert (~6s)…');
         return;
     }
+    // v2.3.179: H5 Position-Refine — pending Refinement-Tasks füttern
+    // (nutzt cur+refFrame des aktuellen Frames). Läuft VOR der Detection-Logik,
+    // damit auch Frames während Cooldown/Warmup nach Hit noch eingesammelt werden.
+    try { processRefineQueue(cur, refFrame); } catch(e) {}
+
     const prev = refFrame.data;
     const next = cur.data;
     const threshold = parseInt(document.getElementById('sens').value);
@@ -3622,6 +3627,143 @@ function runDetection() {
     tryCommitHit({ cx, cy, ringDec, ringLabel, distMm, deg });
 }
 
+// =========================================================================
+// v2.3.179: H5 Position-Refine (Event-getriggerte Lokal-Integration)
+// =========================================================================
+// Hintergrund: BEFUND 2026-05-19 + Re-Analyse 2026-05-22 zeigten,
+// dass die committed Hit-Koordinaten typisch 3-13 mm vom tatsächlichen
+// Loch-Zentrum abweichen. Eine Integration über 8 Post-Hit-Frames im
+// 60×60-Fenster löst das Signal sauber heraus: Offline-Test ergab
+// 3/8 Hits auf ≤10 px, 5/8 weitere auf 23-40 px Genauigkeit.
+// Hier: nach jedem committed Hit wird ein Task in die Queue gepusht.
+// Die nächsten 8 runDetection-Iterationen akkumulieren das positive
+// Residuum (richtungssensitiv: innerhalb Spiegel hell, außerhalb dunkel).
+// Nach 8 Frames: Peak-Suche im Integrations-Buffer → Hit-Koordinaten +
+// Ring werden retroaktiv aktualisiert.
+const REFINE_WIN = 30;       // ±30 px ROI = 60×60 = matches Offline-Analyse
+const REFINE_FRAMES = 8;     // 8 Frames ≈ 2 s bei 4Hz Detection
+const refineQueue = [];
+
+function scheduleRefine(hitIdx, cxOrig, cyOrig) {
+    if (!refFrame) return;
+    const w = refFrame.width, h = refFrame.height;
+    const x0 = Math.max(0, Math.round(cxOrig) - REFINE_WIN);
+    const y0 = Math.max(0, Math.round(cyOrig) - REFINE_WIN);
+    const x1 = Math.min(w, Math.round(cxOrig) + REFINE_WIN);
+    const y1 = Math.min(h, Math.round(cyOrig) + REFINE_WIN);
+    const roiW = x1 - x0, roiH = y1 - y0;
+    if (roiW < 10 || roiH < 10) return;
+    // Sign-Konvention (wie in runDetection): innerhalb Spiegel = hell wird zu Loch (+); außerhalb = dunkel (−)
+    const sign = isInsideSpiegel(cxOrig, cyOrig) ? 1 : -1;
+    refineQueue.push({
+        hitIdx, cxOrig, cyOrig, x0, y0, x1, y1, roiW, roiH, sign,
+        integ: new Float32Array(roiW * roiH),
+        framesGot: 0,
+    });
+}
+
+function processRefineQueue(cur, ref) {
+    if (refineQueue.length === 0) return;
+    if (!cur || !ref || cur.width !== ref.width || cur.height !== ref.height) return;
+    const W = cur.width;
+    const curD = cur.data, refD = ref.data;
+    for (let qi = refineQueue.length - 1; qi >= 0; qi--) {
+        const r = refineQueue[qi];
+        if (r.framesGot >= REFINE_FRAMES) continue;
+        // Akkumuliere positives sign-korrigiertes Residuum im ROI
+        let j = 0;
+        const sign = r.sign;
+        for (let y = r.y0; y < r.y1; y++) {
+            const rowBase = y * W * 4;
+            for (let x = r.x0; x < r.x1; x++, j++) {
+                const i = rowBase + x * 4;
+                const lc = curD[i] + curD[i+1] + curD[i+2];
+                const lp = refD[i] + refD[i+1] + refD[i+2];
+                const d = sign * (lc - lp);
+                if (d > 0) r.integ[j] += d;
+            }
+        }
+        r.framesGot++;
+        if (r.framesGot >= REFINE_FRAMES) {
+            doRefine(r);
+            refineQueue.splice(qi, 1);
+        }
+    }
+}
+
+function doRefine(r) {
+    const W = r.roiW;
+    const integ = r.integ;
+    // Peak suchen
+    let peakVal = -1, peakIdx = -1;
+    for (let i = 0; i < integ.length; i++) {
+        if (integ[i] > peakVal) { peakVal = integ[i]; peakIdx = i; }
+    }
+    if (peakVal < 50) {
+        if (typeof console !== 'undefined' && console.log) {
+            console.log(`[v2.3.179] Refine#${r.hitIdx}: zu schwacher peak ${peakVal.toFixed(0)} — Original behalten`);
+        }
+        return;
+    }
+    const px = peakIdx % W;
+    const py = (peakIdx - px) / W;
+    const newCx = r.x0 + px;
+    const newCy = r.y0 + py;
+    const deltaPx = Math.hypot(newCx - r.cxOrig, newCy - r.cyOrig);
+    if (deltaPx > REFINE_WIN * 0.9) {
+        if (typeof console !== 'undefined' && console.log) {
+            console.log(`[v2.3.179] Refine#${r.hitIdx}: peak am ROI-Rand (Δ${deltaPx.toFixed(0)}px) — verdaechtig, Original behalten`);
+        }
+        return;
+    }
+    if (r.hitIdx >= hits.length) return;
+    if (typeof calib === 'undefined' || !calib || !calib.cx) {
+        // Ohne Kalibrierung nur Koordinaten update
+        hits[r.hitIdx].x = newCx;
+        hits[r.hitIdx].y = newCy;
+        hits[r.hitIdx].refined = true;
+        return;
+    }
+    // Ring neu berechnen (exakt gleiche Logik wie in runDetection vor tryCommitHit)
+    const dx = newCx - calib.cx, dy = newCy - calib.cy;
+    const cosA = Math.cos(-calib.angle), sinA = Math.sin(-calib.angle);
+    const rx = cosA * dx - sinA * dy;
+    const ry = sinA * dx + cosA * dy;
+    const normDist = Math.sqrt((rx/calib.a)*(rx/calib.a) + (ry/calib.b)*(ry/calib.b));
+    const newDistMm = normDist * Math.sqrt(calib.a * calib.b) / calib.pxPerMm;
+    const disc = DISCS[document.getElementById('discSel').value];
+    const scoreDist = newDistMm - disc.kaliber / 2;
+    let newRing = 0;
+    for (const rng of disc.ringe) {
+        if (scoreDist <= rng.radius) { newRing = rng.r; break; }
+    }
+    const newRingDec = ringMitZehntel(scoreDist, newRing, disc);
+    const newDeg = hitDeg(newCx, newCy);
+    const oldRing = hits[r.hitIdx].ring;
+    hits[r.hitIdx].x = newCx;
+    hits[r.hitIdx].y = newCy;
+    hits[r.hitIdx].ring = newRingDec;
+    hits[r.hitIdx].distMm = newDistMm.toFixed(1);
+    hits[r.hitIdx].deg = newDeg;
+    hits[r.hitIdx].refined = true;
+    hits[r.hitIdx].refineDelta = Math.round(deltaPx);
+    // recSession update
+    if (typeof recSession !== 'undefined' && recSession && recSession.hits && recSession.hits[r.hitIdx]) {
+        const rh = recSession.hits[r.hitIdx];
+        rh.x_refined = Math.round(newCx);
+        rh.y_refined = Math.round(newCy);
+        rh.ring_refined = newRingDec;
+        rh.distMm_refined = parseFloat(newDistMm.toFixed(1));
+        rh.deg_refined = Math.round(newDeg);
+        rh.refine_delta_px = Math.round(deltaPx);
+        rh.refine_peak = Math.round(peakVal);
+    }
+    if (typeof console !== 'undefined' && console.log) {
+        console.log(`[v2.3.179] Refine#${r.hitIdx}: Δ${deltaPx.toFixed(0)}px ring ${(typeof oldRing==='number'?oldRing.toFixed(1):oldRing)}→${newRingDec.toFixed(1)} peak ${peakVal.toFixed(0)}`);
+    }
+    if (typeof updateScore === 'function') updateScore();
+}
+
 // v2.3.168: Hit-Commit-Logik aus runDetection extrahiert.
 // Bei Bestätigungs-Modus AN → Banner mit Tap/Auto-Discard-Timer; sonst direkt committen.
 let confirmPending = null;       // {payload, expiresAt, timeoutId}
@@ -3637,6 +3779,10 @@ function tryCommitHit(payload) {
 function commitHit(payload) {
     const { cx, cy, ringDec, ringLabel, distMm, deg } = payload;
     hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg });
+    // v2.3.179: H5 Position-Refine — Task für die nächsten 8 Frames einplanen,
+    // siehe scheduleRefine/processRefineQueue/doRefine oben. Hit-Koord wird
+    // retroaktiv präzisiert sobald genug Frames akkumuliert sind.
+    try { scheduleRefine(hits.length - 1, cx, cy); } catch(e) {}
     // v2.3.146: bei aktiver Session-Aufnahme den Hit auch dort mit Timestamp loggen
     if (recSession) {
         recSession.hits.push({
