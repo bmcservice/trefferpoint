@@ -1242,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.180';
+const APP_VERSION = '2.3.181';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -1430,6 +1430,13 @@ function saveTsMask() {
  * das Wasserzeichen serverseitig ab. Bei aktiv=false (SGK / andere) wird die
  * Maske-UI wieder eingeblendet — der SGK-Pfad bleibt 1:1 wie heute.
  */
+// v2.3.181: Idempotenz-Tracker. Wenn der gleiche AE-Lock-PUT zweimal
+// in Folge gefeuert wird (Mode-Switch + Stream-Start), kann der zweite
+// während der RTSP-Verhandlung ankommen und den Decoder glitchen
+// (PixelCopy code=3 = ERROR_SOURCE_NO_DATA dauerhaft). Lösung: PUTs
+// nur einmal pro (active, gwIp)-Kombination senden, bis ein
+// applyEtfMode(false,...) das Flag zurücksetzt.
+let _etfPutsLastIp = null;
 function applyEtfMode(active, gwIp) {
     camIsEtf = !!active;
     const tsBtn = document.getElementById('btnTsMask');
@@ -1445,6 +1452,11 @@ function applyEtfMode(active, gwIp) {
         if (zoomRow2 && zoomRow2.parentElement) zoomRow2.parentElement.style.display = active ? 'none' : '';
     } catch(_) {}
     if (active && gwIp) {
+        // v2.3.181: Idempotenz-Guard. Wenn der gleiche PUT schon für dieselbe IP
+        // gefeuert wurde, NICHT erneut senden — sonst trifft der zweite während
+        // RTSP-Handshake auf die Cam und glitcht den Decoder (PixelCopy code=3).
+        if (_etfPutsLastIp === gwIp) return;
+        _etfPutsLastIp = gwIp;
         // Wasserzeichen abschalten — Body-Schema reverse-engineered aus Apexel-App
         // ETFClient.setOSDStatus(int) → JSONObject{"time":{"visible":<0|1>}}
         // Der Server akzeptiert es auch über plain HTTP-PUT (Apexel selbst nutzt
@@ -1466,6 +1478,11 @@ function applyEtfMode(active, gwIp) {
             cache: 'no-store',
             body: JSON.stringify({ ae: { enable: 0 } })
         }).catch(() => {});
+    } else {
+        // v2.3.181: bei active=false Idempotenz-Flag zurücksetzen, damit der
+        // nächste Aktivierung-Zyklus die PUTs wieder schicken darf
+        // (z.B. nach Cam-Power-Cycle, Mode-Switch zurück, etc.).
+        _etfPutsLastIp = null;
     }
 }
 
@@ -4727,6 +4744,16 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         const lbl = isMjpeg ? 'MJPEG' : 'RTSP';
         setStatus(lbl + ' verbinden\u2026', 'warn');
         setMsg('Starte ' + lbl + '-Stream\u2026');
+        // v2.3.181: ETF150-PUT-Setup MUSS VOR startRtsp passieren - sonst trifft
+        // der PUT auf /roc/isp/param waehrend des RTSP-Handshakes auf die Cam
+        // und glitcht den MediaCodec-Decoder dauerhaft (PixelCopy code=3 =
+        // ERROR_SOURCE_NO_DATA, beobachtet 2026-05-28 v2.3.180-Smoketest).
+        // Idempotenz-Guard in applyEtfMode verhindert duplicate Calls.
+        if (/192\.168\.10\.1/.test(url)) {
+            applyEtfMode(true, '192.168.10.1');
+        } else {
+            applyEtfMode(false, null);
+        }
         // Wichtig: Frame-Receiver einmal aufsetzen (dasselbe wie für USB)
         setupBridgeFrameReceiver();
         try { window.tpBridge.startRtsp(url); } catch(e) {
@@ -4740,13 +4767,6 @@ document.getElementById('btnModeStream').addEventListener('click', () => {
         if (!isMjpeg) startRtspSnapshotLoop();
         // v2.3.167: Keep-Alive-Ping gegen ETF150-autoShutdown
         if (/192\.168\.10\.1/.test(url)) startEtfKeepAlive('192.168.10.1');
-        // v2.3.151: ETF150-Cam \u2014 OSD/Wasserzeichen abschalten + Maske-UI ausblenden.
-        // Bei jedem Stream-Start neu, weil Cam-Power-Cycle das Setting auf Default zur\u00fccksetzt.
-        if (/192\.168\.10\.1/.test(url)) {
-            applyEtfMode(true, '192.168.10.1');
-        } else {
-            applyEtfMode(false, null);
-        }
         document.getElementById('btnRtspStop').style.display = '';
         initWlanCamButtons(); // v2.3.119: SGK-Kamera-Buttons aktivieren
     });
