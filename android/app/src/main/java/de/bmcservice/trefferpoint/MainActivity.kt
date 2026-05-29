@@ -729,6 +729,27 @@ class MainActivity : AppCompatActivity() {
         fun getDetCaptureCount(): Int = detCaptureCount
 
         /**
+         * v2.3.184: Schreibt eine _meta.json mit Geometrie-Stempel in detCaptureDir.
+         * Wird vom JS-Wizard direkt nach setDetCapture(true,…) aufgerufen mit
+         * cal-Koords, canvas-rect, rtspVideoWidth/Height, surfaceView-Position etc.
+         * Damit ist später offline rekonstruierbar ob Touch→Canvas→Stream-Mapping
+         * linear war oder ob ein Offset existiert (Befund Session 2026-05-29).
+         */
+        @JavascriptInterface
+        fun writeDetMeta(json: String): String {
+            val dir = detCaptureDir ?: return "ERROR: detCaptureDir==null (setDetCapture nicht aktiv?)"
+            return try {
+                val sv = surfaceView
+                val svLoc = IntArray(2).also { sv.getLocationOnScreen(it) }
+                val combined = """{"app_meta":$json,"native":{"surfaceViewWidth":${sv.width},"surfaceViewHeight":${sv.height},"surfaceViewLeft":${svLoc[0]},"surfaceViewTop":${svLoc[1]},"rtspVideoWidth":$rtspVideoWidth,"rtspVideoHeight":$rtspVideoHeight,"activeMode":"$activeMode","appVersion":"${BuildConfig.VERSION_NAME}"}}"""
+                java.io.File(dir, "_meta.json").writeText(combined)
+                "OK: ${dir.absolutePath}/_meta.json (${combined.length} bytes)"
+            } catch (e: Exception) {
+                "ERROR: ${e.message}"
+            }
+        }
+
+        /**
          * v2.3.163: Speichert einen JSON-String direkt in /sdcard/Download/<filename>.
          * Vorher: WebView nutzte `<a download="…" href="blob:…">.click()`, was im
          * WebView ohne setDownloadListener KOMPLETT IGNORIERT wird. Ergebnis:

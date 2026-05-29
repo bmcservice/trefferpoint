@@ -1197,6 +1197,11 @@
                 </label>
                 <div id="diagStatus" style="font-size:10px;color:var(--text-dim);
                     font-family:'Share Tech Mono',monospace;margin-top:3px"></div>
+                <!-- v2.3.184: Q-Drift-Banner — wird sichtbar wenn Cal vermutlich verschoben -->
+                <div id="qDriftBanner" onclick="this.style.display='none'; this.dataset.dismissed='1'"
+                    style="display:none;font-size:11px;color:#fff;background:#c44;
+                    padding:6px 8px;border-radius:4px;margin-top:6px;cursor:pointer;
+                    font-family:'Share Tech Mono',monospace;line-height:1.3"></div>
             </div>
         </div>
 
@@ -1242,7 +1247,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.183';
+const APP_VERSION = '2.3.184';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3800,9 +3805,35 @@ function tryCommitHit(payload) {
     else commitHit(payload);
 }
 
+// v2.3.184: Q-Drift-Warner. Hält Quadranten der letzten 3 Hits, warnt
+// wenn alle in einem Quadranten landen — typisches Anzeichen einer
+// verschobenen Kalibrierung (echter Spiegel-Mittelpunkt liegt nicht
+// am App-Center). Banner ist dismissable; bei verschobenem Cal kann
+// per Tap-Edit-Mode korrigiert werden (chkTapCalEdit).
+const _qHistory = [];
+function checkQuadrantDrift(x, y) {
+    if (!calib) return;
+    const q = (x < calib.cx ? 'L' : 'R') + (y < calib.cy ? 'O' : 'U');
+    _qHistory.push(q);
+    if (_qHistory.length > 5) _qHistory.shift();
+    if (_qHistory.length < 3) return;
+    const last3 = _qHistory.slice(-3);
+    if (last3[0] === last3[1] && last3[1] === last3[2]) {
+        const banner = document.getElementById('qDriftBanner');
+        if (banner && !banner.dataset.dismissed) {
+            const labels = {LO:'oben-links', RO:'oben-rechts', LU:'unten-links', RU:'unten-rechts'};
+            banner.textContent = `⚠ Letzte 3 Hits alle ${labels[last3[0]] || last3[0]} — Kalibrierung verschoben? (Tap zum Schließen, oder Tap-Korrektur aktivieren)`;
+            banner.style.display = 'block';
+        }
+    }
+}
+
 function commitHit(payload) {
     const { cx, cy, ringDec, ringLabel, distMm, deg } = payload;
     hits.push({ x: cx, y: cy, ring: ringDec, distMm: distMm.toFixed(1), deg });
+    // v2.3.184: Q-Drift-Warner — 3 Hits in Folge im selben Quadranten = Kalibrierung
+    // wahrscheinlich verschoben (Befund 2026-05-29: 17/18 Hits in Q3 unten-links).
+    try { checkQuadrantDrift(cx, cy); } catch(e) {}
     // v2.3.179: H5 Position-Refine — Task für die nächsten 8 Frames einplanen,
     // siehe scheduleRefine/processRefineQueue/doRefine oben. Hit-Koord wird
     // retroaktiv präzisiert sobald genug Frames akkumuliert sind.
@@ -5194,10 +5225,35 @@ function startDetCaptureIfDiag() {
         _detCaptureActive = !String(res).startsWith('ERROR');
         const ds = document.getElementById('diagStatus');
         if (ds) ds.textContent = _detCaptureActive ? ('🔬 Capture: ' + res) : ('⚠ ' + res);
+        // v2.3.184: Geometrie-Stempel ins detCaptureDir schreiben (Cal-Drift-Diagnose)
+        if (_detCaptureActive) writeDetMetaStamp();
     } catch(e) {
         const ds = document.getElementById('diagStatus');
         if (ds) ds.textContent = '⚠ Capture-Fehler: ' + e.message;
     }
+}
+
+// v2.3.184: Geometrie-Stempel — beantwortet offline ob Touch→Canvas→Stream-Mapping
+// linear ist (Befund 2026-05-29: cal liegt visuell verschoben gegenüber Detframe-Inhalt).
+function writeDetMetaStamp() {
+    if (!(window.tpBridge && window.tpBridge.writeDetMeta)) return;
+    try {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const meta = {
+            ts: Date.now(),
+            canvas: { internal_w: canvas.width, internal_h: canvas.height,
+                      css_w: rect.width, css_h: rect.height,
+                      left: rect.left, top: rect.top, dpr: dpr },
+            cal: calib ? { cx: calib.cx, cy: calib.cy, a: calib.a, b: calib.b,
+                           angle: calib.angle, pxPerMm: calib.pxPerMm, locked: !!calib.locked }
+                       : null,
+            window: { innerW: window.innerWidth, innerH: window.innerHeight,
+                      scrollX: window.scrollX, scrollY: window.scrollY }
+        };
+        const res = window.tpBridge.writeDetMeta(JSON.stringify(meta));
+        console.log('[v2.3.184] writeDetMeta:', res);
+    } catch(e) { console.warn('writeDetMetaStamp failed:', e); }
 }
 function stopDetCapture() {
     if (!_detCaptureActive) return;
