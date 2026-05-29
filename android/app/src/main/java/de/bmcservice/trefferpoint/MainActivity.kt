@@ -381,6 +381,24 @@ class MainActivity : AppCompatActivity() {
                 uvcFrameCount++
                 lastUvcFrameJpeg = jpeg   // v2.3.118: für sgkSaveFrame() im USB-Modus
                 lastFrameSize = jpeg.size
+                // v2.3.182: Detection-Frame-Capture auch im USB-Cam-Pfad (analog
+                // zur PixelCopy-Variante in captureRtspSurfaceJpeg). Vorher nur
+                // im RTSP/SurfaceView-Modus implementiert → USB-Cam-Tests lieferten
+                // 0 Frames im Detframes-Ordner, blockierten Vergleichs-Analyse.
+                // Gleiche 4-Hz-Drosselung + gleicher detCaptureDir wie PixelCopy-Pfad.
+                val detDir = detCaptureDir
+                if (detDir != null) {
+                    val nowMs = System.currentTimeMillis()
+                    if (nowMs - detLastSavedEpoch >= 240) {  // ~4 Hz Cap
+                        detLastSavedEpoch = nowMs
+                        try {
+                            java.io.File(detDir, "df_$nowMs.jpg").writeBytes(jpeg)
+                            detCaptureCount++
+                        } catch (e: Exception) {
+                            AppLog.e(TAG, "DetFrame-Write (UVC) fehlgeschlagen", e)
+                        }
+                    }
+                }
                 if (!logged) {
                     AppLog.i(TAG, "Erster Frame: ${bytes.size}B roh → ${jpeg.size}B JPEG @ ${w}x$h")
                     logged = true
