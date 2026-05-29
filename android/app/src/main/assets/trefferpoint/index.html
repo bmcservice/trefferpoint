@@ -1242,7 +1242,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.182';
+const APP_VERSION = '2.3.183';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3552,9 +3552,14 @@ function runDetection() {
     }
 
     frozenSpotTrack(candidateCx, candidateCy);
-    const _fsOn = !isDiagMode() && (function(){ const e=document.getElementById('chkFrozenSpot'); return e && e.checked; })();
-    if (_fsOn && frozenSpotCheck(candidateCx, candidateCy)) {
-        logRejected('frozen_spot', { x: Math.round(candidateCx), y: Math.round(candidateCy) });
+    // v2.3.183 KERNFIX: Frozen-Spot WAR im Diag-Modus IMMER aus → 13 Spots gelernt,
+    // aber nicht geblockt → Cluster B Session 2026-05-29 lieferte 11 statt 5 Hits.
+    // Neu: Filter auch im Diag-Modus aktiv (außer chkFrozenSpot=AUS), aber Block
+    // wird als 'frozen_spot' geloggt damit der raw_candidate-Stream weiter sichtbar
+    // bleibt. Damit liefern Diag-Sessions wieder belastbare Trainingsdaten.
+    const _fsOptIn = (function(){ const e=document.getElementById('chkFrozenSpot'); return !e || e.checked; })();
+    if (_fsOptIn && frozenSpotCheck(candidateCx, candidateCy)) {
+        logRejected('frozen_spot', { x: Math.round(candidateCx), y: Math.round(candidateCy), diag: isDiagMode() });
         pendingHit = null;
         return;
     }
@@ -3622,8 +3627,10 @@ function runDetection() {
     }
 
     // v2.3.138: Spatial Exclusion — Loch das bereits erkannt wurde nicht nochmal zählen.
-    // Exclusion-Zone = 2× Kaliber-Durchmesser (z.B. 11.2mm bei .22, 18mm bei 9mm).
-    const exclPx = calib.pxPerMm * disc.kaliber * 2;
+    // v2.3.183: Zone auf 3× Kaliber erhöht (vorher 2×). Befund Session 2026-05-29
+    // Cluster A: Schuss 5 wurde als #5/#6/#7 dreifach committed, Pixel-Distanzen 27-50px.
+    // Bei pxPerMm=3 entspricht 2×Kal=33.6px (zu klein), 3×Kal=50.4px (fängt die Klone).
+    const exclPx = calib.pxPerMm * disc.kaliber * 3;
     const alreadyDetected = hits.some(h => {
         const dx = h.x - cx, dy = h.y - cy;
         return dx*dx + dy*dy < exclPx*exclPx;
@@ -3812,9 +3819,14 @@ function commitHit(payload) {
         });
     }
     // v2.3.168: 1.5 s real-time Re-Stabilisierung + neuen Median-Akkumulator.
+    // v2.3.183: Cooldown von 3.0s → 4.5s erhöht. Befund Session 2026-05-29
+    // Cluster A: #5/#6/#7 für denselben Schuss 5 in 9.7s — Cooldown 3s ließ #6
+    // (5.1s nach #5) und #7 (9.7s nach #5) durch. 4.5s sperrt mindestens #6 sicher.
+    // KK25-Sportpistole-Schussfolge ist typisch 4-6s, also kompatibel mit echten
+    // Schüssen, aber drosselt Doppel-Trigger.
     refWarmupUntil = performance.now() + 1500;
     refAccum = null; refAccumSamples = 0;
-    cooldown  = Math.round(displayFps * 3.0) || 75;
+    cooldown  = Math.round(displayFps * 4.5) || 110;
 
     updateScore();
     showPop(ringLabel, distMm.toFixed(1));
