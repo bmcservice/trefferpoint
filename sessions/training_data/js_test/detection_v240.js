@@ -206,9 +206,20 @@ function streamDetect(ref, post, W, H, spiegel, kaliberMm, opts = {}) {
   return { dets, shift };
 }
 
+// ---- Helper: canvas ImageData (RGBA) → Float32 Graustufen ----
+// Im Browser: ctx.getImageData(...).  Graustufe = Luma (0.299R+0.587G+0.114B).
+function imageDataToGray(imgData) {
+  const { data, width: W, height: H } = imgData;
+  const gray = new Float32Array(W * H);
+  for (let i = 0, p = 0; i < W * H; i++, p += 4) {
+    gray[i] = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+  }
+  return { gray, W, H };
+}
+
 // Browser: window-Export; Node: module.exports
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { registerTranslation, detectOnDiff, streamDetect, centerSurround, integralImage };
+  module.exports = { registerTranslation, detectOnDiff, streamDetect, centerSurround, integralImage, imageDataToGray };
 } else if (typeof window !== 'undefined') {
-  window.TPDetect = { registerTranslation, detectOnDiff, streamDetect };
+  window.TPDetect = { registerTranslation, detectOnDiff, streamDetect, imageDataToGray };
 }
