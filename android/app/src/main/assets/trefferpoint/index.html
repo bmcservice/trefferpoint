@@ -1251,7 +1251,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.4.1';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2674,6 +2674,9 @@ function loop() {
         frameCount = 0;
         lastFpsTime = now;
         document.getElementById('statusFps').textContent = displayFps + ' fps';
+        // v2.4.1: SurfaceView deckungsgleich halten (Cal-Mapping-Fix). 1×/s, Caching
+        // in syncSurfaceBounds ruft die Bridge nur bei tatsächlicher Größen-Änderung.
+        try { syncSurfaceBounds(); } catch(e) {}
     }
 
     // Software-Zoom + optionale Kamera-Rotation
