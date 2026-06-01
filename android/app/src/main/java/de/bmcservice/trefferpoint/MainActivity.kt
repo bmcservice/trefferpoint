@@ -750,6 +750,37 @@ class MainActivity : AppCompatActivity() {
         }
 
         /**
+         * v2.4.1 CAL-MAPPING-FIX: Positioniert+dimensioniert die SurfaceView exakt
+         * auf die camera-wrap-Region des WebViews (physische Pixel). Vorher war die
+         * SurfaceView match_parent (full-screen) → das Live-Bild wurde 1920→2560
+         * gestreckt, während das Canvas-Overlay nur 1912px breit war (Faktor 1.339).
+         * Folge: Touch→Stream-Koordinate um ~34% verschoben, calib saß 86mm neben
+         * dem echten Spiegel (Befund 2026-05-31). Mit deckungsgleicher SurfaceView
+         * skalieren beide Layer identisch → Touch/Ringe/Detection/calib konsistent.
+         * Aufruf aus JS bei Stream-Start + window.resize mit den phys-px der
+         * camera-wrap (getBoundingClientRect × devicePixelRatio).
+         */
+        @JavascriptInterface
+        fun setSurfaceBounds(left: Int, top: Int, w: Int, h: Int): String {
+            if (w <= 0 || h <= 0) return "ERROR: ungültige Größe ${w}x${h}"
+            runOnUiThread {
+                try {
+                    val lp = surfaceView.layoutParams as android.widget.FrameLayout.LayoutParams
+                    lp.width = w
+                    lp.height = h
+                    lp.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                    lp.leftMargin = left
+                    lp.topMargin = top
+                    surfaceView.layoutParams = lp
+                    AppLog.i(TAG, "setSurfaceBounds: ${w}x${h} @($left,$top)")
+                } catch (e: Exception) {
+                    AppLog.e(TAG, "setSurfaceBounds fehlgeschlagen", e)
+                }
+            }
+            return "OK: ${w}x${h}@($left,$top)"
+        }
+
+        /**
          * v2.3.163: Speichert einen JSON-String direkt in /sdcard/Download/<filename>.
          * Vorher: WebView nutzte `<a download="…" href="blob:…">.click()`, was im
          * WebView ohne setDownloadListener KOMPLETT IGNORIERT wird. Ergebnis:

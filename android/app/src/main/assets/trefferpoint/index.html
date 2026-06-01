@@ -1251,7 +1251,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.3.184';
+const APP_VERSION = '2.4.0';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2591,6 +2591,29 @@ function syncCanvasSize(width, height) {
         canvas.height = height;
     }
 }
+
+// v2.4.1 CAL-MAPPING-FIX: SurfaceView deckungsgleich auf das Canvas-Element legen.
+// Vorher war die SurfaceView full-screen (match_parent) → Live-Bild 1920→2560 gestreckt,
+// Canvas-Overlay nur 1912px → Touch/Stream-Versatz Faktor 1.339 (calib 86mm daneben).
+// Jetzt: SurfaceView-Bounds = Canvas-getBoundingClientRect × devicePixelRatio.
+// Damit skalieren Live-Bild und Canvas-Koordinaten identisch → calib stimmt.
+let _lastSurfBounds = '';
+function syncSurfaceBounds() {
+    if (!isNativeSurfaceRtspMode() || !window.tpBridge || !window.tpBridge.setSurfaceBounds) return;
+    const r = canvas.getBoundingClientRect();
+    if (r.width < 10 || r.height < 10) return;   // Canvas unsichtbar (anderer View)
+    const dpr = window.devicePixelRatio || 1;
+    const left = Math.round(r.left * dpr);
+    const top  = Math.round(r.top  * dpr);
+    const w    = Math.round(r.width  * dpr);
+    const h    = Math.round(r.height * dpr);
+    const key = `${left},${top},${w},${h}`;
+    if (key === _lastSurfBounds) return;          // nur bei Änderung
+    _lastSurfBounds = key;
+    try { window.tpBridge.setSurfaceBounds(left, top, w, h); } catch(e) {}
+}
+// bei Fenster-/Layout-Änderungen nachführen
+window.addEventListener('resize', () => { _lastSurfBounds=''; setTimeout(syncSurfaceBounds, 100); });
 
 function syncRtspCanvasFromStatus() {
     if (!isNativeSurfaceRtspMode()) return false;
@@ -4425,6 +4448,11 @@ function setupBridgeFrameReceiver() {
                     buildCamControls();
                     setStatus('Stream aktiv · SurfaceView', 'ok');
                     setMsg('Live-Bild läuft direkt · Vergleich arbeitet per Snapshot');
+                    // v2.4.1: SurfaceView deckungsgleich auf Canvas legen (Cal-Mapping-Fix).
+                    // Mehrfach mit Verzögerung, bis Canvas-Layout stabil ist.
+                    syncSurfaceBounds();
+                    setTimeout(syncSurfaceBounds, 300);
+                    setTimeout(syncSurfaceBounds, 1000);
                     if (!rafId) startLoop();
                 }
                 clearInterval(checkTimer); return;
