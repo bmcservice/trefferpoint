@@ -36,30 +36,38 @@ function boxMean(I, W, H, cx, cy, rad) {
   return n > 0 ? boxSum(I, W, x0, y0, x1, y1) / n : 0;
 }
 
-// ---- Translation-Registration (brute-force, JS-portierbar) ----
-function registerTranslation(ref, post, W, H, maxShift = 10, step = 1) {
+// ---- Translation-Registration (coarse-to-fine, JS-portierbar) ----
+function _mseAt(ref, post, W, H, dx, dy, sub) {
   const cy0 = (H >> 1), cx0 = (W >> 1);
   const rh = (H / 3) | 0, rw = (W / 3) | 0;
-  let best = { mse: Infinity, dx: 0, dy: 0 };
-  for (let dy = -maxShift; dy <= maxShift; dy += step) {
-    for (let dx = -maxShift; dx <= maxShift; dx += step) {
-      let sse = 0, n = 0;
-      // subsample für Speed (jeder 2. Pixel)
-      for (let y = cy0 - rh; y < cy0 + rh; y += 2) {
-        const ry = y + dy;
-        if (ry < 0 || ry >= H) { sse = Infinity; break; }
-        for (let x = cx0 - rw; x < cx0 + rw; x += 2) {
-          const rx = x + dx;
-          if (rx < 0 || rx >= W) { sse = Infinity; break; }
-          const d = post[y * W + x] - ref[ry * W + rx];
-          sse += d * d; n++;
-        }
-        if (sse === Infinity) break;
-      }
-      const mse = n > 0 ? sse / n : Infinity;
-      if (mse < best.mse) best = { mse, dx, dy };
+  let sse = 0, n = 0;
+  for (let y = cy0 - rh; y < cy0 + rh; y += sub) {
+    const ry = y + dy;
+    if (ry < 0 || ry >= H) return Infinity;
+    for (let x = cx0 - rw; x < cx0 + rw; x += sub) {
+      const rx = x + dx;
+      if (rx < 0 || rx >= W) return Infinity;
+      const d = post[y * W + x] - ref[ry * W + rx];
+      sse += d * d; n++;
     }
   }
+  return n > 0 ? sse / n : Infinity;
+}
+function registerTranslation(ref, post, W, H, maxShift = 10) {
+  let best = { mse: Infinity, dx: 0, dy: 0 };
+  // Phase 1: grob, step 2, subsample 4
+  for (let dy = -maxShift; dy <= maxShift; dy += 2)
+    for (let dx = -maxShift; dx <= maxShift; dx += 2) {
+      const mse = _mseAt(ref, post, W, H, dx, dy, 4);
+      if (mse < best.mse) best = { mse, dx, dy };
+    }
+  // Phase 2: fein um bestes ±1, subsample 2
+  const c = { ...best }; best.mse = Infinity;
+  for (let dy = c.dy - 1; dy <= c.dy + 1; dy++)
+    for (let dx = c.dx - 1; dx <= c.dx + 1; dx++) {
+      const mse = _mseAt(ref, post, W, H, dx, dy, 2);
+      if (mse < best.mse) best = { mse, dx, dy };
+    }
   // aligned ref erzeugen (shift ref um (dx,dy) so dass es auf post passt)
   const aligned = new Float32Array(W * H);
   const { dx, dy } = best;
