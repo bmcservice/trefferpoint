@@ -42,12 +42,18 @@ auf dem Display visuell korrekt. Ursache: Canvas-CSS (850×478) ≠ SurfaceView 
 Touch→Stream-Mapping verzerrt. `_meta.json`-Diagnose-Stempel (v2.3.184) liegt vor.
 → getCanvasPointer() Touch→Stream-Transform reparieren. Braucht Tablet zum Verifizieren.
 
-### 2. v2.4.0 additiv in index.html einbauen (offline machbar)
-Zwei-Stufen-Trigger (siehe INTEGRATION_PLAN_v240.md):
-- billiger Grob-Trigger pro Frame (bestehende Diff-Flächen-Logik)
-- teure v2.4.0-Präzision (~370ms) nur bei Schuss-Event, ~1×/Schuss
+### 2. v2.4.0 in index.html — TEILWEISE ERLEDIGT (2026-06-01)
+✓ TPDetect-Block additiv eingebettet (Commit main 8495c26), window.TPDetect,
+  isolierter <script>-Block, keine Seiteneffekte. APP_VERSION unverändert.
+✓ Verifiziert: extrahierter Block aus index.html = 90%/90% (test_embedded.mjs).
+✓ Mirror nach android-assets + G-Drive. NICHT gepusht (toter Code, kein CI-Build).
+OFFEN — die eigentliche Live-Verdrahtung (Zwei-Stufen-Trigger, INTEGRATION_PLAN_v240.md):
+- billiger Grob-Trigger pro Frame (bestehende Diff-Flächen-Logik) ruft bei Schuss-Event
+  window.TPDetect.streamDetect() (~370ms, ~1×/Schuss)
+- refFrame inkrementell nach jedem Schuss aktualisieren
 - additiv hinter Checkbox „v2.4-Präzisions-Detection", alter Pfad bleibt Default
-- Browser-Harness gegen PNG-Frames testen vor Stand
+- Spiegel-Geometrie aus calib (cx,cy → r aus a/b, pxPerMm) an TPDetect übergeben
+- Browser-Harness (harness_v240.html) als Vor-Stand-Check
 
 ### 3. Stream-Test am Tablet
 - Einzelframe-Rauschen (offline nutzte Median über 15 Frames → live ggf. 3-5 mitteln)
