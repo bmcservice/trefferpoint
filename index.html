@@ -7074,5 +7074,89 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http') && type
     });
 } // 2s nach Start prüfen (ohne Ladezeit zu blockieren)
 </script>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     v2.4.0 Präzisions-Detection (VORBEREITET, noch NICHT in den Live-Loop verdrahtet)
+     Offline dreifach validiert: 90% Recall / 90% Precision auf 1080p-Stream.
+     Pipeline: Registration → Frame-Diff → Center-Surround → NMS → SNR-Verify.
+     Aktivierung erfolgt in einem späteren Schritt über Zwei-Stufen-Trigger
+     (siehe sessions/training_data/INTEGRATION_PLAN_v240.md). Reiner Funktions-
+     Namespace window.TPDetect — keine Seiteneffekte, bricht den Live-Loop nicht.
+     ════════════════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+'use strict';
+function integralImage(arr, W, H){
+  const I = new Float64Array((W+1)*(H+1));
+  for(let y=0;y<H;y++){ let rs=0; for(let x=0;x<W;x++){ rs+=arr[y*W+x]; I[(y+1)*(W+1)+(x+1)]=I[y*(W+1)+(x+1)]+rs; } }
+  return I;
+}
+function boxSum(I,W,x0,y0,x1,y1){ const Wp=W+1; return I[(y1+1)*Wp+(x1+1)]-I[y0*Wp+(x1+1)]-I[(y1+1)*Wp+x0]+I[y0*Wp+x0]; }
+function boxMean(I,W,H,cx,cy,rad){
+  const x0=Math.max(0,cx-rad),y0=Math.max(0,cy-rad),x1=Math.min(W-1,cx+rad),y1=Math.min(H-1,cy+rad);
+  const n=(x1-x0+1)*(y1-y0+1); return n>0?boxSum(I,W,x0,y0,x1,y1)/n:0;
+}
+function _mseAt(ref,post,W,H,dx,dy,sub){
+  const cy0=(H>>1),cx0=(W>>1),rh=(H/3)|0,rw=(W/3)|0; let sse=0,n=0;
+  for(let y=cy0-rh;y<cy0+rh;y+=sub){ const ry=y+dy; if(ry<0||ry>=H)return Infinity;
+    for(let x=cx0-rw;x<cx0+rw;x+=sub){ const rx=x+dx; if(rx<0||rx>=W)return Infinity;
+      const d=post[y*W+x]-ref[ry*W+rx]; sse+=d*d; n++; } }
+  return n>0?sse/n:Infinity;
+}
+function registerTranslation(ref,post,W,H,maxShift){
+  maxShift=maxShift||10; let best={mse:Infinity,dx:0,dy:0};
+  for(let dy=-maxShift;dy<=maxShift;dy+=2)for(let dx=-maxShift;dx<=maxShift;dx+=2){ const m=_mseAt(ref,post,W,H,dx,dy,4); if(m<best.mse)best={mse:m,dx,dy}; }
+  const c={dx:best.dx,dy:best.dy}; best.mse=Infinity;
+  for(let dy=c.dy-1;dy<=c.dy+1;dy++)for(let dx=c.dx-1;dx<=c.dx+1;dx++){ const m=_mseAt(ref,post,W,H,dx,dy,2); if(m<best.mse)best={mse:m,dx,dy}; }
+  const aligned=new Float32Array(W*H); const dx=best.dx,dy=best.dy;
+  for(let y=0;y<H;y++){ const ry=y+dy; for(let x=0;x<W;x++){ const rx=x+dx; aligned[y*W+x]=(rx>=0&&rx<W&&ry>=0&&ry<H)?ref[ry*W+rx]:post[y*W+x]; } }
+  return {dx:best.dx,dy:best.dy,aligned};
+}
+function centerSurround(signal,W,H,rInner){
+  const I=integralImage(signal,W,H); const rOuter=Math.max(rInner+2,Math.round(rInner*2.5)); const score=new Float32Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){ score[y*W+x]=boxMean(I,W,H,x,y,rInner)-boxMean(I,W,H,x,y,rOuter); }
+  return score;
+}
+function localMaxima(score,W,H,thr,minDist){
+  const cand=[]; const r=Math.max(1,minDist|0);
+  for(let y=r;y<H-r;y++)for(let x=r;x<W-r;x++){ const v=score[y*W+x]; if(v<thr)continue; let mx=true;
+    for(let dy=-r;dy<=r&&mx;dy++)for(let dx=-r;dx<=r;dx++){ if(score[(y+dy)*W+(x+dx)]>v){mx=false;break;} }
+    if(mx)cand.push({x,y,score:v}); }
+  return cand;
+}
+function nms(dets,radius){ dets.sort((a,b)=>b.score-a.score); const keep=[];
+  for(const d of dets){ let ok=true; for(const k of keep){ if(Math.hypot(d.x-k.x,d.y-k.y)<radius){ok=false;break;} } if(ok)keep.push(d); } return keep;
+}
+function detectOnDiff(diff,W,H,sp,kalMm,opts){
+  opts=opts||{}; const thrRel=opts.thrRel!=null?opts.thrRel:0.30, snrMin=opts.snrMin!=null?opts.snrMin:6;
+  const ppm=sp.pxPerMm, rInner=Math.max(2,Math.round(kalMm*0.5*ppm)), nmsR=Math.max(4,Math.round(1.5*kalMm*ppm));
+  const pos=new Float32Array(W*H),neg=new Float32Array(W*H);
+  for(let i=0;i<W*H;i++){ const d=diff[i]; pos[i]=d>0?d:0; neg[i]=d<0?-d:0; }
+  const sIn=centerSurround(pos,W,H,rInner),sOut=centerSurround(neg,W,H,rInner);
+  const cx=sp.cx,cy=sp.cy,r=sp.r;
+  function inZone(x,y,z){ const dd=Math.hypot(x-cx,y-cy); return z==='in'?dd<r*0.93:(dd>r*1.05&&dd<r*2.4); }
+  let mIn=0,mOut=0; for(let i=0;i<W*H;i++){ if(sIn[i]>mIn)mIn=sIn[i]; if(sOut[i]>mOut)mOut=sOut[i]; }
+  let cand=[];
+  for(const c of localMaxima(sIn,W,H,thrRel*mIn,rInner)) if(inZone(c.x,c.y,'in')) cand.push(Object.assign({zone:'in'},c));
+  for(const c of localMaxima(sOut,W,H,thrRel*mOut,rInner)) if(inZone(c.x,c.y,'out')) cand.push(Object.assign({zone:'out'},c));
+  cand=nms(cand,nmsR);
+  const absS=Float64Array.from(diff,v=>Math.abs(v)); absS.sort(); const noise=(absS[absS.length>>1]||0)+1e-6;
+  const out=[];
+  for(const c of cand){ const rr=Math.max(1,Math.round(rInner*1.5)); let peak=0;
+    for(let dy=-rr;dy<=rr;dy++)for(let dx=-rr;dx<=rr;dx++){ const yy=c.y+dy,xx=c.x+dx; if(yy<0||yy>=H||xx<0||xx>=W)continue; const a=Math.abs(diff[yy*W+xx]); if(a>peak)peak=a; }
+    const snr=peak/noise; if(snr<snrMin)continue; out.push({x:c.x,y:c.y,score:c.score,snr,zone:c.zone}); }
+  return out;
+}
+function streamDetect(ref,post,W,H,sp,kalMm,opts){
+  opts=opts||{}; let aligned=ref,shift={dx:0,dy:0};
+  if(opts.register!==false){ const r=registerTranslation(ref,post,W,H,opts.maxShift||10); aligned=r.aligned; shift={dx:r.dx,dy:r.dy}; }
+  const diff=new Float32Array(W*H); for(let i=0;i<W*H;i++)diff[i]=post[i]-aligned[i];
+  return {dets:detectOnDiff(diff,W,H,sp,kalMm,opts),shift};
+}
+function imageDataToGray(img){ const d=img.data,W=img.width,H=img.height,g=new Float32Array(W*H);
+  for(let i=0,p=0;i<W*H;i++,p+=4)g[i]=0.299*d[p]+0.587*d[p+1]+0.114*d[p+2]; return {gray:g,W,H}; }
+window.TPDetect={ registerTranslation, detectOnDiff, streamDetect, imageDataToGray, _version:'2.4.0' };
+})();
+</script>
 </body>
 </html>
