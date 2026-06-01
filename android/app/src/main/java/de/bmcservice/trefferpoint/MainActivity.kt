@@ -729,6 +729,26 @@ class MainActivity : AppCompatActivity() {
         fun getDetCaptureCount(): Int = detCaptureCount
 
         /**
+         * v2.4.2 STAND-TEST-PROTOKOLL: Speichert einen vom JS erzeugten Snapshot
+         * (Base64-JPEG, Live-Bild + Overlay kombiniert) in detCaptureDir.
+         * Für die Offline-Auswertung am Schießstand (User offline → App muss
+         * autark alles protokollieren). Name z.B. "snap_hit3_<epoch>".
+         */
+        @JavascriptInterface
+        fun saveSnapshot(base64Jpeg: String, name: String): String {
+            val dir = detCaptureDir ?: return "ERROR: detCaptureDir==null"
+            return try {
+                val safe = name.replace(Regex("[^A-Za-z0-9_-]"), "_").take(60)
+                val bytes = android.util.Base64.decode(base64Jpeg, android.util.Base64.DEFAULT)
+                java.io.File(dir, "$safe.jpg").writeBytes(bytes)
+                "OK: $safe.jpg (${bytes.size} bytes)"
+            } catch (e: Exception) {
+                AppLog.e(TAG, "saveSnapshot fehlgeschlagen", e)
+                "ERROR: ${e.message}"
+            }
+        }
+
+        /**
          * v2.3.184: Schreibt eine _meta.json mit Geometrie-Stempel in detCaptureDir.
          * Wird vom JS-Wizard direkt nach setDetCapture(true,…) aufgerufen mit
          * cal-Koords, canvas-rect, rtspVideoWidth/Height, surfaceView-Position etc.

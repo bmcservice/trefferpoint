@@ -1251,7 +1251,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.1';
+const APP_VERSION = '2.4.2';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3893,10 +3893,68 @@ function commitHit(payload) {
     showPop(ringLabel, distMm.toFixed(1));
     addHitRow(ringLabel, distMm.toFixed(1), hits.length, deg);
 
+    // v2.4.2 STAND-TEST-PROTOKOLL: kombinierten Snapshot (Live + Overlay) + _meta
+    // bei jedem Hit speichern, damit der Stand-Test (User offline) vollständig
+    // offline auswertbar ist. Läuft nur wenn detCapture aktiv (Diag-Modus).
+    try { saveStandSnapshot(hits.length); } catch(e) {}
+    try { if (window.writeDetMetaStamp) writeDetMetaStamp(); } catch(e) {}
+
     if (speechEnabled) {
         const clock = clockPos(cx, cy);
         speak(`${ringZuSprache(ringDec)} auf ${clock} Uhr`);
     }
+}
+
+// v2.4.2: kombinierter Stand-Test-Snapshot (Live-PixelCopy + Overlay calib/Hits).
+// Speichert in detCaptureDir via Bridge. Nur aktiv wenn Diag-Capture läuft.
+async function saveStandSnapshot(hitN) {
+    if (!_detCaptureActive) return;
+    if (!(window.tpBridge && window.tpBridge.captureCurrentFrame && window.tpBridge.saveSnapshot)) return;
+    let b64;
+    try { b64 = window.tpBridge.captureCurrentFrame(); } catch(e) { return; }
+    if (!b64 || b64.length < 200) return;
+    const img = new Image();
+    try {
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = 'data:image/jpeg;base64,' + b64; });
+    } catch(e) { return; }
+    const oc = document.createElement('canvas');
+    oc.width = img.naturalWidth || canvas.width;
+    oc.height = img.naturalHeight || canvas.height;
+    const octx = oc.getContext('2d');
+    octx.drawImage(img, 0, 0, oc.width, oc.height);
+    // Skalierung Stream→Snapshot (falls captureCurrentFrame anders dimensioniert)
+    const sx = oc.width / canvas.width, sy = oc.height / canvas.height;
+    // calib-Ellipse (gelb)
+    if (calib) {
+        octx.save();
+        octx.translate(calib.cx * sx, calib.cy * sy);
+        octx.rotate(calib.angle || 0);
+        octx.strokeStyle = 'rgba(255,210,60,0.95)'; octx.lineWidth = 3;
+        octx.beginPath(); octx.ellipse(0, 0, calib.a * sx, calib.b * sy, 0, 0, Math.PI*2); octx.stroke();
+        octx.restore();
+        octx.fillStyle = 'rgba(255,210,60,0.95)';
+        octx.beginPath(); octx.arc(calib.cx*sx, calib.cy*sy, 5, 0, Math.PI*2); octx.fill();
+    }
+    // alle Hits (letzter gold, Rest rot) + Nummer
+    hits.forEach((h, i) => {
+        const last = (i === hits.length - 1);
+        octx.strokeStyle = last ? 'rgba(200,168,75,1)' : 'rgba(232,64,64,0.9)';
+        octx.lineWidth = last ? 3 : 2;
+        octx.beginPath(); octx.arc(h.x*sx, h.y*sy, last ? 12 : 9, 0, Math.PI*2); octx.stroke();
+        octx.fillStyle = octx.strokeStyle;
+        octx.font = 'bold 16px monospace'; octx.textAlign = 'center';
+        octx.fillText(i+1, h.x*sx, h.y*sy - 14);
+    });
+    // Info-Zeile
+    octx.fillStyle = 'rgba(0,0,0,0.6)'; octx.fillRect(0, 0, oc.width, 28);
+    octx.fillStyle = '#fff'; octx.font = '16px monospace'; octx.textAlign = 'left';
+    octx.fillText(`v${APP_VERSION}  Hit #${hitN}  ${new Date().toISOString().slice(11,19)}  cal(${Math.round(calib?calib.cx:0)},${Math.round(calib?calib.cy:0)})`, 8, 20);
+    try {
+        const dataUrl = oc.toDataURL('image/jpeg', 0.85);
+        const b64out = dataUrl.split(',')[1];
+        const res = window.tpBridge.saveSnapshot(b64out, 'snap_hit' + hitN + '_' + Date.now());
+        if (debugMode) console.log('[v2.4.2] saveStandSnapshot:', res);
+    } catch(e) {}
 }
 
 // Banner-Logik
@@ -5421,12 +5479,12 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
       } },
 
     { type:'info', title:'Ground-Truth festhalten',
-      text:'Scheibe vom Stand mitnehmen. Zuhause: 1) Foto mit Lineal als Maßstab (oder Lineal-Messung) jeder einzelnen Loch-Position relativ zum Spiegel-Mittelpunkt. 2) Tool ground_truth_spiegel.html öffnen, dort die Lochpositionen anklicken → JSON-Block kopieren.',
-      sub:'Diese physische Wahrheit ist die einzige unabhängige Validierung gegen die App-Erkennung (raw + v2.3.179-refined). Ohne sie ist jede Aussage „App erkennt richtig" zirkulär.' },
+      text:'Scheibe nummerieren (Stift, z.B. „1a") und INTAKT mitnehmen. Zuhause frontal fotografieren — der schwarze Spiegel (∅200 mm) ist selbst der Maßstab, KEIN Lineal nötig. Foto in sessions/training_data ablegen.',
+      sub:'Diese physische Wahrheit ist die einzige unabhängige Validierung gegen die App-Erkennung. Detframes + Snapshots + _meta liegen schon auf dem Tablet — daraus wird die Detection offline ausgewertet.' },
 
-    { type:'info', title:'Fertig ✓',
-      text:'Test abgeschlossen. Session-Log + Detection-Frames sind auf dem Tablet gesichert. Ground-Truth-JSON aus Schritt zuvor an Auswertung übergeben.',
-      sub:'Aufschreiben: Anzahl real abgegebener Schüsse, Lichtbedingungen (Vormittag/Nachmittag, hell/diffus), Cam-/Spektiv-Position-Notiz. Dann „Abbrechen" zum Beenden.' },
+    { type:'info', title:'Fertig ✓ — alles autark gespeichert',
+      text:'Auf dem Tablet liegen jetzt (offline-auswertbar): Detection-Frames (Live, ~4 Hz), pro Treffer ein Screenshot (Live + Overlay), _meta.json (Kalibrierung/Geometrie) und das Session-Log. Pfad: /Android/data/de.bmcservice.trefferpoint/files/detframes/<session>/ und /Download/.',
+      sub:'Notieren: Anzahl real abgegebener Schüsse, Lichtbedingungen, Cam-/Spektiv-Position. Scheibe mitnehmen + fotografieren. Dann „Abbrechen". Auswertung erfolgt offline aus den Tablet-Daten + Scheiben-Foto.' },
   ];
 
   let idx = 0, busy = false;
