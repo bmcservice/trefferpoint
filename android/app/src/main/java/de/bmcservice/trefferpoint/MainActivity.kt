@@ -678,7 +678,11 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun captureCurrentFrame(): String {
-            val jpeg = captureRtspSurfaceJpeg() ?: return ""
+            // v2.4.3: USB-C-UVC-Fallback. captureRtspSurfaceJpeg() liefert nur im
+            // RTSP/SurfaceView-Modus einen Frame; im USB-Cam-Modus kommen die Frames
+            // via UVC-frameCallback (lastUvcFrameJpeg). Ohne diesen Fallback lieferte
+            // captureCurrentFrame() im USB-Modus "" → saveStandSnapshot scheiterte.
+            val jpeg = captureRtspSurfaceJpeg() ?: lastUvcFrameJpeg ?: return ""
             return Base64.encodeToString(jpeg, Base64.NO_WRAP)
         }
 
