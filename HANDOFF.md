@@ -34,6 +34,32 @@ Die zwei fehlenden Bausteine der alten App:
 Branch: `claude/nervous-tu-2286b6` (worktree). 5 Commits heute (fb01f81..4b4e59c).
 **Muss noch nach main übertragen werden** (Worktree-Regel).
 
+## STAND-TEST: autarke Offline-Protokollierung (v2.4.2, 2026-06-01)
+
+User ist am Schießstand OFFLINE → keine Live-Diagnose. App speichert jetzt autark
+ALLES für die spätere Offline-Auswertung. v2.4.0-Detection wird NICHT live verdrahtet,
+sondern hinterher gegen die Detframes simuliert (wie 2026-05-31: 9/10 Treffer).
+
+App speichert pro Stand-Session (in deterframes/<session>/ + /Download/):
+- Detection-Frames (Live-PixelCopy, ~4 Hz) — Basis für Offline-Detection
+- Snapshot pro Hit: Live-Bild + Overlay (calib-Ellipse, alle Hits nummeriert) [v2.4.2]
+- _meta.json bei jedem Hit (calib + SurfaceView-Geometrie, Cal-Drift-Tracking) [v2.4.2]
+- Session-JSON (Hits mit Position/Ring/Zeit)
+Verifiziert: Bridge saveSnapshot schreibt valides JPEG; saveStandSnapshot-Logik OK
+(voller Live-Pfad nur am Stand mit Stream testbar).
+
+ABLAUF für den User am Stand:
+1. Tab ins ETF150-WLAN, RTSP-Stream starten (Live-Bild steht)
+2. Wizard „TEST" starten → weiter-weiter-weiter durchklicken:
+   Diag-Modus AN, manuell kalibrieren (Cal-Fix v2.4.1 macht das jetzt korrekt!),
+   visuell prüfen, Referenzframe, 5 Schüsse, Nachlauf, Session speichern
+3. Scheibe NUMMERIEREN + INTAKT mitnehmen
+4. Zuhause: Scheibe frontal fotografieren (Spiegel ∅200mm = Maßstab) → sessions/training_data
+5. Online: Tablet-Daten via USB-ADB pullen, mir geben → Offline-Auswertung
+
+WICHTIG Setup: USB-ADB-Kabel mitnehmen (WLAN-ADB geht nicht — PC-Netz ≠ Cam-Netz).
+ETF150 wacht nur bei aktivem Stream; bei Inaktivität schläft sie → Tab fällt ins Heimnetz.
+
 ## NÄCHSTE SCHRITTE — brauchen Tablet/Stream (Reihenfolge!)
 
 ### 1. Cal-Mapping-Fix — ✓ ERLEDIGT (2026-06-01, v2.4.0/v2.4.1)
