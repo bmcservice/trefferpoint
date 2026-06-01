@@ -36,11 +36,15 @@ Branch: `claude/nervous-tu-2286b6` (worktree). 5 Commits heute (fb01f81..4b4e59c
 
 ## NÄCHSTE SCHRITTE — brauchen Tablet/Stream (Reihenfolge!)
 
-### 1. Cal-Mapping-Fix (VORAUSSETZUNG für alles weitere)
-Befund 2026-05-31: App-Cal sitzt 120px/86mm neben echtem Spiegel im Stream, obwohl
-auf dem Display visuell korrekt. Ursache: Canvas-CSS (850×478) ≠ SurfaceView (2560×1438),
-Touch→Stream-Mapping verzerrt. `_meta.json`-Diagnose-Stempel (v2.3.184) liegt vor.
-→ getCanvasPointer() Touch→Stream-Transform reparieren. Braucht Tablet zum Verifizieren.
+### 1. Cal-Mapping-Fix — ✓ ERLEDIGT (2026-06-01, v2.4.0/v2.4.1)
+Wurzel: SurfaceView war match_parent (full-screen 2560px), streckte Stream 1920→2560,
+Canvas-Overlay nur 1912px → Touch/Stream-Versatz Faktor 1.339 → calib 86mm daneben.
+FIX: Bridge setSurfaceBounds() legt SurfaceView deckungsgleich auf die camera-wrap-
+Region (= Canvas). JS syncSurfaceBounds() im rAF-Loop (1×/s) + Stream-Start + resize.
+LIVE VERIFIZIERT (Tablet, v2.4.1): calib auf Stream-Pos des Lämpchens (449,575) →
+Ring sitzt visuell exakt drauf. Auto-Sync setzt SurfaceView automatisch auf 1912×1076.
+OFFEN (braucht Scheibe): finale End-to-End-Verifikation calib==Spiegel bei echter
+manueller Kalibrierung auf eine Schießscheibe (zuhause war nur Zimmerdecke im Bild).
 
 ### 2. v2.4.0 in index.html — TEILWEISE ERLEDIGT (2026-06-01)
 ✓ TPDetect-Block additiv eingebettet (Commit main 8495c26), window.TPDetect,
