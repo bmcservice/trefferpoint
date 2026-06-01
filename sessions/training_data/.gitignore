@@ -1,0 +1,5 @@
+# Große Rohdaten nicht committen (lokal reproduzierbar)
+*.HEIC
+*.heic
+bild_*.jpg
+immich-*/
