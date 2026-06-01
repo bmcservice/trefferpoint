@@ -43,8 +43,13 @@ FIX: Bridge setSurfaceBounds() legt SurfaceView deckungsgleich auf die camera-wr
 Region (= Canvas). JS syncSurfaceBounds() im rAF-Loop (1×/s) + Stream-Start + resize.
 LIVE VERIFIZIERT (Tablet, v2.4.1): calib auf Stream-Pos des Lämpchens (449,575) →
 Ring sitzt visuell exakt drauf. Auto-Sync setzt SurfaceView automatisch auf 1912×1076.
-OFFEN (braucht Scheibe): finale End-to-End-Verifikation calib==Spiegel bei echter
-manueller Kalibrierung auf eine Schießscheibe (zuhause war nur Zimmerdecke im Bild).
+FINAL VERIFIZIERT (2026-06-01, echte KK25-Scheibe vor ETF150): App-Auto-Kalibrierung
+trifft echten Spiegel mit nur 16px ≈ 4mm Versatz (vorher 127px/40mm). CV-Fit (orange)
+und App-Cal (grün) liegen visuell deckungsgleich auf dem Spiegel-Rand. Beweis-Bild:
+sessions/2026-05-31_v184_test/cal_fix_PROOF.jpg. CAL-MAPPING-FIX KOMPLETT ABGESCHLOSSEN.
+
+Setup-Hinweis: USB-ADB nötig (PC im Heimnetz erreicht Tab im ETF-WLAN nicht per WLAN-ADB).
+ETF150 geht bei Inaktivität in Standby → Tab wechselt dann selbst ins Heimnetz.
 
 ### 2. v2.4.0 in index.html — TEILWEISE ERLEDIGT (2026-06-01)
 ✓ TPDetect-Block additiv eingebettet (Commit main 8495c26), window.TPDetect,
