@@ -1,0 +1,5 @@
+# Große Rohdaten lokal
+run2_frames/
+main/
+*.jpg
+!run2/snap*.jpg
