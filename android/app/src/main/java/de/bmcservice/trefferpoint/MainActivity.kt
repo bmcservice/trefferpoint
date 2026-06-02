@@ -412,9 +412,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 // Fix A: Belichtungs-Regelung auf Ziel-Helligkeit (mean ~100–135).
                 // Ersetzt das blinde Gain-Einfrieren (AGC liefert gain=0 → früher dunkles Bild).
-                // Läuft ab Frame 60 alle 12 Frames bis konvergiert; passt sich Stand-Licht an.
+                // Intervall 45 Frames (~1.5s): UVC-Gain/Exposure brauchen mehrere Frames zum
+                // Einschwingen. Bei 12 Frames (0.4s) maß die Regelung Transienten → konvergierte
+                // zu früh auf einen Zwischenwert → Bild driftete danach hell (mean 126→183).
                 if (autoModesDisabled && !exposureConverged && uvcFrameCount >= 60L &&
-                    uvcFrameCount % 12L == 0L && !isJpeg(bytes)) {
+                    uvcFrameCount % 45L == 0L && !isJpeg(bytes)) {
                     regulateExposure(helper, computeYMean(bytes, w, h))
                 }
                 pushFrameToWebView(jpeg)
