@@ -1251,7 +1251,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.3';
+const APP_VERSION = '2.4.4';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -6446,7 +6446,29 @@ async function sessionRecMaybeStart() {
     if (recSession) return; // already running
     let gwIp = '192.168.0.1';
     try { if (window.tpBridge) gwIp = window.tpBridge.getWifiGateway() || gwIp; } catch(_) {}
-    if (gwIp !== '192.168.10.1') return; // ETF150 only
+    if (gwIp !== '192.168.10.1') {
+        // v2.4.4: cam-agnostische Session OHNE ETF150-Video (USB-C-UVC, andere Cams).
+        // Nur Hit-Logging + JSON-Export — kein /roc/record/start. Vorher returnte die
+        // Funktion hier hart (ETF150-only) → im USB-Modus kein Session-JSON trotz
+        // vollständigem Wizard-Durchlauf (Befund 2026-06-02).
+        const discU = document.getElementById('discSel').value;
+        const stElU = document.getElementById('sessionRecStatus');
+        rejectedCandidates = [];
+        resetFrozenSpots();
+        recSession = {
+            startMs: Date.now(),
+            recStartIso: new Date().toISOString(),
+            recStartVidBase: null, prevMaxVid: null, dateStr: null,
+            hits: [], discipline: discU,
+            device: (typeof inputMode !== 'undefined' && inputMode === 'usb') ? 'USB-C UVC' : 'Kamera',
+            noVideo: true,
+            calib: calib ? { cx: calib.cx, cy: calib.cy, a: calib.a, b: calib.b,
+                             angle: calib.angle, pxPerMm: calib.pxPerMm, locked: !!calib.locked } : null
+        };
+        if (stElU) stElU.textContent = '📝 Session-Log läuft (ohne Video)';
+        try { document.getElementById('btnSaveSession').disabled = false; } catch(_) {}
+        return;
+    }
     const baseUrl = 'http://' + gwIp;
     const dateStr = etf150DateStr();
     const stEl = document.getElementById('sessionRecStatus');
@@ -6564,8 +6586,8 @@ function saveSessionJson() {
     if (!recSession) return;
     const data = {
         version: APP_VERSION,
-        device: 'Apexel ETF150',
-        camera: { ip: '192.168.10.1' },
+        device: recSession.device || 'Apexel ETF150',
+        camera: recSession.noVideo ? { type: recSession.device || 'usb' } : { ip: '192.168.10.1' },
         session: {
             start_ms: recSession.startMs,
             start_iso: new Date(recSession.startMs).toISOString(),
