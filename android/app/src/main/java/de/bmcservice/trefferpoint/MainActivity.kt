@@ -410,10 +410,67 @@ class MainActivity : AppCompatActivity() {
                     autoModesDisabled = true
                     freezeCameraAutoModes(helper)
                 }
+                // Fix A: Belichtungs-Regelung auf Ziel-Helligkeit (mean ~100–135).
+                // Ersetzt das blinde Gain-Einfrieren (AGC liefert gain=0 → früher dunkles Bild).
+                // Läuft ab Frame 60 alle 12 Frames bis konvergiert; passt sich Stand-Licht an.
+                if (autoModesDisabled && !exposureConverged && uvcFrameCount >= 60L &&
+                    uvcFrameCount % 12L == 0L && !isJpeg(bytes)) {
+                    regulateExposure(helper, computeYMean(bytes, w, h))
+                }
                 pushFrameToWebView(jpeg)
             } catch (e: Exception) {
                 AppLog.e(TAG, "Frame-Verarbeitung fehlgeschlagen", e)
             }
+        }
+    }
+
+    // ── Belichtungs-Regelung (Fix A) ───────────────────────────────────────────
+    // Kalibriert live 2026-06-02 (Mustcam 20x, mean-Zielband 100–135):
+    //   exp=70ms/gain=140 → mean~120. Gain sättigt bei ~160; Exposure ist Haupthebel.
+    @Volatile private var exposureConverged = false
+    private var aeExp = 70    // Belichtungszeit in ms (Startwert)
+    private var aeGain = 140  // UVC-Gain (Startwert)
+    private var aeStable = 0
+
+    /** Mittlere Helligkeit der Y-Plane (NV21) — billig, jeder 37. Pixel. */
+    private fun computeYMean(nv21: ByteArray, w: Int, h: Int): Int {
+        val n = w * h
+        if (nv21.size < n) return -1
+        var sum = 0L; var cnt = 0; var i = 0
+        while (i < n) { sum += (nv21[i].toInt() and 0xFF); cnt++; i += 37 }
+        return if (cnt > 0) (sum / cnt).toInt() else -1
+    }
+
+    /** Regelt Exposure/Gain iterativ auf Ziel-Helligkeit; friert nach 3 stabilen Schritten ein. */
+    private fun regulateExposure(helper: ICameraHelper, ymean: Int) {
+        if (ymean < 0) return
+        val uvc = helper.uvcControl ?: return
+        val lo = 100; val hi = 135
+        if (ymean in lo..hi) {
+            aeStable++
+            if (aeStable >= 3) {
+                exposureConverged = true
+                AppLog.i(TAG, "UVC: Belichtung konvergiert — mean=$ymean exp=${aeExp}ms gain=$aeGain")
+            }
+            return
+        }
+        aeStable = 0
+        if (ymean < lo) {
+            // zu dunkel: erst Exposure hoch (bis 140ms), dann Gain (bis 200)
+            if (aeExp < 140) aeExp = (aeExp + 25).coerceAtMost(140)
+            else if (aeGain < 200) aeGain = (aeGain + 30).coerceAtMost(200)
+        } else {
+            // zu hell: erst Gain runter (bis 40), dann Exposure (bis 20ms)
+            if (aeGain > 40) aeGain = (aeGain - 30).coerceAtLeast(40)
+            else if (aeExp > 20) aeExp = (aeExp - 20).coerceAtLeast(20)
+        }
+        try {
+            uvc.setAutoExposureMode(1)               // MANUAL
+            uvc.setExposureTimeAbsolute(aeExp * 10)  // UVC-Units = 0.1ms
+            uvc.setGain(aeGain)
+            AppLog.i(TAG, "UVC: regle mean=$ymean → exp=${aeExp}ms gain=$aeGain")
+        } catch (e: Exception) {
+            AppLog.w(TAG, "regulateExposure: ${e.message}")
         }
     }
 
@@ -423,19 +480,6 @@ class MainActivity : AppCompatActivity() {
             AppLog.w(TAG, "UVC-Control nicht verfügbar — Kamera bleibt im Auto-Modus")
             return
         }
-        // Auto-Exposure → Manual Mode (1): friert aktuelle Belichtungszeit ein
-        try {
-            uvc.setAutoExposureMode(1)
-            AppLog.i(TAG, "UVC: Auto-Exposure auf MANUAL gesetzt (Flacker-Fix)")
-        } catch (e: Exception) {
-            // Wenn Manual nicht unterstützt, probier Shutter-Priority (4) = feste Shutter-Zeit
-            try {
-                uvc.setAutoExposureMode(4)
-                AppLog.i(TAG, "UVC: Auto-Exposure auf SHUTTER_PRIORITY gesetzt")
-            } catch (e2: Exception) {
-                AppLog.w(TAG, "UVC: setAutoExposureMode nicht unterstützt (${e.message})")
-            }
-        }
         // Auto-White-Balance aus — verhindert Farb-Pendeln
         try {
             uvc.setWhiteBalanceAuto(false)
@@ -443,13 +487,16 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             AppLog.w(TAG, "UVC: setWhiteBalanceAuto nicht unterstützt: ${e.message}")
         }
-        // Gain (AGC) einfrieren — laufende AGC ist häufigste Flacker-Ursache bei Spektiv-Szenen
+        // Belichtung: Manual-Mode + kalibrierte Startwerte (mean~120 @ Heim-Licht).
+        // Danach übernimmt regulateExposure() die Feinregelung auf das Zielband.
+        // Ersetzt das frühere `setGain(uvc.gain)` — das fror im AGC-Modus gain=0 ein (dunkles Bild).
         try {
-            val g = uvc.gain
-            uvc.setGain(g)
-            AppLog.i(TAG, "UVC: Gain fixiert auf $g")
+            uvc.setAutoExposureMode(1)
+            uvc.setExposureTimeAbsolute(aeExp * 10)
+            uvc.setGain(aeGain)
+            AppLog.i(TAG, "UVC: AE-Startwerte exp=${aeExp}ms gain=$aeGain (Regelung folgt)")
         } catch (e: Exception) {
-            AppLog.w(TAG, "UVC: Gain-Fixierung nicht unterstützt: ${e.message}")
+            AppLog.w(TAG, "UVC: AE-Init nicht unterstützt: ${e.message}")
         }
     }
 
@@ -1015,11 +1062,14 @@ class MainActivity : AppCompatActivity() {
                     }
                     // Auto-Auto-Lock (Flacker-Fix) übersteuern
                     autoModesDisabled = true
+                    exposureConverged = true  // manueller Eingriff: Regelung stoppt
+                    aeExp = millis
                     try { uvc.setAutoExposureMode(1) } catch (_: Exception) {}  // MANUAL
                     try { uvc.setExposureTimeAbsolute(millis * 10) } catch (e: Exception) {
                         AppLog.w(TAG, "setExposureTimeAbsolute fehlgeschlagen: ${e.message}")
                     }
-                    try { uvc.setGain(uvc.gain) } catch (_: Exception) {}
+                    // Gain auf zuletzt geregelten Wert (NICHT uvc.gain — AGC liefert dort 0 → dunkel)
+                    try { uvc.setGain(aeGain) } catch (_: Exception) {}
                     AppLog.i(TAG, "UVC: Exposure manuell auf ${millis} ms (${millis * 10} UVC-Units)")
                 } catch (e: Exception) {
                     AppLog.e(TAG, "setExposureTime Exception", e)

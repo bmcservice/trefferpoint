@@ -11,8 +11,8 @@ android {
         applicationId "de.bmcservice.trefferpoint"
         minSdk 26
         targetSdk 34
-        versionCode 193
-        versionName "2.4.4"
+        versionCode 194
+        versionName "2.4.5"
     }
 
     signingConfigs {
