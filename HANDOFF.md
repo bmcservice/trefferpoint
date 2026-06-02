@@ -1,3 +1,22 @@
+# HANDOFF — Stand 2026-06-02
+
+## Update 2026-06-02: USB-Cam vollwertig + Negativ-Kontrolle bestätigt v2.4.0
+
+App-Stand: **v2.4.4** (versionCode 193), installiert.
+
+- **v2.4.3**: captureCurrentFrame USB-UVC-Fallback → Stand-Snapshots auch im USB-Modus.
+- **v2.4.4**: cam-agnostische recSession → Session-JSON auch im USB-Modus (vorher ETF150-only).
+- **USB-Cam-Befund** (Trockenübung, 0 Schüsse = Negativ-Kontrolle):
+  - USB-Cam = Full HD 1920×1080 (Detframes); App-Live-Detection aber nur 1280 (Display-Server skaliert).
+  - Cal im USB-Modus nativ korrekt (kein SurfaceView-Versatz).
+  - **v2.4.0 = 0-1 Phantome vs alte App = 4 Phantome** auf statischer Szene → bestätigt LEER-Befund.
+- **Setup-Optionen klar:** USB-Cam + WLAN-ADB (Heimnetz) gleichzeitig möglich (USB-Port frei).
+  ETF150 + ADB nur per USB-Kabel (PC-Heimnetz erreicht ETF-Netz nicht). ADB-tcpip nach Reboot weg.
+- **Test-Lehre:** nach Referenzframe 2-3s warten (AE/WB einpendeln) vor Scharfschalten.
+- Details: `sessions/2026-06-02_usbcam/BEFUND_usbcam.md`
+
+---
+
 # HANDOFF — Stand 2026-06-01
 
 ## Großer Durchbruch heute: Detection-Algorithmus war die Hürde, NICHT die Auflösung
