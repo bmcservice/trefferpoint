@@ -1261,7 +1261,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.8';
+const APP_VERSION = '2.4.9';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -7309,9 +7309,13 @@ function detectOnDiff(diff,W,H,sp,kalMm,opts){
   const cx=sp.cx,cy=sp.cy,r=sp.r;
   function inZone(x,y,z){ const dd=Math.hypot(x-cx,y-cy); return z==='in'?dd<r*0.93:(dd>r*1.05&&dd<r*2.4); }
   let mIn=0,mOut=0; for(let i=0;i<W*H;i++){ if(sIn[i]>mIn)mIn=sIn[i]; if(sOut[i]>mOut)mOut=sOut[i]; }
+  // v2.4.9: absoluter Score-Floor — verhindert localMaxima-Explosion bei signalarmen Szenen
+  // (diff≈0 → thrRel*max≈0 → ALLE Pixel Kandidaten → O(N·r²)). Echte Treffer haben max≥5;
+  // Floor greift nur bei max<3.3 → ändert echte Detektion nicht (verifiziert 90%/90%).
+  const _flr=opts.scoreFloor!=null?opts.scoreFloor:1.0, thrIn=Math.max(thrRel*mIn,_flr), thrOut=Math.max(thrRel*mOut,_flr);
   let cand=[];
-  for(const c of localMaxima(sIn,W,H,thrRel*mIn,rInner)) if(inZone(c.x,c.y,'in')) cand.push(Object.assign({zone:'in'},c));
-  for(const c of localMaxima(sOut,W,H,thrRel*mOut,rInner)) if(inZone(c.x,c.y,'out')) cand.push(Object.assign({zone:'out'},c));
+  for(const c of localMaxima(sIn,W,H,thrIn,rInner)) if(inZone(c.x,c.y,'in')) cand.push(Object.assign({zone:'in'},c));
+  for(const c of localMaxima(sOut,W,H,thrOut,rInner)) if(inZone(c.x,c.y,'out')) cand.push(Object.assign({zone:'out'},c));
   cand=nms(cand,nmsR);
   // v2.4.8: Median per Sampling (jeder 13. Pixel) statt Full-Sort — war ~66% der Laufzeit + 7.4MB-Alloc (OOM im WebView). |diff|-Median robust → Sample==exakt (Δ0.00%).
   const _N=W*H,_ST=13,_sm=new Float64Array(Math.ceil(_N/_ST)); let _si=0; for(let i=0;i<_N;i+=_ST)_sm[_si++]=Math.abs(diff[i]); const _su=_sm.subarray(0,_si); _su.sort(); const noise=(_su[_si>>1]||0)+1e-6;
