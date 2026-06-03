@@ -430,9 +430,12 @@ class MainActivity : AppCompatActivity() {
     // Kalibriert live 2026-06-02 (Mustcam 20x, mean-Zielband 100–135):
     //   exp=70ms/gain=140 → mean~120. Gain sättigt bei ~160; Exposure ist Haupthebel.
     @Volatile private var exposureConverged = false
-    private var aeExp = 70    // Belichtungszeit in ms (Startwert)
-    private var aeGain = 140  // UVC-Gain (Startwert)
-    private var aeStable = 0
+    // v2.4.14 (Codex-Review #4): @Volatile — regulateExposure schreibt auf dem UVC-
+    // Worker-Thread, setExposureTime liest/schreibt via runOnUiThread → Sichtbarkeit
+    // ohne @Volatile nicht garantiert (JIT-Register-Caching).
+    @Volatile private var aeExp = 70    // Belichtungszeit in ms (Startwert)
+    @Volatile private var aeGain = 140  // UVC-Gain (Startwert)
+    @Volatile private var aeStable = 0
 
     /** Mittlere Helligkeit der Y-Plane (NV21) — billig, jeder 37. Pixel. */
     private fun computeYMean(nv21: ByteArray, w: Int, h: Int): Int {
@@ -447,7 +450,10 @@ class MainActivity : AppCompatActivity() {
     private fun regulateExposure(helper: ICameraHelper, ymean: Int) {
         if (ymean < 0) return
         val uvc = helper.uvcControl ?: return
-        val lo = 100; val hi = 135
+        // v2.4.14 (Codex-Review #6): Hysterese-Totband (95..140) breiter als die
+        // Soll-Mitte → verhindert 2-Schritt-Zickzack ohne Konvergenz bei wechselndem
+        // Licht (am Stand z.B. vorbeigehende Personen). Im Totband wird NICHT geregelt.
+        val lo = 95; val hi = 140
         if (ymean in lo..hi) {
             aeStable++
             if (aeStable >= 3) {

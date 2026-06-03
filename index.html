@@ -1261,7 +1261,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.13';
+const APP_VERSION = '2.4.14';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3559,7 +3559,12 @@ function runDetection() {
     try { processRefineQueue(cur, refFrame); } catch(e) {}
 
     // v2.4.10: Frame-Ring für den Verifier pflegen (nur wenn aktiv). Hält die letzten
-    // N Frames → bei einem Schuss mittelt der Verifier sie zu einem rauscharmen post.
+    // N Frames; der Verifier mittelt sie zu einem rauschärmeren post.
+    // EINSCHRÄNKUNG (Codex-Review #1): bei Verify-Auslösung enthält der Ring die 3
+    // Grob-Trigger-Bestätigungs-Frames (Loch sichtbar) + bis zu 2 Pre-Schuss-Frames.
+    // Die Mittelung verwässert den Lochkontrast daher um ~2/5 → SNR netto besser als
+    // Einzelframe, aber nicht optimal. Saubere Lösung (nur Post-Schuss mitteln) braucht
+    // Ring-Einfrieren bei Trigger-Start; aufgeschoben bis Stand-Daten zeigen, ob nötig.
     if (document.getElementById('chkV24Precision') && document.getElementById('chkV24Precision').checked) {
         _v24Ring.push(cur);
         if (_v24Ring.length > _V24_RING_N) _v24Ring.shift();
@@ -4397,6 +4402,10 @@ function resetSession() {
     refWarmupUntil = 0; refAccum = null; refAccumSamples = 0;
     pendingHit = null;
     detecting = false;
+    // v2.4.14 (Codex-Review #2/#5): v2.4-Verifier-State mit zurücksetzen, damit eine
+    // Folge-Session weder alte Ring-Frames mittelt noch ein gemischtes SNR-Log speichert.
+    if (typeof _v24Ring !== 'undefined') _v24Ring.length = 0;
+    if (typeof _v24Log !== 'undefined') _v24Log.length = 0;
     if (window.speechSynthesis) speechSynthesis.cancel();
     document.getElementById('hitList').innerHTML = '';
     const tvList = document.getElementById('tvHitList');
@@ -6704,7 +6713,14 @@ async function sessionRecMaybeStop() {
 }
 
 function saveSessionJson() {
-    if (!recSession) return;
+    if (!recSession) {
+        // v2.4.14 (Codex-Review #3): nicht still scheitern — am offline Stand würde
+        // der User glauben, gespeichert zu haben (Erkennung lief evtl. ohne Auto-REC).
+        const stEl = document.getElementById('sessionRecStatus');
+        if (stEl) stEl.textContent = '⚠ Keine aktive Session — nichts gespeichert (Erkennung gestartet? Auto-REC an?)';
+        try { setMsg && setMsg('⚠ Kein Session-Log: keine aktive Aufzeichnung'); } catch(e) {}
+        return;
+    }
     const data = {
         version: APP_VERSION,
         device: recSession.device || 'Apexel ETF150',
