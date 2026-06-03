@@ -2,7 +2,18 @@
 
 ## Update 2026-06-03: v2.4.0 LIVE verdrahtet + Performance gelöst + Stand-Setup fertig
 
-App-Stand: **v2.4.13** (versionCode 202), installiert auf Tab (192.168.178.235:5555).
+App-Stand: **v2.4.14** (versionCode 203), installiert auf Tab (192.168.178.235:5555).
+
+### v2.4.14 — Codex-Review-Fixes
+**WICHTIG: Codex-Runner funktioniert wieder** (Memory „CreateProcessAsUserW failed:5"
+ist VERALTET). `node .../codex-companion.mjs setup --json` → ready:true, codex-cli
+0.130.0, ChatGPT-Login aktiv. /codex:rescue nutzbar. Review von v2.4.4→v2.4.13 lieferte
+6 valide Befunde, 5 gefixt: saveSessionJson-Warnung bei !recSession (HIGH); resetSession
+leert _v24Ring+_v24Log (war asymmetrisch zum Wizard — dieselbe Bug-Klasse wie der
+calib-Erbe); @Volatile für aeExp/aeGain/aeStable; Hysterese-Totband in regulateExposure.
+Offen (#1, dokumentiert): _v24Ring mittelt Trigger-Frames mit → Lochkontrast ~2/5
+verwässert; Umbau (Ring bei Trigger einfrieren) aufgeschoben bis Stand-Daten zeigen ob nötig.
+
 
 ### v2.4.12/13 — Trailrun-Befunde gefixt (calib-Konsistenz + Frozen-Spot)
 Doppel-Trailrun 2026-06-03 (USB-Cam) deckte zwei stand-kritische Bugs auf:
