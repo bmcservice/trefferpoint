@@ -1,202 +1,223 @@
-# TrefferPoint — Session Handoff
-_Stand: 2026-05-13 abends — v2.3.170, bereit für 2. Praxistest am Stand (morgen 2026-05-14)_
+# HANDOFF — Stand 2026-06-03
+
+## Update 2026-06-03: v2.4.0 LIVE verdrahtet + Performance gelöst + Stand-Setup fertig
+
+App-Stand: **v2.4.13** (versionCode 202), installiert auf Tab (192.168.178.235:5555).
+
+### v2.4.12/13 — Trailrun-Befunde gefixt (calib-Konsistenz + Frozen-Spot)
+Doppel-Trailrun 2026-06-03 (USB-Cam) deckte zwei stand-kritische Bugs auf:
+- **v2.4.12 calib-Konsistenz:** gespeicherte calib ≠ Mess-calib. Wurzel: saveSessionJson
+  nullt recSession nicht + sessionRecMaybeStart hat `if(recSession)return` → Folge-Session
+  erbt calib der vorigen. KRITISCH für Zwei-Kamera-Stand (USB→ETF150 → zweite erbt erste
+  calib → GT-Transformation falsch). Fix: Wizard-Schritt „Diagnose-Parameter" ruft
+  resetSession() (frische Session mit aktueller calib); saveSessionJson speichert die
+  AKTUELLE globale calib. VERIFIZIERT: neue Session calib cx=544 ↔ 25/25 Signale im
+  Spiegel, keine geerbte Alt-calib mehr.
+- **v2.4.13 Frozen-Spot:** GUI meldete „Frozen-Spot gelernt — wird ignoriert" trotz
+  chkFrozenSpot=AUS (2 gelernt/0 geblockt). frozenSpotTrack lief immer. Fix: Lernen+Blocken
+  nur noch wenn chkFrozenSpot AN. Mit v2.4-Verifier ohnehin obsolet.
+
+Offen: Zwei-Session-Test (zweite Kamera erbt nicht erste calib) am Stand mit USB+ETF150
+nachholen — Fix indirekt bestätigt (frische Session nahm neue calib statt Alt-830).
+
+
+### v2.4.11 — Wizard aktiviert Verifier (Offline-Erfassung wasserdicht) + END-TO-END verifiziert
+KRITISCH: Der Diagnose-Wizard aktivierte chkDiagMode, aber NICHT chkV24Precision → am
+offline Stand wäre der Verifier nie gelaufen → SNR-Log leer → Kalibrierung unmöglich
+(erst zuhause bemerkt). Fix: Wizard-Schritt „Diagnose-Parameter setzen" aktiviert jetzt
+chkV24Precision + _v24UseAvg + leert _v24Log; Schritt „Messung beenden" meldet Log-Größe
+(„✓ N Kandidaten" / „⚠ LEER — Verifier lief nicht!").
+
+END-TO-END am Tablet verifiziert (USB-Cam, v2.4.11): Wizard-Setup → Detection 20s →
+saveSessionJson → Datei /sdcard/Download/tp_session_*.json gepullt → `v24_verifier_log`
+mit 17 Einträgen (5 commit / 11 reject_snr / 1 reject_nosignal, SNR 3.2–101.3, je
+bestX/Y+ms+decision) + `calibration.pxPerMm`. `analyze_v24_session.py` wertet sauber aus.
+**Die komplette Offline-Kette (Wizard → Log → JSON → Auswertung) ist bewiesen.**
+
+ETF150 vs USB (Code-Analyse): v2.4.0-Kern (Verifier/Performance/Mittelung/SNR-Log/Cal-Fix)
+ist kamera-agnostisch (arbeitet auf getDetectionImageData/calib). Unterschiede: (1) Belichtung
+— USB=UVC-Regelung v2.4.5/6, ETF150=eigener AE-Lock /roc/isp/param; (2) Auflösung — ETF150
+canvas=1920×1080 → streamDetect ~700ms statt ~300ms; (3) Frame-Rate — ETF150 ~4Hz → 5-Frame-
+Mittelungs-Ring deckt ~1.25s ab (USB ~0.17s), bei AE-Drift relevanter, evtl. Ring zeitbegrenzen.
+ETF150-Verifier-Lauf NOCH NICHT live gegengetestet (Cam war nicht angeschlossen) → am Stand
+als erste ETF150-Session verifizieren (Wizard meldet Log-Größe → sofort sichtbar ob ok).
+
+
+### Was erreicht wurde (v2.4.5–2.4.10)
+- **v2.4.5/2.4.6 — USB-Cam-Belichtung gefixt.** Wurzel: `freezeCameraAutoModes` fror
+  `setGain(uvc.gain)` ein, aber AGC liefert gain=0 → dunkles, bei jedem Connect anderes
+  Bild. Fix: Closed-Loop-Regelung auf Ziel-Helligkeit (mean 100–135). v2.4.6: Regelintervall
+  12→45 Frames (Einschwingen), sonst Transient-Konvergenz → Drift 126→183. Live verifiziert:
+  mean konvergiert auf ~105 und bleibt stabil. Kennlinie: exp=70ms/gain=140→mean~120,
+  Gain sättigt ~160, Exposure ist Haupthebel.
+- **v2.4.7 — v2.4.0-Verifier live verdrahtet** (Zwei-Stufen-Trigger, opt-in `chkV24Precision`,
+  default AUS). Grob-Trigger (alte Pipeline) bestätigt Schuss → `runV24Verify()` ruft 1×
+  TPDetect.streamDetect (Registration+Center-Surround+NMS+SNR), übernimmt präzise Position,
+  verwirft wenn kein Signal nahe. Fail-safe + additiv.
+- **v2.4.8/2.4.9 — Performance gelöst.** streamDetect war auf Adreno >7s (Timeout/OOM).
+  Zwei Hotspots: (1) SNR-Verify Float64-Full-Sort über W·H = 66% + 7.4MB-Alloc → Median per
+  Sampling (jeder 13. Pixel, Δ0.00% verifiziert). (2) localMaxima-Explosion bei signalarmer
+  Szene (maxIn≈0 → thr≈0 → alle Pixel Kandidaten) → absoluter Score-Floor (1.0). **Ergebnis:
+  streamDetect 7s → ~300ms live, in allen Fällen.** 90%/90%/2.0mm bleibt (test_v240 + test_embedded).
+- **v2.4.10 — Frame-Mittelung + SNR-Logging (Stand-Vorbereitung).**
+  - Mittelung: Ringpuffer letzte 5 Frames → rauscharmer post (refFrame ist eh 6-Frame-gemittelt).
+    Umschaltbar `window._v24UseAvg` (default true).
+  - SNR-Log: jeder bestätigte Grob-Trigger → bestSnr+Entscheidung in `_v24Log` → landet in
+    Session-JSON (`v24_verifier_log`).
+
+### FAIRER Mittelungs-Beweis (identische Live-Frames, echte calib)
+| | rohe Phantome (13 Frames) | SNR |
+|---|---|---|
+| Einzelframe | **1151** | 6-27 (viele 12-22) |
+| 5-Frame-Mittel | **160** | fast alle 6-9 |
+→ **Mittelung = 86% weniger Phantome**, drückt Rausch-SNR auf 6-9. Hypothese bestätigt.
+(Synthetisches Gauss-Rauschen taugte NICHT als Modell — clustert nicht wie echtes JPEG/AE-Rauschen.
+Live-A/B zeitversetzt taugt auch nicht — Szenen-Aktivität schwankt. Nur identische Frames = fair.)
+
+### NÄCHSTER SCHRITT: Stand-Test mit echten Schüssen (alles vorbereitet)
+Ziel: die Commit-Schwelle `_v24SnrCommit` datengetrieben setzen (Rest-Phantome liegen nach
+Mittelung bei SNR 6-9 → Schwelle vmtl. ~9-10; ob echte Treffer das überstehen → nur Stand zeigt es).
+
+Ablauf am Stand:
+1. USB-Cam dran, App starten (Belichtung regelt sich selbst auf mean~105).
+2. `⚙ v2.4-Präzision` aktivieren + `🔬 Diagnose-Modus` (Detframes + Session-JSON).
+3. Referenzframe FRISCH setzen (refFrame-Drift erhöht Phantome — kurze Serien, ggf. „Neuer Spiegel"
+   zwischendurch). 2-3s warten, dann scharf.
+4. 5-10 Schuss, Scheibe NUMMERIEREN + INTAKT mitnehmen.
+5. Zuhause: Scheibe frontal fotografieren (Spiegel ∅200mm = Maßstab).
+6. Auswertung: `python sessions/training_data/analyze_v24_session.py tp_session_*.json --gt "x1,y1 ..."`
+   → SNR-Verteilung echt vs phantom + empfohlene Commit-Schwelle. GT-Lochpositionen aus dem Foto
+   (gt_multi.html) in Stream-px.
+7. Schwelle setzen (`window._v24SnrCommit` bzw. als Default in index.html), ggf. Release.
+
+Offen / Ideen: refFrame inkrementell nach jedem Schuss aktualisieren (gegen AE-Drift);
+Frozen-Spot bleibt AUS (v2.4-SNR ersetzt die Heuristik — ein echter Schuss an einem gelernten
+Spot würde sonst verworfen, kein Entlernen). SNR-Override könnte Frozen-Spot überstimmen.
 
 ---
 
-## Aktueller Stand
+## Update 2026-06-02: USB-Cam vollwertig + Negativ-Kontrolle bestätigt v2.4.0
 
-**Repo: v2.3.170** (committed, getaggt, gepusht, GitHub Release vorhanden, APK auf Tablet installiert)
-**Tablet:** versionName 2.3.170 / versionCode 174 (`ce031823ccfb0432027e`)
-**Hardware:** Apexel ETF150 WiFi-Cam am Spektiv
+App-Stand: **v2.4.4** (versionCode 193), installiert.
 
----
-
-## Was zwischen v2.3.167 (1. Stand-Test) und v2.3.170 passiert ist
-
-### 1. Stand-Test (2026-05-12) — Befunde (siehe `sessions/2026-05-12_nachbesprechung/README.md`)
-- **KK25:** 37 Hits in 36 min · Ø 9.05 · Streuung 140×151 mm (zu groß) — User: "deutlich mehr Schüsse signalisiert als abgegeben"
-- **GK25:** 21 Hits in 5:46 · Ø 6.33 · 1.8er-Ringe verdächtig
-- **Auto-Kalib lag immer "3-4 Ringe zu weit links"**
-- **App war zwischenzeitlich eingefroren** (Neustart nötig)
-- Erste Hits schon bei t=0.42 s nach "Erkennung starten" → Warmup effektiv kaputt
-
-### v2.3.168 — Detection-Härtung
-- Auto-Kalib: **Center-of-Mass-Anchor** (statt fixer Bildmitte) + Quadranten-Symmetrie-Check
-- Warmup: **zeitbasiert 6 s + Median-Ref-Frame** statt 60 rAF-Frames (≈1 s)
-- 3-Frame-Bestätigung (statt 2-Frame), Disziplin-spezifischer minRing-Filter (Sportpistole=3)
-- Hit-Liste FIFO 60, Snapshot-In-Flight-Guard
-- **Bestätigungs-Modus** (Checkbox): Tap-to-Confirm Banner mit 5 s Auto-Discard
-- ETF150 REC: alle Auto-Segment-Clips als `vidPaths`-Array (vorher nur erster 40s-Clip)
-
-### v2.3.169 — Code-Review-Followup (P1 #1+#3)
-- `scripts/check_versions.sh` Pre-Release-Drift-Check (6 Stellen)
-- `stopAllActiveStreams()` cleanupt jetzt auch `rtspSnapshotInterval`, `rtspKeepAliveInterval`, Confirm-Banner, refWarmup-Akku
-- sw.js-Asset-Drift (140 → 168 → 170) gefixt
-
-### v2.3.170 — Praxis-Ready für morgen
-1. **3-Frame-Confirm jetzt echt:** vorher zählte rAF (60 Hz) denselben Snapshot 15× pro Sekunde → 3 Confirms trivial in 5 ms abgeschlossen. Jetzt `snapshotGen`-Guard: 3 Confirms = 3 verschiedene Source-Frames (~750 ms SurfaceView-Mode).
-2. **PixelCopy native-async** (Code-Review P1 #4): JS-Call kehrt in <1 ms zurück statt bis 1500 ms zu blockieren. Bitmap-Reuse statt 9k×8 MB-Alloc-Churn → vermutlich die "App-Freeze"-Quelle aus dem 1. Stand-Test.
-3. **Diagnostik:** Jede Filter-Rejection (`pts_out_of_range`, `not_circular`, `spatial_jitter`, `below_min_ring`, `spatial_exclusion`, `user_discarded`) wird in `recSession.rejected_candidates` gespeichert + `rejected_summary` aggregiert.
-4. **Live-Counter "1/3 → 2/3 → 3/3"** über pending-Cluster (orange/gelb/grün) für visuelles Feedback.
+- **v2.4.3**: captureCurrentFrame USB-UVC-Fallback → Stand-Snapshots auch im USB-Modus.
+- **v2.4.4**: cam-agnostische recSession → Session-JSON auch im USB-Modus (vorher ETF150-only).
+- **USB-Cam-Befund** (Trockenübung, 0 Schüsse = Negativ-Kontrolle):
+  - USB-Cam = Full HD 1920×1080 (Detframes); App-Live-Detection aber nur 1280 (Display-Server skaliert).
+  - Cal im USB-Modus nativ korrekt (kein SurfaceView-Versatz).
+  - **v2.4.0 = 0-1 Phantome vs alte App = 4 Phantome** auf statischer Szene → bestätigt LEER-Befund.
+- **Setup-Optionen klar:** USB-Cam + WLAN-ADB (Heimnetz) gleichzeitig möglich (USB-Port frei).
+  ETF150 + ADB nur per USB-Kabel (PC-Heimnetz erreicht ETF-Netz nicht). ADB-tcpip nach Reboot weg.
+- **Test-Lehre:** nach Referenzframe 2-3s warten (AE/WB einpendeln) vor Scharfschalten.
+- Details: `sessions/2026-06-02_usbcam/BEFUND_usbcam.md`
 
 ---
 
-## Praxis-Workflow am Stand (morgen 2026-05-14)
+# HANDOFF — Stand 2026-06-01
 
-### Setup
-1. ETF150-Hotspot anschalten, Tablet **explizit ins ETF150-WLAN** wählen (Gateway `192.168.10.1`)
-2. TrefferPoint öffnen → "📡 WLAN-Cam" → "▶ RTSP-Stream starten"
-3. **Auto-Kalibrierung 1× testen** — sollte jetzt korrekt sitzen (Center-of-Mass-Anchor). Banner "asymmetrischer Fit (Quadranten …)" → manuell mit 3-Klick weitermachen
-4. Disziplin wählen (KK25 oder GK25), Auto-REC aktivieren
+## Großer Durchbruch heute: Detection-Algorithmus war die Hürde, NICHT die Auflösung
 
-### Erste Serie (empfohlen): Bestätigungs-Modus AN
-- "✋ Bestätigung erforderlich" (Checkbox im Detection-Panel) anhaken
-- "Erkennung starten" → 6 s Warmup-Banner ("stabilisiere · Ns · N Samples")
-- Bei jedem Treffer-Kandidaten: Banner oben mit Ring + Distanz, "✓ Behalten" oder "✗ Verwerfen" oder Tap aufs Canvas (= bestätigen)
-- 5 s Timeout → auto-verworfen
-- **Vorteil:** jeder "Verwerfen"-Klick produziert einen `user_discarded`-Eintrag im JSON → Gold für FP-Analyse
+Nach 4 Wochen Kamera-/Auflösungs-Fokus empirisch widerlegt. 1080p reicht für 90% Recall.
+Das geplante 4K-Hardware-Upgrade ist unnötig.
 
-### Zweite Serie: Bestätigungs-Modus AUS
-- Auto-Detection läuft volltransparent durch
-- Auf "1/3 → 2/3 → 3/3"-Counter achten:
-  - Counter geht 1 → 3 schnell durch = echter Treffer wird zuverlässig erkannt
-  - Counter springt 1 → 2 → verschwindet = Spatial-Jitter (FP knapp verworfen, gut)
-  - Counter bleibt 1 → 0 = pts_out_of_range / not_circular (FP weit verworfen, sehr gut)
-- Treffer-Ansage akustisch wie gehabt
+### Was offline fertig + dreifach validiert ist (v2.4.0)
 
-### Speichern
-- "■ Erkennung pausieren" → REC stoppt, vidPaths-Array gefüllt
-- "💾 Session-Log speichern" → JSON nativ in `/sdcard/Download/tp_session_<ts>_<disz>.json`
-- JSON enthält jetzt:
-  - `hits[]` (committed)
-  - `rejected_candidates[]` mit Reason je Eintrag
-  - `rejected_summary` aggregiert pro Reason
-  - `rec.video_paths[]` ALLE Auto-Segment-Clips (nicht nur ersten)
+Pipeline: **Spiegel → Image-Registration → Frame-Diff → Center-Surround → NMS → SNR-Verify**
 
----
+| Variante | Recall | Precision | Δ | Status |
+|---|---|---|---|---|
+| Python-Referenz (`detection_v240.py`) | 90% | 90% | 2.7mm | ✓ |
+| Node-JS (`js_test/detection_v240.js`) | 90% | 90% | 2.0mm | ✓ |
+| Browser-Pfad (`imageDataToGray`) | 90% | 90% | 2.0mm | ✓ |
 
-## Architektur (Stand v2.3.170)
+Foto-Modus (12MP Standbild, Endauswertung): 72% / 98% / 0.9mm.
+App-Algorithmus heute zum Vergleich: 20% / 12% / 10.2mm.
 
-```
-Apexel ETF150 (1920×1080 H.264 RTSP)
-            ↓ TCP, kein Proxy
-RtspMediaCodecPipeline
-  ├─ HW-Decoder OMX.qcom.video.decoder.avc
-  ├─ KEY_LOW_LATENCY=1, OPERATING_RATE=60, PRIORITY=0
-  ├─ Watchdog gegen Decoder-Stall (v2.3.156, 4 s Stall → Auto-Restart)
-  └─ releaseOutputBuffer(idx, true)
-            ↓ direkt
-SurfaceView (Android Hardware-Overlay)           ← Display, <500 ms Lag
-  (body.rtsp-live transparent → durch WebView sichtbar)
+Die zwei fehlenden Bausteine der alten App:
+1. **Image-Registration** vor Frame-Diff (Scheibe driftet 2-4px → sonst Ring-Geisterbilder → Phantome)
+2. **Korrektes NMS** gegen Loch-Form (alte App markierte Ring-Ziffern als Treffer, 20 FP auf LEER-Scheibe)
 
-            ↑ Async-PixelCopy (v2.3.170)
-captureRtspSurfaceJpeg() — Async-Producer
-  ├─ Persistenter HandlerThread
-  ├─ Reusable Bitmap (1× alloc statt 4 Hz × 8 MB Allocs)
-  ├─ AtomicReference<latestJpeg>
-  └─ JS-Call kehrt sofort zurück mit zuletzt-fertigem JPEG
-            ↑ alle 250 ms abgerufen (4 Hz)
-WebView (transparent)
-  ├─ UI/Overlays (Ringe, Treffer-Marker, Status, 1/3-Counter)
-  ├─ Snapshot-Loop: imgEl ← captureCurrentFrame() → 4 Hz
-  ├─ Off-Screen-Canvas detCtx mit imgEl befüllt
-  ├─ runDetection() im rAF-Loop liest aus detCtx → Hit-Detection
-  │   ├─ pts_out_of_range filter
-  │   ├─ not_circular filter (b/a < 0.25)
-  │   ├─ 3-Frame-Bestätigung mit snapshotGen-Guard (v2.3.170)
-  │   ├─ below_min_ring (Sportpistole=3) filter
-  │   └─ spatial_exclusion gegen vorige Hits
-  └─ tryCommitHit() → commitHit() oder showConfirmBanner() (Bestätigungs-Modus)
+### Wo alles liegt (sessions/training_data/)
 
-            ↑ Side-Channels
-  • KeepAlive-Pings 30 s → ETF150 schläft nicht ein
-  • tpBridge.saveJsonToDownloads → /sdcard/Download/
-  • Auto-REC: alle Auto-Segment-Clips in vidPaths-Array
-```
+- `detection_v240.py` / `validate_v240.py` — Python-Referenz + Validierungs-Harness
+- `js_test/detection_v240.js` — JS-Modul (Browser+Node), `test_v240.mjs`, `test_browser_path.mjs`
+- `js_test/harness_v240.html` — visueller Browser-Test (über HTTP-Server öffnen)
+- `gt_multi.html` + `ground_truth_multi.json` — 13 Fotos, 130 Labels, GT-Tool
+- `ERGEBNIS_v240.md`, `INTEGRATION_PLAN_v240.md`, `BEFUND_AUFLOESUNG.md` — Doku
+- Rohdaten (HEIC-Fotos, Detframes, PNG) via .gitignore lokal, nicht committed
 
----
+Branch: `claude/nervous-tu-2286b6` (worktree). 5 Commits heute (fb01f81..4b4e59c).
+**Muss noch nach main übertragen werden** (Worktree-Regel).
 
-## Pre-Release-Check (NEU v2.3.169)
+## STAND-TEST: autarke Offline-Protokollierung (v2.4.2, 2026-06-01)
 
-Vor jedem Tag:
-```bash
-bash scripts/check_versions.sh
-```
-Prüft alle 6 Stellen synchron + Hash-Gleichheit Root vs Asset-Kopien. Exit 1 bei Drift.
+User ist am Schießstand OFFLINE → keine Live-Diagnose. App speichert jetzt autark
+ALLES für die spätere Offline-Auswertung. v2.4.0-Detection wird NICHT live verdrahtet,
+sondern hinterher gegen die Detframes simuliert (wie 2026-05-31: 9/10 Treffer).
 
----
+App speichert pro Stand-Session (in deterframes/<session>/ + /Download/):
+- Detection-Frames (Live-PixelCopy, ~4 Hz) — Basis für Offline-Detection
+- Snapshot pro Hit: Live-Bild + Overlay (calib-Ellipse, alle Hits nummeriert) [v2.4.2]
+- _meta.json bei jedem Hit (calib + SurfaceView-Geometrie, Cal-Drift-Tracking) [v2.4.2]
+- Session-JSON (Hits mit Position/Ring/Zeit)
+Verifiziert: Bridge saveSnapshot schreibt valides JPEG; saveStandSnapshot-Logik OK
+(voller Live-Pfad nur am Stand mit Stream testbar).
 
-## Hardware-Checkliste für den Stand
+ABLAUF für den User am Stand:
+1. Tab ins ETF150-WLAN, RTSP-Stream starten (Live-Bild steht)
+2. Wizard „TEST" starten → weiter-weiter-weiter durchklicken:
+   Diag-Modus AN, manuell kalibrieren (Cal-Fix v2.4.1 macht das jetzt korrekt!),
+   visuell prüfen, Referenzframe, 5 Schüsse, Nachlauf, Session speichern
+3. Scheibe NUMMERIEREN + INTAKT mitnehmen
+4. Zuhause: Scheibe frontal fotografieren (Spiegel ∅200mm = Maßstab) → sessions/training_data
+5. Online: Tablet-Daten via USB-ADB pullen, mir geben → Offline-Auswertung
 
-- [ ] **Tablet voll geladen** (Display + WLAN + Cam-Pipeline ziehen 2-3 h Akku)
-- [ ] **SD-Karte in der ETF150** (mind. 16 GB, FAT32/ExFAT) — Auto-REC braucht sie zwingend
-- [ ] **Spektiv-Stativ stabil** (Mikrowackler erzeugen False-Positives)
-- [ ] **USB-C-Kabel** falls ADB-Diagnose vor Ort gewünscht
-- [ ] **Cam Power-Cycle** vor Setup (clean state)
+WICHTIG Setup: USB-ADB-Kabel mitnehmen (WLAN-ADB geht nicht — PC-Netz ≠ Cam-Netz).
+ETF150 wacht nur bei aktivem Stream; bei Inaktivität schläft sie → Tab fällt ins Heimnetz.
 
----
+## NÄCHSTE SCHRITTE — brauchen Tablet/Stream (Reihenfolge!)
 
-## Was morgen am Stand erstmals zu verifizieren
+### 1. Cal-Mapping-Fix — ✓ ERLEDIGT (2026-06-01, v2.4.0/v2.4.1)
+Wurzel: SurfaceView war match_parent (full-screen 2560px), streckte Stream 1920→2560,
+Canvas-Overlay nur 1912px → Touch/Stream-Versatz Faktor 1.339 → calib 86mm daneben.
+FIX: Bridge setSurfaceBounds() legt SurfaceView deckungsgleich auf die camera-wrap-
+Region (= Canvas). JS syncSurfaceBounds() im rAF-Loop (1×/s) + Stream-Start + resize.
+LIVE VERIFIZIERT (Tablet, v2.4.1): calib auf Stream-Pos des Lämpchens (449,575) →
+Ring sitzt visuell exakt drauf. Auto-Sync setzt SurfaceView automatisch auf 1912×1076.
+FINAL VERIFIZIERT (2026-06-01, echte KK25-Scheibe vor ETF150): App-Auto-Kalibrierung
+trifft echten Spiegel mit nur 16px ≈ 4mm Versatz (vorher 127px/40mm). CV-Fit (orange)
+und App-Cal (grün) liegen visuell deckungsgleich auf dem Spiegel-Rand. Beweis-Bild:
+sessions/2026-05-31_v184_test/cal_fix_PROOF.jpg. CAL-MAPPING-FIX KOMPLETT ABGESCHLOSSEN.
 
-1. **3-Frame-Confirm-Fix wirkt:** FP-Rate gegenüber 2026-05-12 deutlich runter
-2. **Async-PixelCopy:** kein App-Freeze mehr in langen Sessions
-3. **Center-of-Mass-Auto-Kalib:** Mitte sitzt
-4. **Live-Counter sinnvoll als Feedback** (Tap-Bestätigung darüber im Bestätigungs-Modus)
-5. **Mehrere Schüsse in Folge** (Sportpistole-Präzision 5 Schuss / 5 min — entspannt; Schnellfeuer 5 / 4-8 s — Cooldown-Test)
-6. **Disziplin-Wechsel mitten in der Session** (KK25 → GK25 oder umgekehrt)
-7. **Trainings-Frame-Extraktion** `extract_session.py` mit den vidPaths-Array endlich vollständig (vorher nur 40 s)
+Setup-Hinweis: USB-ADB nötig (PC im Heimnetz erreicht Tab im ETF-WLAN nicht per WLAN-ADB).
+ETF150 geht bei Inaktivität in Standby → Tab wechselt dann selbst ins Heimnetz.
 
----
+### 2. v2.4.0 in index.html — TEILWEISE ERLEDIGT (2026-06-01)
+✓ TPDetect-Block additiv eingebettet (Commit main 8495c26), window.TPDetect,
+  isolierter <script>-Block, keine Seiteneffekte. APP_VERSION unverändert.
+✓ Verifiziert: extrahierter Block aus index.html = 90%/90% (test_embedded.mjs).
+✓ Mirror nach android-assets + G-Drive. NICHT gepusht (toter Code, kein CI-Build).
+OFFEN — die eigentliche Live-Verdrahtung (Zwei-Stufen-Trigger, INTEGRATION_PLAN_v240.md):
+- billiger Grob-Trigger pro Frame (bestehende Diff-Flächen-Logik) ruft bei Schuss-Event
+  window.TPDetect.streamDetect() (~370ms, ~1×/Schuss)
+- refFrame inkrementell nach jedem Schuss aktualisieren
+- additiv hinter Checkbox „v2.4-Präzisions-Detection", alter Pfad bleibt Default
+- Spiegel-Geometrie aus calib (cx,cy → r aus a/b, pxPerMm) an TPDetect übergeben
+- Browser-Harness (harness_v240.html) als Vor-Stand-Check
 
-## Bekannte offene Punkte (kein Showstopper für morgen)
+### 3. Stream-Test am Tablet
+- Einzelframe-Rauschen (offline nutzte Median über 15 Frames → live ggf. 3-5 mitteln)
+- Live-Performance auf Adreno-CPU (370ms im Node ≠ Tablet)
+- Grob-Trigger-Timing
 
-1. **WebView/Bridge sehr offen** (Code-Review P1 #2) — `allowUniversalAccessFromFileURLs`, `setWebContentsDebuggingEnabled(true)`, Dev-HTTP-Server :8090. Funktional kein Problem, Security-Schuld.
-2. **Tote Pfade** (Code-Review P2) — `pushFrameToWebView`, `setupImageReader`, ungenutzte ExoPlayer-Deps in `build.gradle`. Cleanup-Sprint nach KK25/GK25-Stabilisierung.
-3. **Trefferlogik UI-frei machen** (Code-Review P2) — `TP.detect.findHits({refImage, curImage, calib, disc, settings})` als reine Funktion ohne DOM-Seiteneffekte. Nötig für reproduzierbare Offline-Tests gegen Ground Truth.
-4. **Auto-Kalibrierung bei mehreren Scheiben** unzuverlässig — Workaround: am Stand hängt nur eine Scheibe.
-5. **Detection-Multi-Trigger 1.5×** aus Laser-Test (2026-05-11) — sollte mit echtem 3-Frame-Fix v2.3.170 weg sein. Bei dann noch FP: Cooldown 300 ms → 1500 ms erwägen.
-6. **`setupImageReader()` in `RtspMediaCodecPipeline.kt`** Dead Code seit v2.3.159 — Cleanup ausstehend.
+### 4. Stand-Test mit echten Schüssen, A/B alt vs v2.4.0
 
----
+## Methoden-Regel (ab jetzt Pflicht)
+Jede Test-Session braucht unabhängige Ground-Truth = **Scheiben-FOTO** + Screenshot +
+Detframes + Session-JSON + GT-Tool. 4 Wochen lang nur Pipeline-Output gesammelt →
+Symptom-Patching statt Quote-Messung. Das war der eigentliche Fehler.
 
-## Versionsdateien sync (immer 6 gleichzeitig — Check via scripts/check_versions.sh)
-
-- `index.html` → `APP_VERSION`
-- `sw.js` → `CACHE_VER` (`tp-X.Y.Z`)
-- `version.json` → `{"version":"X.Y.Z"}`
-- `android/app/build.gradle` → `versionName` + `versionCode`
-- Asset-Kopien (1:1):
-  - `android/app/src/main/assets/trefferpoint/index.html`
-  - `android/app/src/main/assets/trefferpoint/sw.js`
-  - `android/app/src/main/assets/trefferpoint/version.json`
-
-Release: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z` → GitHub Actions baut APK.
-APK ziehen: `gh release download vX.Y.Z --pattern "*.apk" --dir /c/Users/bertm/AppData/Local/Temp/ --clobber` + `adb install -r /c/Users/bertm/AppData/Local/Temp/app-debug.apk`
-
----
-
-## Tablet-Verbindung & Diagnose
-
-```
-ADB-Gerät: ce031823ccfb0432027e (Samsung Tab S6 Lite)
-ADB-Tier: "click" — typing in App via Auto-Fill / WebView-DevTools-Bridge-eval
-WLAN: ETF150-Hotspot, Gateway 192.168.10.1
-ETF150-Status: Snapshot+REC+OSD via /roc/*-API (kein Auth)
-Apexel-App: WebSocket-Protokoll auf Port 80, Subprotocol "rocapi", Auth admin:12345678
-```
-
-**Diagnose-Toolkit:**
-- `adb logcat -v time RtspMediaCodec:V RtspSdpProxy:V TrefferPoint:V *:E` — Pipeline-Stages
-- WebView-DevTools-Protocol via `adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>` → Python `websocket-client` (mit `suppress_origin=True`) → JS-Eval
-- `adb shell ls /sdcard/Download/tp_session*.json` — JSON-Save-Verifikation
-
----
-
-## Sessions in Zahlen
-
-| Zeitabschnitt | Phasen | Versionen | Erkenntnis |
-|---|---|---|---|
-| 2026-05-10/11 (Lag-Marathon) | Lag-Diagnose + ETF150 Bringup | v2.3.149→167 | CPU-lesbare-Pipeline strukturell zu langsam → SurfaceView |
-| 2026-05-12 (1. Stand-Test) | Echte KK25/GK25-Schüsse | v2.3.167 | "Deutlich mehr Hits als Schüsse", App eingefroren, Auto-Kalib zu weit links |
-| 2026-05-13 (Code-Review + Fix-Iteration) | Detection-Härtung | v2.3.168→170 | 3-Frame-Confirm-Bug fixed, Async-PixelCopy, Diagnostik |
-| 2026-05-14 (2. Stand-Test) | KK25/GK25 mit v2.3.170 | — | Erwartung: drastisch weniger FPs, keine Freezes, korrekte Auto-Kalib |
+## Tablet/Hardware
+- Tablet ce031823ccfb0432027e (Samsung Tab S6 Lite), ADB-Tier "click"
+- ETF150 (RTSP 1080p, 192.168.10.1) = Echtzeit-Track
+- App-Stand: v2.3.184 (versionCode 188) installiert
