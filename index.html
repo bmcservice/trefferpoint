@@ -1261,7 +1261,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.9';
+const APP_VERSION = '2.4.10';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3454,12 +3454,34 @@ function isInsideSpiegel(px, py) {
     return (rx*rx)/(_sp.a*_sp.a) + (ry*ry)/(_sp.b*_sp.b) <= 1.0;
 }
 
-// v2.4.7: v2.4.0-Präzisions-Verifier (opt-in via chkV24Precision).
-// Läuft NUR bei einem bereits vom Grob-Trigger bestätigten Schuss — also ~1×/Schuss,
-// nicht pro Frame → die ~370ms von streamDetect() sind unkritisch.
+// v2.4.10: Verifier-Zustand. Ringpuffer der letzten N Frames für die Mittelung
+// (gegen Einzelframe-Rauschen) + SNR-Log aller Kandidaten (Stand-Kalibrierung).
+let _v24Ring = [];                 // letzte N ImageData (nur gepflegt wenn Verifier an)
+const _V24_RING_N = 5;
+let _v24Log = [];                  // {t,gx,gy,bestSnr,bestX,bestY,nDets,ring,ms,decision}
+window._v24SnrCommit = 6;          // Commit-Schwelle (am Stand datengetrieben justierbar)
+window._v24UseAvg = true;          // Frame-Mittelung an/aus (für Live-A/B umschaltbar)
+
+// Mittelt die Ring-Frames zu einem rauscharmen Graustufen-post.
+// refFrame ist bereits 6-Frame-gemittelt; so wird auch post symmetrisch rauscharm
+// → diff zeigt nur echte Änderungen (persistentes Loch), transiente Rausch-Spitzen /√N.
+function _v24AveragedPost(cur) {
+    // Schalter für Live-A/B (window._v24UseAvg=false → reiner Einzelframe wie v2.4.9)
+    if (window._v24UseAvg === false) return window.TPDetect.imageDataToGray(cur).gray;
+    const ring = (_v24Ring.length >= 3) ? _v24Ring : [cur];
+    const W = ring[0].width, H = ring[0].height, n = ring.length;
+    for (const f of ring) if (f.width !== W || f.height !== H) return window.TPDetect.imageDataToGray(cur).gray;
+    const g = new Float32Array(W * H);
+    for (const f of ring) { const d = f.data; for (let i = 0, p = 0; i < W * H; i++, p += 4) g[i] += 0.299*d[p]+0.587*d[p+1]+0.114*d[p+2]; }
+    const inv = 1 / n; for (let i = 0; i < W * H; i++) g[i] *= inv;
+    return g;
+}
+
+// v2.4.0-Präzisions-Verifier (opt-in via chkV24Precision). Läuft NUR bei einem vom
+// Grob-Trigger bestätigten Schuss (~1×/Schuss) → die ~300ms sind unkritisch.
 // Rückgabe:
-//   { ok:true, x, y, snr }     → v2.4.0 fand Signal nahe (cx,cy): präzise Position übernehmen
-//   { ok:false, fallback:false}→ sauber gelaufen, KEIN Signal nahe: Kandidat = Phantom, verwerfen
+//   { ok:true, x, y, snr }     → Signal nahe (cx,cy) ≥ Commit-Schwelle: präzise Position
+//   { ok:false, fallback:false}→ kein/zu schwaches Signal: Kandidat = Phantom, verwerfen
 //   { ok:false, fallback:true }→ nicht verfügbar/Fehler: grobe Position behalten (fail-safe)
 function runV24Verify(cx, cy, cur) {
     if (!window.TPDetect || !refFrame || !calib) return { ok:false, fallback:true };
@@ -3467,25 +3489,37 @@ function runV24Verify(cx, cy, cur) {
         const W = cur.width, H = cur.height;
         if (refFrame.width !== W || refFrame.height !== H) return { ok:false, fallback:true };
         const ref = window.TPDetect.imageDataToGray(refFrame).gray;
-        const post = window.TPDetect.imageDataToGray(cur).gray;
+        const post = _v24AveragedPost(cur);   // gemittelt über Ringpuffer
         const sp = { cx: calib.cx, cy: calib.cy, r: calib.a, pxPerMm: calib.pxPerMm };
         const disc = DISCS[document.getElementById('discSel').value] || DISCS.kk25;
         const _t0 = performance.now();
-        const res = window.TPDetect.streamDetect(ref, post, W, H, sp, disc.kaliber, { maxShift: 10, snrMin: 6 });
+        // snrMin niedrig (3) → breite Detektion; die eigentliche Commit-Schwelle ist
+        // _v24SnrCommit. So loggen wir auch knapp-darunter-Kandidaten für die Kalibrierung.
+        const res = window.TPDetect.streamDetect(ref, post, W, H, sp, disc.kaliber, { maxShift: 10, snrMin: 3 });
         const _dt = Math.round(performance.now() - _t0);
-        window._v24LastMs = _dt;  // Live-Diagnose: WebView-Laufzeit via DevTools auslesbar
-        if (debugMode) console.log(`[v2.4.8] streamDetect ${W}x${H} → ${_dt}ms, ${res.dets.length} dets`);
-        // Akzeptiere v2.4.0-Treffer innerhalb 3× Kaliber um den Grob-Trigger
+        window._v24LastMs = _dt;
         const tolPx = Math.max(20, calib.pxPerMm * disc.kaliber * 3);
         let best = null, bestD = Infinity;
         for (const d of res.dets) {
             const dd = Math.hypot(d.x - cx, d.y - cy);
             if (dd < tolPx && dd < bestD) { bestD = dd; best = d; }
         }
-        if (!best) return { ok:false, fallback:false };
+        const commit = window._v24SnrCommit != null ? window._v24SnrCommit : 6;
+        const decision = best ? (best.snr >= commit ? 'commit' : 'reject_snr') : 'reject_nosignal';
+        // SNR-Log: jeder bestätigte Grob-Trigger mit v2.4.0-Signalstärke → am Stand
+        // gegen das Scheibenfoto die echt-vs-phantom-SNR-Verteilung auswerten.
+        try {
+            _v24Log.push({ t: Math.round(performance.now()), gx: Math.round(cx), gy: Math.round(cy),
+                bestSnr: best ? Math.round(best.snr*10)/10 : null,
+                bestX: best ? Math.round(best.x) : null, bestY: best ? Math.round(best.y) : null,
+                nDets: res.dets.length, ring: _v24Ring.length, ms: _dt, decision });
+            if (_v24Log.length > 500) _v24Log.shift();
+        } catch(e){}
+        if (debugMode) console.log(`[v2.4.10] ${decision} bestSnr=${best?best.snr.toFixed(1):'-'} ${_dt}ms ring=${_v24Ring.length} nDets=${res.dets.length}`);
+        if (!best || best.snr < commit) return { ok:false, fallback:false };
         return { ok:true, x: best.x, y: best.y, snr: best.snr, shift: res.shift, nDets: res.dets.length };
     } catch (e) {
-        if (debugMode) console.warn('[v2.4.7] runV24Verify Fehler:', e);
+        if (debugMode) console.warn('[v2.4.10] runV24Verify Fehler:', e);
         return { ok:false, fallback:true };
     }
 }
@@ -3523,6 +3557,13 @@ function runDetection() {
     // (nutzt cur+refFrame des aktuellen Frames). Läuft VOR der Detection-Logik,
     // damit auch Frames während Cooldown/Warmup nach Hit noch eingesammelt werden.
     try { processRefineQueue(cur, refFrame); } catch(e) {}
+
+    // v2.4.10: Frame-Ring für den Verifier pflegen (nur wenn aktiv). Hält die letzten
+    // N Frames → bei einem Schuss mittelt der Verifier sie zu einem rauscharmen post.
+    if (document.getElementById('chkV24Precision') && document.getElementById('chkV24Precision').checked) {
+        _v24Ring.push(cur);
+        if (_v24Ring.length > _V24_RING_N) _v24Ring.shift();
+    } else if (_v24Ring.length) { _v24Ring.length = 0; }
 
     const prev = refFrame.data;
     const next = cur.data;
@@ -6686,7 +6727,12 @@ function saveSessionJson() {
             acc[r.reason] = (acc[r.reason] || 0) + 1; return acc;
         }, {}),
         // v2.3.172-A: gelernte Frozen-Spots (Decode-Pfad-Artefakte, ursachenunabhängig maskiert)
-        frozen_spots: (typeof frozenSpots !== 'undefined' ? frozenSpots : [])
+        frozen_spots: (typeof frozenSpots !== 'undefined' ? frozenSpots : []),
+        // v2.4.10: v2.4-Verifier-Log — pro bestätigtem Grob-Trigger die v2.4.0-Signalstärke
+        // (bestSnr) + Entscheidung. Am Stand mit dem Scheibenfoto abgleichen → echt-vs-
+        // phantom-SNR-Verteilung → Commit-Schwelle (_v24SnrCommit) datengetrieben setzen.
+        v24_verifier_log: (typeof _v24Log !== 'undefined' ? _v24Log : []),
+        v24_snr_commit: (typeof window._v24SnrCommit !== 'undefined' ? window._v24SnrCommit : null)
     };
     const jsonText = JSON.stringify(data, null, 2);
     const ts = new Date(recSession.startMs).toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
