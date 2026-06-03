@@ -1261,7 +1261,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.11';
+const APP_VERSION = '2.4.12';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -5521,6 +5521,12 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
     { type:'auto', title:'Diagnose-Parameter setzen',
       text:'Ich stelle die App auf saubere Roh-Messung.',
       run: async ()=>{
+        // v2.4.12: ALTE Session verwerfen, damit die folgende Messung eine FRISCHE
+        // recSession mit der AKTUELLEN Kalibrierung startet. Sonst (Befund Trailrun
+        // 2026-06-03): bei zwei Läufen hintereinander (z.B. USB→ETF150 ohne Neustart)
+        // greift `if (recSession) return` → die zweite Session erbt die calib der
+        // ersten → gespeicherte calib ≠ Mess-calib → Offline-Auswertung unbrauchbar.
+        try { if (typeof resetSession==='function') resetSession(); } catch(e) {}
         setChk('chkFrozenSpot', false);
         setChk('chkConfirmMode', false);
         setChk('chkAutoRec', true);
@@ -6726,7 +6732,12 @@ function saveSessionJson() {
                 : null
         },
         discipline: recSession.discipline,
-        calibration: recSession.calib,
+        // v2.4.12: AKTUELLE calib bevorzugen (nicht die beim Session-Start eingefrorene).
+        // Schützt gegen In-Session-Rekalibrierung UND geerbte Alt-Sessions. Die Live-
+        // Detection rechnet ohnehin mit der globalen calib → die muss in die JSON.
+        calibration: (typeof calib !== 'undefined' && calib)
+            ? { cx: calib.cx, cy: calib.cy, a: calib.a, b: calib.b, angle: calib.angle, pxPerMm: calib.pxPerMm, locked: !!calib.locked }
+            : recSession.calib,
         hits: recSession.hits,
         // v2.3.170: Diagnostik — abgelehnte Hits inkl. Grund. Für post-test FP-Analyse.
         // Reasons: pts_out_of_range | not_circular | spatial_jitter | below_min_ring |
