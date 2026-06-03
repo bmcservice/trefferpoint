@@ -1261,7 +1261,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.10';
+const APP_VERSION = '2.4.11';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -5525,7 +5525,13 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
         setChk('chkConfirmMode', false);
         setChk('chkAutoRec', true);
         setChk('chkDiagMode', true);
-        return {ok:true, msg:'Gesetzt: 🔬 Diagnose AN · Auto-REC AN · Frozen-Spot AUS · Bestätigung AUS.'};
+        // v2.4.11: v2.4-Verifier AN — füllt das SNR-Log (_v24Log → Session-JSON
+        // v24_verifier_log). OHNE diesen Schritt bleibt das Log leer und die
+        // offline Schwellen-Kalibrierung (analyze_v24_session.py) ist unmöglich.
+        setChk('chkV24Precision', true);
+        if (typeof _v24Log !== 'undefined') _v24Log.length = 0;   // sauberer Start
+        window._v24UseAvg = true;                                 // Frame-Mittelung an
+        return {ok:true, msg:'Gesetzt: 🔬 Diagnose AN · ⚙ v2.4-Verifier AN (SNR-Log) · Auto-REC AN · Frozen-Spot AUS · Bestätigung AUS.'};
       } },
 
     { type:'info', title:'Leere Scheibe',
@@ -5578,7 +5584,10 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
         let saved='(Session-Log bitte manuell „💾 Session-Log speichern")';
         try { if (typeof saveSessionJson==='function'){ saveSessionJson(); saved='✓ Session-Log gespeichert.'; } } catch(e){ saved='⚠ Save: '+e.message; }
         let n=0; try{ n = window.tpBridge.getDetCaptureCount(); }catch(_){}
-        return {ok:true, msg: saved+' · Detection-Frames: '+n};
+        // v2.4.11: SNR-Log-Kontrolle — wenn 0, lief der Verifier NICHT (Daten unbrauchbar!)
+        let v24n = (typeof _v24Log!=='undefined') ? _v24Log.length : -1;
+        let v24msg = v24n > 0 ? ('✓ v2.4-SNR-Log: '+v24n+' Kandidaten') : '⚠ v2.4-SNR-Log LEER — Verifier lief nicht!';
+        return {ok:true, msg: saved+' · Detection-Frames: '+n+' · '+v24msg};
       } },
 
     { type:'info', title:'Ground-Truth festhalten',
@@ -5586,8 +5595,8 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
       sub:'Diese physische Wahrheit ist die einzige unabhängige Validierung gegen die App-Erkennung. Detframes + Snapshots + _meta liegen schon auf dem Tablet — daraus wird die Detection offline ausgewertet.' },
 
     { type:'info', title:'Fertig ✓ — alles autark gespeichert',
-      text:'Auf dem Tablet liegen jetzt (offline-auswertbar): Detection-Frames (Live, ~4 Hz), pro Treffer ein Screenshot (Live + Overlay), _meta.json (Kalibrierung/Geometrie) und das Session-Log. Pfad: /Android/data/de.bmcservice.trefferpoint/files/detframes/<session>/ und /Download/.',
-      sub:'Notieren: Anzahl real abgegebener Schüsse, Lichtbedingungen, Cam-/Spektiv-Position. Scheibe mitnehmen + fotografieren. Dann „Abbrechen". Auswertung erfolgt offline aus den Tablet-Daten + Scheiben-Foto.' },
+      text:'Auf dem Tablet liegen jetzt (offline-auswertbar): Detection-Frames (Live, ~4 Hz), pro Treffer ein Screenshot (Live + Overlay), _meta.json (Kalibrierung/Geometrie), das Session-Log MIT v2.4-SNR-Log (v24_verifier_log) und die Scheibe als Ground-Truth. Pfad: /Android/data/de.bmcservice.trefferpoint/files/detframes/<session>/ und /Download/.',
+      sub:'Notieren: Anzahl real abgegebener Schüsse, Lichtbedingungen, Cam-/Spektiv-Position. Bei ZWEI Kameras (USB + ETF150): je einen kompletten Durchlauf, Scheiben UNTERSCHIEDLICH nummerieren (z.B. „USB-1", „ETF-1"). Scheiben mitnehmen + fotografieren. Auswertung offline aus Tablet-Daten + Foto.' },
   ];
 
   let idx = 0, busy = false;
