@@ -1261,7 +1261,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.12';
+const APP_VERSION = '2.4.13';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3673,17 +3673,20 @@ function runDetection() {
         });
     }
 
-    frozenSpotTrack(candidateCx, candidateCy);
-    // v2.3.183 KERNFIX: Frozen-Spot WAR im Diag-Modus IMMER aus → 13 Spots gelernt,
-    // aber nicht geblockt → Cluster B Session 2026-05-29 lieferte 11 statt 5 Hits.
-    // Neu: Filter auch im Diag-Modus aktiv (außer chkFrozenSpot=AUS), aber Block
-    // wird als 'frozen_spot' geloggt damit der raw_candidate-Stream weiter sichtbar
-    // bleibt. Damit liefern Diag-Sessions wieder belastbare Trainingsdaten.
+    // v2.4.12: Frozen-Spot KOMPLETT an chkFrozenSpot koppeln. Vorher lief
+    // frozenSpotTrack() immer (auch bei AUS) → lernte Spots + meldete „wird ab jetzt
+    // ignoriert", obwohl mit AUS gar nichts geblockt wird (Befund Trailrun 2026-06-03:
+    // 2 gelernt / 0 geblockt + irreführende GUI-Meldung). Mit dem v2.4-Verifier ist
+    // Frozen-Spot ohnehin obsolet (SNR filtert Decode-Artefakte an der Wurzel). Nur
+    // noch lernen+blocken wenn der User es bewusst aktiviert.
     const _fsOptIn = (function(){ const e=document.getElementById('chkFrozenSpot'); return !e || e.checked; })();
-    if (_fsOptIn && frozenSpotCheck(candidateCx, candidateCy)) {
-        logRejected('frozen_spot', { x: Math.round(candidateCx), y: Math.round(candidateCy), diag: isDiagMode() });
-        pendingHit = null;
-        return;
+    if (_fsOptIn) {
+        frozenSpotTrack(candidateCx, candidateCy);
+        if (frozenSpotCheck(candidateCx, candidateCy)) {
+            logRejected('frozen_spot', { x: Math.round(candidateCx), y: Math.round(candidateCy), diag: isDiagMode() });
+            pendingHit = null;
+            return;
+        }
     }
 
     // v2.3.168: 3-Frame-Bestätigung (vorher 2-Frame).
