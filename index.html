@@ -1205,6 +1205,15 @@
                     <input type="checkbox" id="chkV24Precision" style="margin:0">
                     ⚙ v2.4-Präzision (experimentell, Verifier)
                 </label>
+                <!-- v2.4.15: Online-Stufen-Detektor (ersetzt die feste-Referenz-Pipeline).
+                     Validiert: USB-leer→0 Phantome, ETF150-scharf→4/5. Braucht STABILES Bild
+                     (kein Kunstlicht-Flimmern → 10ms-Belichtung). Erkennt Schüsse auf Ziffern. -->
+                <label style="font-size:11px;color:#7d7;
+                    font-family:'Share Tech Mono',monospace;display:flex;align-items:center;gap:6px;margin-top:5px"
+                    title="Stufen-Detektion: erkennt einen Schuss als plötzlichen, bleibenden lokalen Helligkeitssprung. Ignoriert aufgedruckte Ringziffern + Drift. Ersetzt die alte Pipeline. Default aus.">
+                    <input type="checkbox" id="chkStepDetect" style="margin:0">
+                    🎯 Stufen-Detektion (v2, ersetzt alte Pipeline)
+                </label>
                 <div id="diagStatus" style="font-size:10px;color:var(--text-dim);
                     font-family:'Share Tech Mono',monospace;margin-top:3px"></div>
                 <!-- v2.3.184: Q-Drift-Banner — wird sichtbar wenn Cal vermutlich verschoben.
@@ -1261,7 +1270,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.14';
+const APP_VERSION = '2.4.15';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2912,6 +2921,9 @@ function loop() {
             console.error('[v2.3.168] ImageData-Create fehlgeschlagen:', e);
         }
         refAccum = null; refAccumSamples = 0;
+    } else if (detecting && calib && cooldown <= 0 &&
+               document.getElementById('chkStepDetect') && document.getElementById('chkStepDetect').checked) {
+        runStepDetection();   // v2.4.15: Stufen-Detektor (braucht keine feste Referenz, baut eigene Baseline)
     } else if (detecting && refFrame && calib && cooldown <= 0) {
         runDetection();
     }
@@ -3522,6 +3534,54 @@ function runV24Verify(cx, cy, cur) {
         if (debugMode) console.warn('[v2.4.10] runV24Verify Fehler:', e);
         return { ok:false, fallback:true };
     }
+}
+
+// ── v2.4.15: Online-Stufen-Detektor-Pfad (opt-in chkStepDetect) ──────────────
+// Ersetzt im Loop die feste-Referenz-Pipeline. Läuft gedrosselt ~5 Hz (wie die
+// Offline-Validierung @ ~4 Hz). Kamera-agnostisch (getDetectionImageData).
+let _stepState = null;
+let _stepLastMs = 0;
+function resetStepState(){ _stepState = null; _stepLastMs = 0; }
+function runStepDetection() {
+    const now = performance.now();
+    if (now - _stepLastMs < 180) return;   // ~5 Hz Drossel
+    _stepLastMs = now;
+    if (!window.TPStep || !window.TPDetect || !calib) return;
+    const cur = getDetectionImageData();
+    if (!cur) return;
+    if (!_stepState) _stepState = window.TPStep.createState();
+    const W = cur.width, H = cur.height;
+    const gray = window.TPDetect.imageDataToGray(cur).gray;
+    const sp = { cx: calib.cx, cy: calib.cy, r: calib.a };
+    const params = { alpha: (window._stepAlpha!=null?window._stepAlpha:0.06),
+                     thr:   (window._stepThr!=null?window._stepThr:13),
+                     K:     (window._stepK!=null?window._stepK:3), rmin: 0.38 };
+    let got;
+    try { got = window.TPStep.stepFrame(gray, W, H, sp, params, _stepState, hits); }
+    catch(e){ if(debugMode) console.warn('[v2.4.15] stepFrame:', e); return; }
+    for (const g of got) { try { scoreAndCommitStep(g.x, g.y); } catch(e){} }
+}
+// Ring-Berechnung + Commit für einen Stufen-Treffer (repliziert runDetection-Logik)
+function scoreAndCommitStep(cx, cy) {
+    const disc = DISCS[document.getElementById('discSel').value] || DISCS.kk25;
+    const dx = cx - calib.cx, dy = cy - calib.cy;
+    const cosA = Math.cos(-calib.angle), sinA = Math.sin(-calib.angle);
+    const rx = cosA*dx - sinA*dy, ry = sinA*dx + cosA*dy;
+    const normDist = Math.sqrt((rx/calib.a)*(rx/calib.a) + (ry/calib.b)*(ry/calib.b));
+    const distMm = normDist * Math.sqrt(calib.a * calib.b) / calib.pxPerMm;
+    const scoreDist = distMm - disc.kaliber / 2;
+    let ring = 0;
+    for (const rng of disc.ringe) { if (scoreDist <= rng.radius) { ring = rng.r; break; } }
+    const _minRing = disc.minRing || 1;
+    if (ring === 0 || ring < _minRing) { logRejected('below_min_ring', { x: Math.round(cx), y: Math.round(cy), ring }); return; }
+    const exclPx = calib.pxPerMm * disc.kaliber * 3;
+    if (hits.some(h => { const a=h.x-cx, b=h.y-cy; return a*a+b*b < exclPx*exclPx; })) {
+        logRejected('spatial_exclusion', { x: Math.round(cx), y: Math.round(cy), ring }); return;
+    }
+    const ringDec = ringMitZehntel(scoreDist, ring, disc);
+    const ringLabel = ringDec.toFixed(1);
+    const deg = hitDeg(cx, cy);
+    tryCommitHit({ cx, cy, ringDec, ringLabel, distMm, deg });
 }
 
 function runDetection() {
@@ -4405,6 +4465,7 @@ function resetSession() {
     // v2.4.14 (Codex-Review #2/#5): v2.4-Verifier-State mit zurücksetzen, damit eine
     // Folge-Session weder alte Ring-Frames mittelt noch ein gemischtes SNR-Log speichert.
     if (typeof _v24Ring !== 'undefined') _v24Ring.length = 0;
+    if (typeof resetStepState === 'function') resetStepState();   // v2.4.15: frische Baseline
     if (typeof _v24Log !== 'undefined') _v24Log.length = 0;
     if (window.speechSynthesis) speechSynthesis.cancel();
     document.getElementById('hitList').innerHTML = '';
@@ -5394,6 +5455,7 @@ document.getElementById('btnDetect').addEventListener('click', () => {
         setStatus(warming ? 'Referenz stabilisiert sich…' : 'Erkennung aktiv', warming ? 'warn' : 'hot');
         setMsg('');
         spiegelBtn.disabled = false;
+        if (typeof resetStepState === 'function') resetStepState();   // v2.4.15: frische Stufen-Baseline pro Start
         // v2.3.146: Auto-REC starten falls aktiv und ETF150 verbunden
         try { sessionRecMaybeStart(); } catch(e) { console.warn(e); }
         // v2.3.173 Ebene-1: bei Diagnose-Modus Detection-Input-Capture starten
@@ -7419,6 +7481,49 @@ function streamDetect(ref,post,W,H,sp,kalMm,opts){
 function imageDataToGray(img){ const d=img.data,W=img.width,H=img.height,g=new Float32Array(W*H);
   for(let i=0,p=0;i<W*H;i++,p+=4)g[i]=0.299*d[p]+0.587*d[p+1]+0.114*d[p+2]; return {gray:g,W,H}; }
 window.TPDetect={ registerTranslation, detectOnDiff, streamDetect, imageDataToGray, _version:'2.4.0' };
+})();
+</script>
+<!-- ════════════════════════════════════════════════════════════════════════
+     TPStep — Online-Stufen-Detektor v1 (kamera-agnostisch).
+     Validiert offline: USB-leer→0 Phantome, ETF150-scharf→4/5. Prinzip: pro Ort
+     Baseline-EMA der Center-Surround-Antwort; neues Loch = plötzlicher Sprung,
+     PERSISTENT über K Frames → Treffer. Ziffern konstant (in Baseline → kein
+     Phantom). Drift langsam (Baseline folgt). Erkennt Schüsse AUF Ziffern (keine
+     Maskierung). VORAUSSETZUNG: stabiles Bild (kein Kunstlicht-Flimmern).
+     ════════════════════════════════════════════════════════════════════════ -->
+<script>
+(function(){
+'use strict';
+function integral(arr,W,H){const I=new Float64Array((W+1)*(H+1));for(let y=0;y<H;y++){let rs=0;for(let x=0;x<W;x++){rs+=arr[y*W+x];I[(y+1)*(W+1)+(x+1)]=I[y*(W+1)+(x+1)]+rs;}}return I;}
+function boxMeanMap(arr,W,H,rad){const I=integral(arr,W,H),Wp=W+1,out=new Float32Array(W*H);for(let y=0;y<H;y++){const y0=Math.max(0,y-rad),y1=Math.min(H-1,y+rad);for(let x=0;x<W;x++){const x0=Math.max(0,x-rad),x1=Math.min(W-1,x+rad);const s=I[(y1+1)*Wp+(x1+1)]-I[y0*Wp+(x1+1)]-I[(y1+1)*Wp+x0]+I[y0*Wp+x0];out[y*W+x]=s/((x1-x0+1)*(y1-y0+1));}}return out;}
+function csMap(gray,W,H){const small=boxMeanMap(gray,W,H,1),large=boxMeanMap(gray,W,H,5),out=new Float32Array(W*H);for(let i=0;i<W*H;i++)out[i]=small[i]-large[i];return out;}
+function createState(){return {base:null,pend:new Map(),W:0,H:0};}
+function stepFrame(gray,W,H,sp,params,state,hits){
+  const alpha=params.alpha,thr=params.thr,K=params.K,rmin=params.rmin;
+  const cs=csMap(gray,W,H);
+  if(!state.base||state.W!==W||state.H!==H){state.base=cs;state.W=W;state.H=H;state.pend.clear();return [];}
+  const base=state.base,cx=sp.cx,cy=sp.cy,a=sp.r,aIn=a*0.93,aOut=a*2.4;
+  const sig=new Float32Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x,dd=Math.hypot(x-cx,y-cy),D=cs[i]-base[i];if(dd<aIn)sig[i]=D>0?D:0;else if(dd<aOut)sig[i]=D<0?-D:0;}
+  const sm=boxMeanMap(sig,W,H,1),out=[],seen=new Set();
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){
+    const v=sm[y*W+x];if(v<thr)continue;
+    let mx=true;for(let dy=-2;dy<=2&&mx;dy++)for(let dx=-2;dx<=2;dx++){if(sm[(y+dy)*W+(x+dx)]>v){mx=false;break;}}
+    if(!mx)continue;
+    let sxx=0,syy=0,sxy=0,sw=0;
+    for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){const yy=y+dy,xx=x+dx;if(yy<0||yy>=H||xx<0||xx>=W)continue;if(sm[yy*W+xx]>v*0.4){sxx+=dx*dx;syy+=dy*dy;sxy+=dx*dy;sw++;}}
+    if(sw<3)continue;sxx/=sw;syy/=sw;sxy/=sw;
+    const tr=sxx+syy,det=sxx*syy-sxy*sxy,disc=Math.sqrt(Math.max(0,tr*tr/4-det)),e1=tr/2-disc,e2=tr/2+disc,rnd=e2>1e-6?e1/e2:0;
+    if(rnd<rmin)continue;
+    const key=(Math.round(x/5))+','+(Math.round(y/5));seen.add(key);
+    const c=(state.pend.get(key)||0)+1;state.pend.set(key,c);
+    if(c>=K){const ex=(a*0.12)*(a*0.12);const tooClose=hits.some(h=>{const dx2=h.x-x,dy2=h.y-y;return dx2*dx2+dy2*dy2<ex;})||out.some(h=>{const dx2=h.x-x,dy2=h.y-y;return dx2*dx2+dy2*dy2<ex;});if(!tooClose){const dd=Math.hypot(x-cx,y-cy);out.push({x,y,zone:dd<aIn?'in':'out'});}}
+  }
+  for(const key of state.pend.keys()){if(!seen.has(key)){const c=state.pend.get(key)-1;if(c<=0)state.pend.delete(key);else state.pend.set(key,c);}}
+  for(let i=0;i<W*H;i++)base[i]=(1-alpha)*base[i]+alpha*cs[i];
+  return out;
+}
+window.TPStep={createState,stepFrame,csMap,_version:'1.0'};
 })();
 </script>
 </body>

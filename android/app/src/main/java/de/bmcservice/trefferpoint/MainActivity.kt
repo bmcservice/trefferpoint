@@ -463,15 +463,18 @@ class MainActivity : AppCompatActivity() {
             return
         }
         aeStable = 0
+        // v2.4.15 (Stand-Befund 2026-06-05): Belichtung NUR in 10ms-Schritten regeln, damit
+        // sie immer ein Vielfaches von 10ms bleibt → flicker-sicher bei 50Hz-Netz (100Hz-Licht,
+        // 10ms-Periode). Vorher erzeugten 25ms-Schritte Werte wie 95/145ms → wanderndes Banding
+        // ("Flimmern" am Stand). Feinhelligkeit läuft über Gain.
         if (ymean < lo) {
-            // zu dunkel: erst Exposure hoch (bis 140ms), dann Gain (bis 200)
-            if (aeExp < 140) aeExp = (aeExp + 25).coerceAtMost(140)
+            if (aeExp < 140) aeExp = (aeExp + 20).coerceAtMost(140)       // 10ms-Raster
             else if (aeGain < 200) aeGain = (aeGain + 30).coerceAtMost(200)
         } else {
-            // zu hell: erst Gain runter (bis 40), dann Exposure (bis 20ms)
             if (aeGain > 40) aeGain = (aeGain - 30).coerceAtLeast(40)
-            else if (aeExp > 20) aeExp = (aeExp - 20).coerceAtLeast(20)
+            else if (aeExp > 20) aeExp = (aeExp - 20).coerceAtLeast(20)   // 10ms-Raster
         }
+        aeExp = (aeExp / 10) * 10  // hart aufs 10ms-Raster schnappen (Sicherheit)
         try {
             uvc.setAutoExposureMode(1)               // MANUAL
             uvc.setExposureTimeAbsolute(aeExp * 10)  // UVC-Units = 0.1ms
