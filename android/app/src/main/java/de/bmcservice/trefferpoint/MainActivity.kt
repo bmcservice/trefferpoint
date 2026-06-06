@@ -498,6 +498,23 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             AppLog.w(TAG, "UVC: setWhiteBalanceAuto nicht unterstützt: ${e.message}")
         }
+        // v2.4.16 (Stand-Befund 2026-06-06): USB-Cam zeigte starkes 100Hz-Banding
+        // (Band-Bewegung 6.3–6.9 vs ETF150 0.15), das der reine 10ms-Belichtungs-Snap
+        // NICHT killte. Der eigentliche Hebel ist die UVC-Anti-Flicker-Control
+        // (PU_POWER_LINE_FREQUENCY). Default der Cam war offenbar 60Hz/Auto → residuales
+        // Banding am 50Hz-Netz. Hart auf 50Hz (UVC-Wert 1) setzen.
+        try {
+            if (uvc.isPowerlineFrequencyEnable) {
+                uvc.updatePowerlineFrequencyLimit()
+                val was = try { uvc.powerlineFrequency } catch (_: Exception) { -1 }
+                uvc.powerlineFrequency = 1   // 0=aus 1=50Hz 2=60Hz 3=auto
+                AppLog.i(TAG, "UVC: Anti-Flicker → 50Hz gesetzt (war $was)")
+            } else {
+                AppLog.w(TAG, "UVC: PowerlineFrequency-Control nicht unterstützt")
+            }
+        } catch (e: Exception) {
+            AppLog.w(TAG, "UVC: setPowerlineFrequency nicht unterstützt: ${e.message}")
+        }
         // Belichtung: Manual-Mode + kalibrierte Startwerte (mean~120 @ Heim-Licht).
         // Danach übernimmt regulateExposure() die Feinregelung auf das Zielband.
         // Ersetzt das frühere `setGain(uvc.gain)` — das fror im AGC-Modus gain=0 ein (dunkles Bild).
