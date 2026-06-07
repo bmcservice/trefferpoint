@@ -1214,6 +1214,15 @@
                     <input type="checkbox" id="chkStepDetect" style="margin:0">
                     🎯 Stufen-Detektion (v2, ersetzt alte Pipeline)
                 </label>
+                <!-- v2.4.19 Phase 3: validierter Shadow-Detektor als PRIMÄR. Confident-Treffer
+                     (Score>=Schwelle) werden als echte Treffer committet; schwache nur geloggt.
+                     4-Session-Korpus (LOO): ~44% Recall bei 0 Phantomen. App-alt = 0%. -->
+                <label style="font-size:11px;color:#fc6;
+                    font-family:'Share Tech Mono',monospace;display:flex;align-items:center;gap:6px;margin-top:5px"
+                    title="Validierter Detektor (Korpus-getestet). Zeigt sichere Treffer (phantomfrei), schwache bleiben im Log. Empfohlen.">
+                    <input type="checkbox" id="chkShadowPrimary" style="margin:0">
+                    ✅ Detektor v3 (validiert, primär · ~44% sicher, 0 Phantome)
+                </label>
                 <div id="diagStatus" style="font-size:10px;color:var(--text-dim);
                     font-family:'Share Tech Mono',monospace;margin-top:3px"></div>
                 <!-- v2.3.184: Q-Drift-Banner — wird sichtbar wenn Cal vermutlich verschoben.
@@ -1270,7 +1279,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.18';
+const APP_VERSION = '2.4.19';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2924,11 +2933,12 @@ function loop() {
     } else if (detecting && calib && cooldown <= 0 &&
                document.getElementById('chkStepDetect') && document.getElementById('chkStepDetect').checked) {
         runStepDetection();   // v2.4.15: Stufen-Detektor (braucht keine feste Referenz, baut eigene Baseline)
-    } else if (detecting && refFrame && calib && cooldown <= 0) {
-        runDetection();
+    } else if (detecting && refFrame && calib && cooldown <= 0 &&
+               !(document.getElementById('chkShadowPrimary') && document.getElementById('chkShadowPrimary').checked)) {
+        runDetection();   // alte Pipeline NUR wenn v3 NICHT primär (sonst doppelte/Phantom-Commits)
     }
-    // v2.4.17: Shadow-Detektor läuft IMMER mit (loggt nur, triggert nichts) — unabhängig
-    // vom aktiven Detektor und ohne feste Referenz (eigene EMA-Baseline).
+    // v2.4.17/19: Shadow-Detektor läuft IMMER mit — loggt; bei aktivem „Detektor v3" committet er
+    // zusätzlich die confident-Treffer. Eigene EMA-Baseline (keine feste Referenz nötig).
     if (detecting && calib) { try { runShadowDetection(); } catch(e){} }
     if (cooldown > 0) cooldown--;
 
@@ -3628,7 +3638,12 @@ function runShadowDetection(){
     let got;
     try { got = window.TPShadow.processFrame(gray, cur.width, cur.height, sp, params, _shadowState); }
     catch(e){ if (typeof debugMode!=='undefined' && debugMode) console.warn('[v2.4.17 shadow]', e); return; }
+    // v2.4.19 Phase 3: validierter Detektor PRIMÄR — confident-Kandidaten als echte Treffer committen.
+    // Schwelle datengetrieben aus 4-Session-Korpus (≥25 = 0 Phantome). Schwache bleiben nur im Log.
+    const _shPrimary = document.getElementById('chkShadowPrimary') && document.getElementById('chkShadowPrimary').checked;
+    const _shConf = (window._shadowConf != null ? window._shadowConf : 25);
     for (const g of got){
+        if (_shPrimary && g.score >= _shConf) { try { scoreAndCommitStep(g.x, g.y); } catch(e){} }
         let ring=null, distMm=null;
         try {
             const disc = DISCS[document.getElementById('discSel').value] || DISCS.kk25;
@@ -5675,6 +5690,7 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
         // v24_verifier_log). OHNE diesen Schritt bleibt das Log leer und die
         // offline Schwellen-Kalibrierung (analyze_v24_session.py) ist unmöglich.
         setChk('chkV24Precision', true);
+        setChk('chkShadowPrimary', true);   // v2.4.19: validierten Detektor v3 als primär aktivieren
         if (typeof _v24Log !== 'undefined') _v24Log.length = 0;   // sauberer Start
         window._v24UseAvg = true;                                 // Frame-Mittelung an
         return {ok:true, msg:'Gesetzt: 🔬 Diagnose AN · ⚙ v2.4-Verifier AN (SNR-Log) · Auto-REC AN · Frozen-Spot AUS · Bestätigung AUS.'};

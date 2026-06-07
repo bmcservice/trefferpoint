@@ -20,11 +20,12 @@
       "gt_holes": [[1007,520],[1070,439],[1158,466],[1065,383],[1262,264]]
     }
   },
-  "scorecard_2026-06-07": {
-    "tolerance_px": 30,
-    "confident_threshold": 30,
-    "A": {"app": "0/5 (+4 Phantome)", "shadow_t30": "3/5 (+0)", "hole_scores": [94,35,31,"miss","miss"]},
-    "B": {"app": "0/5 (+5 Phantome)", "shadow_t30": "1/5 (+0)", "hole_scores": [132,20,19,15,"miss"]},
-    "befund": "App 0/10. Shadow @30: 4/10 bei 0 Phantomen (100% Praezision). Phantom-Band reicht bis ~29; schwache Treffer (Score 15-20) liegen darin -> per Score nicht trennbar = SNR-limitiert."
+  "scorecard_4session_2026-06-07": {
+    "sessions": ["A","B","0603","0606"], "echte_treffer_gesamt": 18, "tolerance_px": 30,
+    "TP_scores": {"A":[88,18,15,15],"B":[120,20,17,16],"0603":[109,48,28,25],"0606":[101,30]},
+    "global_sweep": {"T15":"13/18 +19ph","T20":"8/18 +3ph","T25":"8/18 (44%) +0ph","T30":"5/18 +0ph"},
+    "leave_one_out": "9/18 (50%) +5ph (T* je 18-24, Phantom-Band schwankt -> B braucht hoehere Schwelle)",
+    "confident_threshold": 25,
+    "befund": "Starke Treffer (~80-120) in ALLEN 4 sicher. Confident @25: 44% Recall, 0 Phantome ueber alle 4. ~1 Loch/Session gar nicht erfasst + schwache (15-20) im Phantom-Band = SNR-Decke. Detektor ~44% sicher vs App 0%."
   }
 }
