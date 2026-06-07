@@ -1,0 +1,30 @@
+{
+  "_comment": "TrefferPoint GT-Korpus. Lochpositionen in VOLL-Auflösung (Detframe-Pixel), vom Schützen an der physischen Scheibe markiert (gt_mark.html). Kalibrierung je Session aus _meta.json.",
+  "sessions": {
+    "A_2026-06-07": {
+      "folder": "1780821347685_kk25",
+      "session_json": "sessions/2026-06-07_stand/tp_session_202606070835536_kk25.json",
+      "calib": {"cx": 1214, "cy": 506, "a": 231, "pxPerMm": 2.31},
+      "detektor_modus": "normal",
+      "kaliber": "kk25 (.22)",
+      "schuss": 5,
+      "gt_holes": [[1048,762],[1018,594],[1019,404],[1320,501],[1330,506]]
+    },
+    "B_2026-06-07": {
+      "folder": "1780825379534_kk25",
+      "session_json": "sessions/2026-06-07_stand/tp_session_202606070943044_kk25.json",
+      "calib": {"cx": 1072, "cy": 496, "a": 231, "pxPerMm": 2.305},
+      "detektor_modus": "v2",
+      "kaliber": "kk25 (.22)",
+      "schuss": 5,
+      "gt_holes": [[1007,520],[1070,439],[1158,466],[1065,383],[1262,264]]
+    }
+  },
+  "scorecard_2026-06-07": {
+    "tolerance_px": 30,
+    "confident_threshold": 30,
+    "A": {"app": "0/5 (+4 Phantome)", "shadow_t30": "3/5 (+0)", "hole_scores": [94,35,31,"miss","miss"]},
+    "B": {"app": "0/5 (+5 Phantome)", "shadow_t30": "1/5 (+0)", "hole_scores": [132,20,19,15,"miss"]},
+    "befund": "App 0/10. Shadow @30: 4/10 bei 0 Phantomen (100% Praezision). Phantom-Band reicht bis ~29; schwache Treffer (Score 15-20) liegen darin -> per Score nicht trennbar = SNR-limitiert."
+  }
+}

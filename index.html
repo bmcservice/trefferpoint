@@ -1270,7 +1270,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.17';
+const APP_VERSION = '2.4.18';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -3595,6 +3595,9 @@ let _shadowLog = [];
 let _shadowState = null;
 let _shadowLastMs = 0;
 function resetShadow(){ _shadowState = null; _shadowLastMs = 0; _shadowLog.length = 0; }
+// v2.4.18 Stabilitäts-Wächter: erkennt eingefrorenen Stream (06-06-Bug) + Bewegung/Stoß (C).
+let _stab = null;
+function resetStab(){ _stab = {prev:null, frozenRun:0, frames:0, frozen:0, disturbed:0, maxFrozen:0, lastWarnMs:0}; }
 function runShadowDetection(){
     const now = performance.now();
     if (now - _shadowLastMs < 180) return;   // ~5 Hz (wie Offline-Validierung)
@@ -3604,6 +3607,23 @@ function runShadowDetection(){
     if (!_shadowState) _shadowState = window.TPShadow.createState();
     const gray = window.TPDetect.imageDataToGray(cur).gray;
     const sp = { cx: calib.cx, cy: calib.cy, r: calib.a };
+    // v2.4.18 Stabilitäts-Wächter: globaler Frame-Sprung über dem Spiegel (grobes Raster, billig).
+    try {
+        if (!_stab) resetStab();
+        const W=cur.width, Hh=cur.height, cx=calib.cx, cy=calib.cy, rr=(calib.a*1.05)*(calib.a*1.05);
+        const samp=[];
+        for (let y=0;y<Hh;y+=8){ const dy=y-cy; for (let x=0;x<W;x+=8){ const dx=x-cx; if (dx*dx+dy*dy<rr) samp.push(gray[y*W+x]); } }
+        if (_stab.prev && _stab.prev.length===samp.length){
+            let s=0; for (let i=0;i<samp.length;i++) s+=Math.abs(samp[i]-_stab.prev[i]);
+            const D=s/Math.max(1,samp.length);
+            _stab.frames++;
+            if (D<0.3){ _stab.frozen++; _stab.frozenRun++; if (_stab.frozenRun>_stab.maxFrozen) _stab.maxFrozen=_stab.frozenRun; }
+            else { _stab.frozenRun=0; if (D>3.5) _stab.disturbed++; }
+            if (_stab.frozenRun>=3 && now-_stab.lastWarnMs>2000){ _stab.lastWarnMs=now;
+                try { setMsg('⚠ Stream steht still (eingefroren) — Treffer werden evtl. nicht erfasst'); } catch(e){} }
+        }
+        _stab.prev=samp;
+    } catch(e){}
     const params = { alpha:0.05, thr:10, K:4, gate:3.5, amin:3, amax:60, rmin:0.40 };
     let got;
     try { got = window.TPShadow.processFrame(gray, cur.width, cur.height, sp, params, _shadowState); }
@@ -4509,6 +4529,7 @@ function resetSession() {
     if (typeof _v24Ring !== 'undefined') _v24Ring.length = 0;
     if (typeof resetStepState === 'function') resetStepState();   // v2.4.15: frische Baseline
     if (typeof resetShadow === 'function') resetShadow();         // v2.4.17: Shadow-Log/Baseline frisch
+    if (typeof resetStab === 'function') resetStab();             // v2.4.18: Stabilitäts-Statistik frisch
     if (typeof _v24Log !== 'undefined') _v24Log.length = 0;
     if (window.speechSynthesis) speechSynthesis.cancel();
     document.getElementById('hitList').innerHTML = '';
@@ -5500,6 +5521,7 @@ document.getElementById('btnDetect').addEventListener('click', () => {
         spiegelBtn.disabled = false;
         if (typeof resetStepState === 'function') resetStepState();   // v2.4.15: frische Stufen-Baseline pro Start
         if (typeof resetShadow === 'function') resetShadow();         // v2.4.17: frische Shadow-Baseline + Log pro Start
+        if (typeof resetStab === 'function') resetStab();             // v2.4.18: Stabilitäts-Statistik pro Start
         // v2.3.146: Auto-REC starten falls aktiv und ETF150 verbunden
         try { sessionRecMaybeStart(); } catch(e) { console.warn(e); }
         // v2.3.173 Ebene-1: bei Diagnose-Modus Detection-Input-Capture starten
@@ -6880,7 +6902,10 @@ function saveSessionJson() {
         v24_snr_commit: (typeof window._v24SnrCommit !== 'undefined' ? window._v24SnrCommit : null),
         // v2.4.17: Shadow-Detektor-Kandidaten (validierter Referenz-Detektor, loggt still).
         // Offline gegen Scheibenfoto scoren → Live-Bestätigung der Golden-Baseline.
-        shadow_log: (typeof _shadowLog !== 'undefined' ? _shadowLog : [])
+        shadow_log: (typeof _shadowLog !== 'undefined' ? _shadowLog : []),
+        // v2.4.18: Stabilitäts-Statistik (Freeze/Bewegung) — Serie unbrauchbar wenn frozen/disturbed hoch.
+        stability: (typeof _stab !== 'undefined' && _stab) ? { frames:_stab.frames, frozen:_stab.frozen,
+            disturbed:_stab.disturbed, max_frozen_run:_stab.maxFrozen } : null
     };
     const jsonText = JSON.stringify(data, null, 2);
     const ts = new Date(recSession.startMs).toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
