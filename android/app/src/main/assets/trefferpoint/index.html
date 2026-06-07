@@ -1270,7 +1270,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.16';
+const APP_VERSION = '2.4.17';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -2927,6 +2927,9 @@ function loop() {
     } else if (detecting && refFrame && calib && cooldown <= 0) {
         runDetection();
     }
+    // v2.4.17: Shadow-Detektor läuft IMMER mit (loggt nur, triggert nichts) — unabhängig
+    // vom aktiven Detektor und ohne feste Referenz (eigene EMA-Baseline).
+    if (detecting && calib) { try { runShadowDetection(); } catch(e){} }
     if (cooldown > 0) cooldown--;
 
     rafId = requestAnimationFrame(loop);
@@ -3582,6 +3585,45 @@ function scoreAndCommitStep(cx, cy) {
     const ringLabel = ringDec.toFixed(1);
     const deg = hitDeg(cx, cy);
     tryCommitHit({ cx, cy, ringDec, ringLabel, distMm, deg });
+}
+
+// ── v2.4.17: SHADOW-MODE des validierten Referenz-Detektors ──────────────────
+// Läuft IMMER mit wenn detektiert wird (unabhängig vom aktiven Detektor). Loggt
+// Kandidaten still nach _shadowLog → Session-JSON (shadow_log). Triggert/zeigt NICHTS.
+// Config = sessions/reference_detector.py (2 GT-Sessions validiert).
+let _shadowLog = [];
+let _shadowState = null;
+let _shadowLastMs = 0;
+function resetShadow(){ _shadowState = null; _shadowLastMs = 0; _shadowLog.length = 0; }
+function runShadowDetection(){
+    const now = performance.now();
+    if (now - _shadowLastMs < 180) return;   // ~5 Hz (wie Offline-Validierung)
+    _shadowLastMs = now;
+    if (!window.TPShadow || !window.TPDetect || !calib) return;
+    const cur = getDetectionImageData(); if (!cur) return;
+    if (!_shadowState) _shadowState = window.TPShadow.createState();
+    const gray = window.TPDetect.imageDataToGray(cur).gray;
+    const sp = { cx: calib.cx, cy: calib.cy, r: calib.a };
+    const params = { alpha:0.05, thr:10, K:4, gate:3.5, amin:3, amax:60, rmin:0.40 };
+    let got;
+    try { got = window.TPShadow.processFrame(gray, cur.width, cur.height, sp, params, _shadowState); }
+    catch(e){ if (typeof debugMode!=='undefined' && debugMode) console.warn('[v2.4.17 shadow]', e); return; }
+    for (const g of got){
+        let ring=null, distMm=null;
+        try {
+            const disc = DISCS[document.getElementById('discSel').value] || DISCS.kk25;
+            const dx=g.x-calib.cx, dy=g.y-calib.cy;
+            const cosA=Math.cos(-calib.angle), sinA=Math.sin(-calib.angle);
+            const rx=cosA*dx - sinA*dy, ry=sinA*dx + cosA*dy;
+            const nd=Math.sqrt((rx/calib.a)*(rx/calib.a)+(ry/calib.b)*(ry/calib.b));
+            distMm=nd*Math.sqrt(calib.a*calib.b)/calib.pxPerMm;
+            const sc=distMm-disc.kaliber/2; for(const rng of disc.ringe){ if(sc<=rng.radius){ring=rng.r;break;} }
+        } catch(e){}
+        _shadowLog.push({ t: Math.round(now), ms: (recSession ? Date.now()-recSession.startMs : null),
+            x: g.x, y: g.y, score: g.score, zone: g.zone, ring: ring,
+            distMm: distMm!=null ? Math.round(distMm*10)/10 : null });
+        if (_shadowLog.length > 2000) _shadowLog.shift();
+    }
 }
 
 function runDetection() {
@@ -4466,6 +4508,7 @@ function resetSession() {
     // Folge-Session weder alte Ring-Frames mittelt noch ein gemischtes SNR-Log speichert.
     if (typeof _v24Ring !== 'undefined') _v24Ring.length = 0;
     if (typeof resetStepState === 'function') resetStepState();   // v2.4.15: frische Baseline
+    if (typeof resetShadow === 'function') resetShadow();         // v2.4.17: Shadow-Log/Baseline frisch
     if (typeof _v24Log !== 'undefined') _v24Log.length = 0;
     if (window.speechSynthesis) speechSynthesis.cancel();
     document.getElementById('hitList').innerHTML = '';
@@ -5456,6 +5499,7 @@ document.getElementById('btnDetect').addEventListener('click', () => {
         setMsg('');
         spiegelBtn.disabled = false;
         if (typeof resetStepState === 'function') resetStepState();   // v2.4.15: frische Stufen-Baseline pro Start
+        if (typeof resetShadow === 'function') resetShadow();         // v2.4.17: frische Shadow-Baseline + Log pro Start
         // v2.3.146: Auto-REC starten falls aktiv und ETF150 verbunden
         try { sessionRecMaybeStart(); } catch(e) { console.warn(e); }
         // v2.3.173 Ebene-1: bei Diagnose-Modus Detection-Input-Capture starten
@@ -6833,7 +6877,10 @@ function saveSessionJson() {
         // (bestSnr) + Entscheidung. Am Stand mit dem Scheibenfoto abgleichen → echt-vs-
         // phantom-SNR-Verteilung → Commit-Schwelle (_v24SnrCommit) datengetrieben setzen.
         v24_verifier_log: (typeof _v24Log !== 'undefined' ? _v24Log : []),
-        v24_snr_commit: (typeof window._v24SnrCommit !== 'undefined' ? window._v24SnrCommit : null)
+        v24_snr_commit: (typeof window._v24SnrCommit !== 'undefined' ? window._v24SnrCommit : null),
+        // v2.4.17: Shadow-Detektor-Kandidaten (validierter Referenz-Detektor, loggt still).
+        // Offline gegen Scheibenfoto scoren → Live-Bestätigung der Golden-Baseline.
+        shadow_log: (typeof _shadowLog !== 'undefined' ? _shadowLog : [])
     };
     const jsonText = JSON.stringify(data, null, 2);
     const ts = new Date(recSession.startMs).toISOString().replace(/[-:.TZ]/g, '').slice(0, 15);
@@ -7524,6 +7571,57 @@ function stepFrame(gray,W,H,sp,params,state,hits){
   return out;
 }
 window.TPStep={createState,stepFrame,csMap,_version:'1.0'};
+})();
+</script>
+<script>
+/* v2.4.17 TPShadow — validierter Referenz-Detektor (Golden Baseline) als SHADOW-MODE.
+   Loggt Kandidaten still mit, ersetzt/triggert NICHTS. Config = sessions/reference_detector.py
+   (gegen 2 GT-Sessions Pappe-geprüft): EMA-CS-Baseline (absorbiert Ziffern-Drift) + Zweizonen
+   + Stör-Gate (Bump/Glitch-Frame überspringen) + Form-Filter (klein+rund) + Persistenz.
+   Läuft auf Halb-Auflösung (wie die Offline-Validierung, SC=2). */
+(function(){
+'use strict';
+function ds2(g,W,H){ const w=W>>1,h=H>>1,o=new Float32Array(w*h);
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){const i=2*y*W+2*x;o[y*w+x]=(g[i]+g[i+1]+g[i+W]+g[i+W+1])*0.25;} return {g:o,w,h}; }
+function integ(a,W,H){ const I=new Float64Array((W+1)*(H+1));
+  for(let y=0;y<H;y++){let rs=0;for(let x=0;x<W;x++){rs+=a[y*W+x];I[(y+1)*(W+1)+(x+1)]=I[y*(W+1)+(x+1)]+rs;}} return I; }
+function boxm(a,W,H,rad){ const I=integ(a,W,H),Wp=W+1,o=new Float32Array(W*H);
+  for(let y=0;y<H;y++){const y0=Math.max(0,y-rad),y1=Math.min(H-1,y+rad);
+    for(let x=0;x<W;x++){const x0=Math.max(0,x-rad),x1=Math.min(W-1,x+rad);
+      o[y*W+x]=(I[(y1+1)*Wp+(x1+1)]-I[y0*Wp+(x1+1)]-I[(y1+1)*Wp+x0]+I[y0*Wp+x0])/((x1-x0+1)*(y1-y0+1));}} return o; }
+function csm(g,W,H){ const s=boxm(g,W,H,1),l=boxm(g,W,H,5),o=new Float32Array(W*H); for(let i=0;i<W*H;i++)o[i]=s[i]-l[i]; return o; }
+function createState(){ return {base:null,prev:null,pend:new Map(),comm:[],W:0,H:0}; }
+function processFrame(gray,Wf,Hf,sp,params,state){
+  const d=ds2(gray,Wf,Hf), g=d.g, W=d.w, H=d.h;
+  const cx=sp.cx/2, cy=sp.cy/2, a=sp.r/2;
+  const ALPHA=params.alpha,T=params.thr,K=params.K,GATE=params.gate,AMIN=params.amin,AMAX=params.amax,RMIN=params.rmin;
+  const cs=csm(g,W,H);
+  if(!state.base||state.W!==W||state.H!==H){ state.base=cs; state.prev=g; state.W=W; state.H=H; state.pend.clear(); state.comm=[]; return []; }
+  let sd=0,sn=0; const aSp=a*1.05;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){ if(Math.hypot(x-cx,y-cy)<aSp){ sd+=Math.abs(g[y*W+x]-state.prev[y*W+x]); sn++; } }
+  const disturbed = sn>0 && (sd/sn)>GATE; state.prev=g;
+  if(disturbed){ for(let i=0;i<W*H;i++)state.base[i]=(1-ALPHA)*state.base[i]+ALPHA*cs[i]; return []; }
+  const base=state.base, sig=new Float32Array(W*H), aIn=a*0.93, aOut=a*2.4;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){ const i=y*W+x,dd=Math.hypot(x-cx,y-cy),Dv=cs[i]-base[i];
+    if(dd<aIn)sig[i]=Dv>0?Dv:0; else if(dd<aOut)sig[i]=Dv<0?-Dv:0; }
+  const sm=boxm(sig,W,H,1), out=[], seen=new Set();
+  for(let y=1;y<H-1;y++)for(let x=1;x<W-1;x++){ const v=sm[y*W+x]; if(v<T)continue;
+    let mx=true; for(let dy=-2;dy<=2&&mx;dy++)for(let dx=-2;dx<=2;dx++){ if(sm[(y+dy)*W+(x+dx)]>v){mx=false;break;} } if(!mx)continue;
+    let sxx=0,syy=0,sxy=0,sw=0;
+    for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){ const yy=y+dy,xx=x+dx; if(yy<0||yy>=H||xx<0||xx>=W)continue; if(sm[yy*W+xx]>v*0.5){sxx+=dx*dx;syy+=dy*dy;sxy+=dx*dy;sw++;} }
+    if(sw<AMIN||sw>AMAX)continue;
+    sxx/=sw;syy/=sw;sxy/=sw; const tr=sxx+syy,dt=sxx*syy-sxy*sxy,disc=Math.sqrt(Math.max(0,tr*tr/4-dt));
+    const e1=tr/2-disc,e2=tr/2+disc,rnd=e2>1e-6?e1/e2:0; if(rnd<RMIN)continue;
+    const key=(x>>2)+','+(y>>2); seen.add(key); const c=(state.pend.get(key)||0)+1; state.pend.set(key,c);
+    if(c>=K){ const ex=(a*0.12)*(a*0.12);
+      const tc=state.comm.some(h=>{const ax=h.x-x,ay=h.y-y;return ax*ax+ay*ay<ex;})||out.some(h=>{const ax=h.x/2-x,ay=h.y/2-y;return ax*ax+ay*ay<ex;});
+      if(!tc){ const dd=Math.hypot(x-cx,y-cy); state.comm.push({x,y}); out.push({x:x*2,y:y*2,score:Math.round(v),zone:dd<aIn?'in':'out'}); } }
+  }
+  for(const key of state.pend.keys()){ if(!seen.has(key)){ const c=state.pend.get(key)-1; if(c<=0)state.pend.delete(key); else state.pend.set(key,c); } }
+  for(let i=0;i<W*H;i++)base[i]=(1-ALPHA)*base[i]+ALPHA*cs[i];
+  return out;
+}
+window.TPShadow={createState,processFrame,_version:'1.0'};
 })();
 </script>
 </body>
