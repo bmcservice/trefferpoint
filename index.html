@@ -1279,7 +1279,7 @@
 //  Leer lassen ('') um Update-Check zu deaktivieren.
 // ================================================================
 const UPDATE_URL = 'https://bmcservice.github.io/trefferpoint'; // z.B. 'https://bertm.github.io/trefferpoint'
-const APP_VERSION = '2.4.19';
+const APP_VERSION = '2.4.20';
 
 function versionGt(a, b) {
     const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -5637,6 +5637,48 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
   }
   function setChk(id, val){ const e=$(id); if(e){ e.checked=!!val; e.dispatchEvent(new Event('change')); } }
 
+  // ── v2.4.20 AKQUISITIONS-GATE ───────────────────────────────────────────────
+  // Misst die REINE Aufnahmequalität (vor jeder Erkennung) im Spiegelbereich:
+  // Belichtungs-Drift, Szenen-Bewegung, Schärfe. Befund 2026-06-15: die sauberst
+  // aufgenommene Serie (stabile Belichtung) trennte Treffer/Phantome am besten
+  // (5/5 @ 1 Phantom), Drift-Serien waren Phantom-Treiber. Das Gate erzwingt das.
+  function readSpiegelFrame(){
+    const img = (typeof getDetectionImageData==='function') ? getDetectionImageData() : null;
+    if(!img) return null;
+    const W=img.width,H=img.height,d=img.data;
+    let cx=W/2, cy=H/2, a=Math.min(W,H)*0.22;
+    if (typeof calib!=='undefined' && calib){ cx=calib.cx; cy=calib.cy; a=calib.a; }
+    const r=Math.max(20, a*0.7);
+    const G=12, grid=new Float32Array(G*G), gc=new Int32Array(G*G);
+    let sum=0,cnt=0,gx=0,gy=0,gcnt=0;
+    const x0=Math.max(1,Math.floor(cx-r)),x1=Math.min(W-2,Math.ceil(cx+r));
+    const y0=Math.max(1,Math.floor(cy-r)),y1=Math.min(H-2,Math.ceil(cy+r));
+    if (x1<=x0||y1<=y0) return null;
+    const step=Math.max(1,Math.floor(r/40));
+    const gray=(i)=>d[i]*0.3+d[i+1]*0.59+d[i+2]*0.11;
+    for(let y=y0;y<y1;y+=step) for(let x=x0;x<x1;x+=step){
+      const dx=x-cx,dy=y-cy; if(dx*dx+dy*dy>r*r) continue;
+      const i=(y*W+x)*4, g=gray(i); sum+=g; cnt++;
+      const gi=Math.floor((y-y0)/(y1-y0)*G)*G + Math.floor((x-x0)/(x1-x0)*G);
+      if(gi>=0&&gi<G*G){ grid[gi]+=g; gc[gi]++; }
+      gx+=Math.abs(g-gray((y*W+x+step)*4));
+      gy+=Math.abs(g-gray(((y+step)*W+x)*4)); gcnt++;
+    }
+    for(let k=0;k<G*G;k++) grid[k]= gc[k]?grid[k]/gc[k]:0;
+    return { mean: cnt?sum/cnt:0, grid, focus: gcnt?(gx+gy)/gcnt:0 };
+  }
+  async function measureQuality(ui, secs){
+    const N=Math.max(6,Math.round(secs*2)), fr=[];
+    for(let k=0;k<N;k++){ const f=readSpiegelFrame(); if(f) fr.push(f); ui('Messe Aufnahmequalität… '+(k+1)+'/'+N); await sleep(500); }
+    if(fr.length<4) return null;
+    const means=fr.map(f=>f.mean);
+    const drift=Math.max(...means)-Math.min(...means);
+    let move=0;
+    for(let k=1;k<fr.length;k++){ let s=0; const L=fr[k].grid.length; for(let j=0;j<L;j++) s+=Math.abs(fr[k].grid[j]-fr[k-1].grid[j]); move=Math.max(move,s/L); }
+    const fs=fr.map(f=>f.focus).sort((a,b)=>a-b);
+    return { drift, move, focus: fs[Math.floor(fs.length/2)], n:fr.length };
+  }
+
   const STEPS = [
     { type:'info', title:'Vorbereitung',
       text:'Tablet im ETF150-WLAN. In der App „📡 WLAN-Cam" → „▶ RTSP-Stream starten". Live-Bild muss sichtbar sein (~1 s Verzögerung ist ok).',
@@ -5654,6 +5696,14 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
     { type:'info', title:'Disziplin wählen',
       text:'Wähle oben die Disziplin die du schießt: KK25 (.22) oder GK25 (9 mm).',
       sub:'Danach Weiter.' },
+
+    { type:'info', title:'Aufbau fixieren',
+      text:'Kamera/Spektiv UND Scheibe bombenfest klemmen. Ab jetzt bis zum Serien-Ende NICHTS am Aufbau anfassen — kein Anstoßen, kein Nachjustieren, Spiegelwechsel NUR nach „Stop".',
+      sub:'Bewegung der Szene war in der Auswertung die Haupt-Phantomquelle. Weiter wenn alles fest sitzt.' },
+
+    { type:'info', title:'Scharf stellen',
+      text:'Stelle das Spektiv so scharf wie möglich auf die Ringe/den Spiegel — die Ringlinien sollen knackig stehen. Scharfe Löcher heben sich deutlich besser ab.',
+      sub:'Weiter wenn das Bild scharf ist.' },
 
     { type:'info', title:'Manuell kalibrieren', camTap:true,
       text:'Drücke „✎ Manuell (3 Klicks)" und tippe so exakt wie möglich: 1) Spiegel-Mitte, 2) Rand bei 3 Uhr, 3) Rand bei 6 Uhr.',
@@ -5700,6 +5750,22 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
       text:'Hänge eine LEERE, unbeschossene Scheibe auf bzw. richte auf den unbeschossenen Spiegel. Bild muss ruhig stehen.',
       sub:'Weiter → ich setze den Referenzframe (6 s Stabilisierung).' },
 
+    { type:'auto', title:'Belichtung einschwingen + Qualität prüfen',
+      text:'Ich starte das Bild, lasse die Belichtung einschwingen und MESSE dann die Aufnahmequalität (Drift / Bewegung / Schärfe). Weiter nur wenn sauber.',
+      run: async (ui)=>{
+        // Erkennung starten, damit Frames fliessen (Snapshot-Loop + Capture)
+        ensureDetecting(true);
+        for (let s=6;s>0;s--){ ui('Belichtung einschwingen… '+s+' s (falls das Bild flackert: festen Verschluss „📷"-Panel wählen)'); await sleep(1000); }
+        const q = await measureQuality(ui, 6);
+        if (!q) return {ok:false, msg:'⚠ Keine Bilddaten lesbar — läuft der Stream/Capture? Nochmal.'};
+        const driftOK = q.drift < 8, moveOK = q.move < 4;
+        const msg = `Drift ${q.drift.toFixed(1)} (Ziel <8) · Bewegung ${q.move.toFixed(1)} (Ziel <4) · Schärfe ${q.focus.toFixed(1)}`;
+        if (!driftOK && !moveOK) return {ok:false, msg:'⚠ '+msg+'  → Belichtung flackert UND Bild wackelt. Festen Verschluss setzen + Aufbau fixieren, dann nochmal.'};
+        if (!driftOK) return {ok:false, msg:'⚠ '+msg+'  → Belichtung driftet. Im „📷"-Panel einen FESTEN Verschluss wählen (nicht Auto), 2-3 s warten, nochmal.'};
+        if (!moveOK) return {ok:false, msg:'⚠ '+msg+'  → Szene bewegt sich. Kamera/Scheibe fester klemmen, nichts anfassen, nochmal.'};
+        return {ok:true, msg:'✓ Aufnahme sauber: '+msg+(q.focus<3?'  (Hinweis: Schärfe niedrig — evtl. nachfokussieren)':'')};
+      } },
+
     { type:'auto', title:'Referenzframe setzen',
       text:'Ich setze den Referenzframe und warte die Stabilisierung ab.',
       run: async (ui)=>{
@@ -5734,8 +5800,8 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
       } },
 
     { type:'info', title:'JETZT 5 Schüsse',
-      text:'Gib EXAKT 5 Schüsse ab — langsam, einzeln gezielt, Richtung Zentrum, ca. 5 s Abstand.',
-      sub:'WICHTIG: Scheibe NACH der Serie INTAKT aufheben — die physischen Lochpositionen sind im Folgeschritt die Ground-Truth-Validierung gegen die App-Erkennung. Weiter ERST nach dem 5. Schuss.' },
+      text:'Gib EXAKT 5 Schüsse ab — langsam, einzeln gezielt, Richtung Zentrum, ca. 5 s Abstand. Den Aufbau dabei NICHT berühren (kein Stoß ans Stativ, keine Nachjustage).',
+      sub:'WICHTIG: Scheibe NACH der Serie INTAKT aufheben — die physischen Lochpositionen sind die Ground-Truth-Validierung. Weiter ERST nach dem 5. Schuss.' },
 
     { type:'auto', title:'Messung beenden + speichern',
       text:'Ich lasse 10 s nachlaufen, stoppe dann und speichere die Session.',
@@ -5758,7 +5824,7 @@ document.getElementById('btnNewSpiegel').addEventListener('click', setRef);
 
     { type:'info', title:'Fertig ✓ — alles autark gespeichert',
       text:'Auf dem Tablet liegen jetzt (offline-auswertbar): Detection-Frames (Live, ~4 Hz), pro Treffer ein Screenshot (Live + Overlay), _meta.json (Kalibrierung/Geometrie), das Session-Log MIT v2.4-SNR-Log (v24_verifier_log) und die Scheibe als Ground-Truth. Pfad: /Android/data/de.bmcservice.trefferpoint/files/detframes/<session>/ und /Download/.',
-      sub:'Notieren: Anzahl real abgegebener Schüsse, Lichtbedingungen, Cam-/Spektiv-Position. Bei ZWEI Kameras (USB + ETF150): je einen kompletten Durchlauf, Scheiben UNTERSCHIEDLICH nummerieren (z.B. „USB-1", „ETF-1"). Scheiben mitnehmen + fotografieren. Auswertung offline aus Tablet-Daten + Foto.' },
+      sub:'Notieren: Anzahl real abgegebener Schüsse, Lichtbedingungen, Cam-/Spektiv-Position. Scheiben mitnehmen + fotografieren. TIPP für den stärksten Erkenntnisgewinn: eine ZWEITE Serie identisch aufnehmen, aber vorher den Spiegel-Druck (Ziffern + Ringlinien INNEN) mit mattem schwarzem Marker übermalen — der A/B-Vergleich zeigt, wie viel der aufgedruckte Ring die schwachen Mitte-Löcher kostet.' },
   ];
 
   let idx = 0, busy = false;
