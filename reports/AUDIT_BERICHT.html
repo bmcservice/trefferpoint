@@ -1,0 +1,88 @@
+<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>TrefferPoint — Audit-Bericht P0–P4</title>
+<style>
+ body{background:#15171a;color:#dde;font-family:system-ui,Arial;max-width:1100px;margin:0 auto;padding:24px;line-height:1.55}
+ h1{font-size:24px;border-bottom:2px solid #356;padding-bottom:8px}
+ h2{font-size:19px;color:#8cf;margin-top:34px;border-bottom:1px solid #2a3340;padding-bottom:4px}
+ h3{font-size:15px;color:#9d8}
+ code,.mono{font-family:'Consolas',monospace;background:#0d0f12;padding:1px 5px;border-radius:3px;color:#cda}
+ pre{background:#0d0f12;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;color:#bdc}
+ table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+ td,th{border:1px solid #2a3340;padding:6px 10px;text-align:left}
+ th{background:#1d222a;color:#9cf}
+ img{width:100%;max-width:960px;display:block;border:1px solid #333;margin:10px 0;border-radius:4px}
+ .cap{color:#9ab;font-size:13px;margin:-4px 0 18px}
+ .good{color:#7d7}.bad{color:#f88}.warn{color:#fc6}
+ .box{background:#1a1e24;border-left:4px solid #58c;padding:10px 16px;margin:14px 0;border-radius:0 6px 6px 0}
+</style></head><body>
+
+<h1>TrefferPoint — Konsolidierter Audit-Bericht (P0–P4)</h1>
+<p class="mono">Datum: 2026-06-11 · Auslöser: Der Nutzer fand durch zufälliges Hinschauen einen eklatanten Fehler in der Analysebasis (ein „Modell" aus Quadraten). Daraufhin: Stopp, Audit, verifizierte Rework.</p>
+
+<div class="box"><b>Kernergebnis in einem Satz:</b> Mein früheres Verdikt „.22 ist softwareseitig nicht lösbar, ~50%-Decke, Algorithmus erschöpft" war auf einer <span class="bad">kaputten Analyse-Pipeline</span> gebaut. Nach Reparatur und Verifikation liegt der ehrliche, belegte Stand bei <b>~50–60% Recall auf verifiziertem Fundament</b> — besser als die alte (fehlerhafte) Zahl, aber kein sauberer Solve; die schwachen .22-Löcher bleiben die echte Grenze.</p></div>
+
+<h2>0. Warum dieser Audit</h2>
+<p>Bei allen bisherigen Offline-Algorithmus-Tests hatte sich der Nutzer „blind" auf meine geht/geht-nicht-Voten verlassen. Beim ersten eigenen Blick auf ein Zwischenbild fand er sofort einen groben Fehler. Das ist das Urteil über meine bisherige Selbstkontrolle: <b>Ich habe End-Ergebnisse gegen Ground Truth geprüft, aber nie die innere Korrektheit der Pipelines — ich habe Zwischenstufen (Modelle, Residuen, Registrierungen) nie angeschaut.</b> Eine Kennzahl kann glänzen, während die Rechnung dahinter Müll ist.</p>
+
+<h2>P0 — Bausteine verifiziert (erst Werkzeuge prüfen, dann analysieren)</h2>
+<table><tr><th>Check</th><th>Methode</th><th>Ergebnis</th></tr>
+<tr><td>Registrierung</td><td>bekannten Sub-Pixel-Versatz (2.3, −1.7) ausrichten + zurückrechnen</td><td class="good">Fehler 0.32px → sub-pixel-genau, SOLIDE</td></tr>
+<tr><td>Detektor</td><td>synthetisch gepflanztes .22-Loch finden</td><td class="good">exakt lokalisiert (0px) → SOLIDE</td></tr>
+<tr><td>Kalibrierung</td><td>roten Kreis über Spiegel (Nutzer-Sichtprüfung)</td><td class="warn">A/0603 korrekt; B leicht versetzt; C357 grob daneben</td></tr></table>
+<img src="P0_seite_registrierung.png"><p class="cap">P0-Check 1: Registrierung. Residuum (rechts unten) fast schwarz = Versatz korrekt zurückgerechnet.</p>
+<p><b>Folgerung:</b> Die <span class="good">globale</span> Registrierung ist solide. Der Fehler steckte spezifisch in einer <span class="bad">kaputten Block-Registrierung</span> (40px-Kacheln einzeln verschoben → Kachel-Artefakte, das „Quadrate-Modell"), nicht im Grundverfahren.</p>
+
+<h2>P1 — Basisscheiben-Subtraktion (das überwirft mein Verdikt)</h2>
+<p>Statt gegen ein gerechnetes Modell: das Schlussbild gegen die <b>echte unbeschossene Basisscheibe</b> (frühe Frames), sauber <b>global</b> registriert. So kürzen sich Ringe UND Ziffern weg, das Loch bleibt.</p>
+<pre>Trennbarkeit (Loch-Residuum > lokaler Clutter-Boden), 7 Sessions / 32 Löcher:
+  verifizierte globale Registrierung: 32/32 (100%)
+  [die kaputte Block-Variante war nur 17/32 = 53%]</pre>
+<img src="P1_0603.png"><p class="cap">P1 Beispiel 0603: links Schlussbild · Mitte registrierte Basisscheibe · rechts Residuum. Grün = echte Treffer.</p>
+<div class="box"><b>Ehrliche Selbstkorrektur:</b> Ich habe „32/32, Decke überwunden!" gefeiert. <span class="bad">Das war wieder zu optimistisch.</span> „Trennbarkeit" prüft nur <i>Loch-Peak > 99,5%-Boden</i> — über diesem Boden liegen aber auch andere Pixel. Der <b>echte Detektor</b> liefert ~50–60%, nicht 100%. Eine Feasibility-Kennzahl als Durchbruch gelesen — genau der Fehler, den der Audit aufdecken sollte, diesmal bei mir.</div>
+
+<h2>P2/P3 — Phantome diagnostiziert (vom Nutzer-Auge)</h2>
+<p>Die Falsch-Erkennungen sind <b>kein Zufallsrauschen</b>, sondern <b>Reste der weißen Druckstruktur</b> (Ringlinien + Ziffern): Eine weiße Linie auf Schwarz hat ~200 Stufen Kontrast; schon 0,3px Rest-Versatz hinterlässt ~60 Residuum an der Kante. Numerisch bestätigt: in 0606 <b>6/6</b> Phantome auf weißem Druck, in 0531 <b>10/16</b>. Echte Löcher liegen fast nie auf weißem Druck (1/5).</p>
+<img src="P2_0531.png"><p class="cap">P2: Residuum mit Erkennungen. Grün = echter Treffer, cyan = Phantom. 0531 (gezeigt) trägt die meisten.</p>
+<h3>Zwei Kalibrierungsfehler gefunden (beide vom Nutzer-Auge)</h3>
+<ul>
+<li><b>B:</b> Zentrum vertikal leicht versetzt — irrelevant (korrigiert ändert nichts).</li>
+<li><b>C357:</b> blaue Maske 2 Ringe gegen den Hintergrund versetzt → die Scheibe hat sich <b>während</b> der Session ~2 Ringe bewegt. Registrierung kann das nicht kürzen → <span class="bad">C357 ist der bewegte Ausreißer, ausgeschlossen.</span> (Genau das würde der Stabilitäts-Wächter v2.4.18 live flaggen.)</li>
+</ul>
+<p class="warn">Nebenbefund: meine <b>automatische</b> Zentrumsmessung ist unzuverlässig (widersprach dem Nutzer-Auge zweimal). Konsequenz: Kalibrierung kommt künftig vom Nutzer-Klick, nicht von Automatik/App.</p>
+
+<h2>P4 — Der echte Detektor (ehrliche Zahlen, 6 saubere Sessions / 28 Löcher)</h2>
+<pre>globaler Schwellwert T35:               Recall 19/28 (68%), 23 Phantome
++ Mindestfläche>=8:                     Recall 16/28 (57%), 13 Phantome
++ Weiß-Druck-Unterdrückung:             Recall 14/28 (50%),  5 Phantome
+lokal-adaptiv (Top-Hat), best:          ~60%,                12 Phantome
++ Edge-Signatur (Vorzeichen-Konsistenz):Phantome 12 -> 3, aber Recall faellt</pre>
+<p>Über alle Varianten konsistent: <b>~50–60% Recall</b> ist die Decke; Phantome runter geht nur auf Kosten des Recalls. Die schwachen .22-Löcher (manche erzeugen schlicht zu wenig Kontrast) sind die genuine Grenze.</p>
+
+<h2>Korrekturen an FRÜHEREN Schlüssen (was fragil war)</h2>
+<table><tr><th>Frühere Aussage</th><th>Status nach Audit</th></tr>
+<tr><td>„~50%-Decke, Algorithmus erschöpft"</td><td class="bad">FALSCH — Block-Registrierungs-Bug. Verworfen.</td></tr>
+<tr><td>„8 Hebel negativ für .22"</td><td class="warn">Auf ungeprüften Pipelines — der Basis-Subtraktions-Pfad war kaputt implementiert, nicht die Idee.</td></tr>
+<tr><td>„C357 fundamental kontaminiert"</td><td class="good">Präzisiert: Scheibe bewegte sich ~2 Ringe während der Session (Ausreißer).</td></tr>
+<tr><td>App-Kalibrierung zuverlässig</td><td class="bad">Teils falsch (B, C357). Nutzer-Klick ist die Quelle.</td></tr>
+</table>
+<p><b>Belastbar geblieben</b> (gegen Pappe verankert): App-alt = 0/10 echt; die echten Lochpositionen; Freeze/Stabilität; Live-Shadow-Treffer.</p>
+
+<h2>QS-Maßnahmen, ab sofort verbindlich</h2>
+<ol>
+<li>Jede Pipeline-Stufe <b>visualisieren und ansehen</b>, bevor einer Zahl geglaubt wird.</li>
+<li>Bausteine auf <b>bekannten/synthetischen Eingaben</b> verifizieren (Registrierung, Detektor, Modell).</li>
+<li><b>Keine Skalar-Metrik ohne gepaartes Bild</b>, das belegt, dass sie das Richtige misst.</li>
+<li><b>Methode vs. Implementierung</b> strikt trennen — „X geht nicht" erst nach Beweis korrekter X-Implementierung.</li>
+<li>Analyse-<b>Code</b> reviewen (nicht nur Schlüsse), ggf. durch zweites Modell.</li>
+<li>Bilder über <b>Chrome</b> ausliefern (zuverlässiger Kanal); Befund immer zuerst als Text.</li>
+</ol>
+
+<h2>Ehrlicher Endstand & offene Punkte</h2>
+<ul>
+<li><b>.22 ist nicht tot</b> — und nicht magisch gelöst. Verifizierte Decke ~50–60% Recall.</li>
+<li>Fundament jetzt <b>solide</b>: Basisscheiben-Subtraktion + globale Registrierung + bekannte Phantomquelle (Weiß-Druck) + Kalibrierung per Nutzer-Klick.</li>
+<li>Die fehlenden ~40% sind <b>schwach-Kontrast-Löcher</b> = ein Akquisitions-Thema (Belichtung/Optik/Stabilität), kein reines Algorithmus-Problem mehr.</li>
+<li><b>0531</b> bleibt die schwierigste der „sauberen" Sessions (höhere Vergrößerung a=310, schwächere Loch-Residuen) — eigener Prüfpunkt.</li>
+</ul>
+<div class="box">Der eigentliche Gewinn des Audits ist nicht eine höhere Zahl, sondern <b>Verlässlichkeit</b>: Wir haben jetzt eine geprüfte Basis und eine ehrliche Zahl statt einer Behauptung auf wackligem Grund.</div>
+
+</body></html>

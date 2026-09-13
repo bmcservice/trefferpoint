@@ -1,0 +1,47 @@
+<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<title>TrefferPoint — GT markieren Stand 2026-06-14</title>
+<style>
+ body{background:#111;color:#ddd;font-family:system-ui,Arial;margin:0;padding:10px}
+ #bar{position:sticky;top:0;background:#111;padding:8px 0;z-index:10}
+ button{background:#234;color:#cde;border:1px solid #456;border-radius:6px;padding:8px 14px;margin-right:6px;font-size:15px;cursor:pointer}
+ button.active{background:#2a6;color:#fff}
+ #wrap{position:relative;display:inline-block;margin-top:8px}
+ #img{max-width:98vw;display:block}
+ .mk{position:absolute;width:26px;height:26px;border:3px solid #2f2;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 0 0 1px #000}
+ .mk span{position:absolute;left:28px;top:-5px;color:#2f2;font-weight:bold;font-size:14px;text-shadow:0 0 3px #000}
+ #out{width:98vw;height:90px;background:#000;color:#6f6;font-family:monospace;font-size:14px;margin-top:8px}
+ #hint{color:#9ab;font-size:13px}
+ #zoom{color:#fc6;font-size:13px;margin-left:10px}
+</style></head><body>
+<div id="bar">
+ <button id="bS0900" class="active" onclick="setImg('S0900')">09:00-Serie (5 Schuss, sauber)</button>
+ <button id="bS0906" onclick="setImg('S0906')">09:06-Serie (5 Schuss)</button>
+ <button onclick="undo()">↶ letzten</button>
+ <button onclick="clearAll()">alle löschen</button>
+ <span id="hint">Klicke die 5 echten Schusslöcher (Abgleich mit der Original-Scheibe). Koordinaten unten kopieren.</span>
+ <span id="zoom"></span>
+</div>
+<div id="wrap"><img id="img" src="" draggable="false"><div id="ovl"></div></div>
+<textarea id="out" readonly></textarea>
+<script>
+const IMGS={'S0900':'S0900.jpg','S0906':'S0906_clean.jpg'};
+let cur='S0900'; const pts={'S0900':[],'S0906':[]};
+const img=document.getElementById('img'), ovl=document.getElementById('ovl');
+function setImg(k){cur=k; img.src=IMGS[k]; ['S0900','S0906'].forEach(n=>document.getElementById('b'+n).className=(n==k?'active':'')); render();}
+img.addEventListener('click',e=>{
+  const r=img.getBoundingClientRect(); const sx=img.naturalWidth/r.width, sy=img.naturalHeight/r.height;
+  pts[cur].push([Math.round((e.clientX-r.left)*sx), Math.round((e.clientY-r.top)*sy)]); render();
+});
+function undo(){pts[cur].pop(); render();}
+function clearAll(){pts[cur]=[]; render();}
+function render(){
+  ovl.innerHTML=''; const r=img.getBoundingClientRect();
+  const sx=r.width/(img.naturalWidth||1), sy=r.height/(img.naturalHeight||1);
+  pts[cur].forEach((p,i)=>{const d=document.createElement('div');d.className='mk';d.style.left=(p[0]*sx)+'px';d.style.top=(p[1]*sy)+'px';d.innerHTML='<span>'+(i+1)+'</span>';ovl.appendChild(d);});
+  document.getElementById('out').value=
+    'S0900 ('+pts['S0900'].length+'/5): '+pts['S0900'].map(p=>'('+p[0]+','+p[1]+')').join(' ')+'\n'+
+    'S0906 ('+pts['S0906'].length+'/5): '+pts['S0906'].map(p=>'('+p[0]+','+p[1]+')').join(' ');
+  document.getElementById('zoom').textContent=cur+': '+pts[cur].length+'/5 markiert';
+}
+img.onload=render; setImg('S0900'); window.addEventListener('resize',render);
+</script></body></html>

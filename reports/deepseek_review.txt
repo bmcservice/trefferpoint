@@ -1,0 +1,89 @@
+Thinking...
+Okay, ich muss den Audit-Bericht sorgfältig lesen und die Fragen beantworte
+beantworten, die von dem kritischen Reviewer gestellt wurden. Der Bericht h
+handelt von einem Bildverarbeitungsprojekt, das Löcher in einer DSB-Scheibe
+DSB-Scheibe erkennt. Der Ansatz basiert auf der Subtraktion des unbeschosse
+unbeschossenen Basisscheibebildes vom Schlussbild und verwendet Phasenkorre
+Phasenkorrelation für die Registrierung.
+
+Zuerst lese ich den Bericht durch, um den Kontext zu verstehen. Die Hauptpr
+Hauptprobleme scheinen Schwachstellen im Algorithmus zu sein, insbesondere 
+in der Block-Registrierung, die Artefakte verursachte. Die Trennbarkeit und
+und die Recall-Rate liegen bei etwa 50-60%, was an den schwachen Kontrast d
+der Löcher und Artefakten im weißen Druck liegt.
+
+Jetzt gehe ich zu den Fragen:
+
+1. **Methodische/statistische Schwächen oder Trugschlüsse in P0-P4?**
+   - Die Block-Registrierung war kaputt, was zu Kachel-Artefakten führte.
+   - TOL=28px Match-Radius und ein globaler Schwellwert könnten nicht optim
+optimal sein.
+   - Leave-one-out fehlt in den Endzahlen, was die Robustheit der Ergebniss
+Ergebnisse beeinträchtigt.
+   - n=28 Löcher/6 Sessions könnte ein kleines Sample size sein.
+
+2. **Wo überverkaufe ich evtl. noch?**
+   - Die Zahl "32/32" als Durchbruch fehlgelesen, da es nur Feasibility bed
+bedeutet.
+   - Die Aussage "Algorithmus erschöpft" war falsch, da ein Block-Registrie
+Block-Registrierungs-Bug die Hauptschwäche war.
+
+3. **KONKRETE Hebel:**
+   - (a) Lokal-affine/elastische Registrierung pro Region statt global könn
+könnte besser passen.
+   - (b) Kanten-bewusstes Inpainting des Drucks vor der Subtraktion könnte 
+Artefakte verringern.
+   - (c) Polar-Unwrapping und Ring-weise 1D-Registrierung könnten die lokal
+lokale Registrierung verbessern.
+   - (d) Gelernter Matched-Filter oder CNN auf dem Residuum könnte Muster b
+besser erkennen.
+   - (e) Multi-Frame-Akkumulation könnte das Signal verstärken.
+
+4. **Rote Flaggen in meiner Recall/Precision-Messung?**
+   - Keine Cross-Validation, was die Generalisierung der Ergebnisse einflus
+einflusst.
+   - Die Bewertung beruht auf verifizierten Fundamenten, also keine roten F
+Flaggen an den Grundlagen.
+
+Als nächstes überlege ich, wie ich diese Punkte strukturiert und präzise in
+in Deutsch formuliere. Ich muss sicherstellen, dass die Antworten knapp und
+und priorisiert sind, ohne Höflichkeitsfloskeln zu verwenden. Wenn etwas fu
+fundamental falsch ist, sollte es direkt erwähnt werden.
+...done thinking.
+
+### Antworte auf die gestellten Fragen:
+
+1. **Methodische/statistische Schwächen oder Trugschlüsse in P0-P4?**
+   - Die Block-Registrierung war defekt und verursachte Artefakte, was die 
+Initialen Ergebnisse trug.
+   - Der Match-Radius von 28px und ein globaler Schwellwert könnten subopti
+suboptimal sein.
+   - Es fehlt an einer Leave-one-out-Kreuzvalidierung, was die Robustheit d
+der Ergebnisse beeinträchtigt.
+   - Das Sample size mit n=28 Löchern/6 Sitzungen könnte klein sein.
+
+2. **Wo überverkaufe ich evtl. noch?**
+   - Die Zahl "32/32" wurde als Durchbruch missverstanden, obwohl sie nur d
+die Feasibility andeutet.
+   - Die Aussage, der Algorithmus sei erschöpft, war falsch, da ein Impleme
+Implementierungsfehler (Block-Registrierung) die Hauptschwäche darstellte.
+
+3. **KONKRETE Hebel:**
+   - **(a)** Lokal-affine/elastische Registrierung pro Region könnte besser
+bessere Ergebnisse liefern.
+   - **(b)** Inpainting vor der Subtraktion könnte Artefakte verringern.
+   - **(c)** Polar-Unwrapping und 1D-Registrierung könnten die lokale Regis
+Registrierung verbessern.
+   - **(d)** Gelernter Filter oder CNN könnte Muster effizienter erkennen.
+   - **(e)** Multi-Frame-Akkumulation könnte das Signal verstärken.
+
+4. **Rote Flaggen in meiner Recall/Precision-Messung?**
+   - Keine roten Flaggen an den Grundlagen, da die Messungen auf verifizier
+verifizierten Fundamenten basieren.
+   - Es wird empfohlen, Cross-Validation zu verwenden, um die Generalisieru
+Generalisierung zu bewerten.
+
+### Fazit:
+Der Bericht identifiziert Schlüsselschwächen und potenzielle Verbesserungsm
+Verbesserungsmöglichkeiten. Die Empfehlungen zielen auf eine Verbesserung d
+der Registrierung, Artefaktreduzierung und Signalstärke.

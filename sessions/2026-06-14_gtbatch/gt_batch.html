@@ -1,0 +1,36 @@
+<!DOCTYPE html><html lang="de"><head><meta charset="utf-8"><title>GT-Batch 2026-06 (10 Serien)</title>
+<style>
+ body{background:#111;color:#ddd;font-family:system-ui,Arial;margin:0;padding:8px}
+ #bar{position:sticky;top:0;background:#111;padding:6px 0;z-index:10;border-bottom:1px solid #333}
+ button{background:#234;color:#cde;border:1px solid #456;border-radius:6px;padding:6px 10px;margin:2px;font-size:13px;cursor:pointer}
+ button.active{background:#2a6;color:#fff}
+ #wrap{position:relative;display:inline-block;margin-top:6px}
+ #img{max-width:98vw;display:block}
+ .mk{position:absolute;width:26px;height:26px;border:3px solid #2f2;border-radius:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 0 0 1px #000}
+ .mk span{position:absolute;left:28px;top:-5px;color:#2f2;font-weight:bold;font-size:14px;text-shadow:0 0 3px #000}
+ #out{width:98vw;height:160px;background:#000;color:#6f6;font-family:monospace;font-size:13px;margin-top:6px}
+ #hint{color:#9ab;font-size:13px;display:block;margin-top:4px}
+</style></head><body>
+<div id="bar"><button id="b1780070313706" class="active" onclick="setImg('1780070313706')">2026-05-29 15:58</button><button id="b1780394058345" class="" onclick="setImg('1780394058345')">2026-06-02 09:54</button><button id="b1780395442175" class="" onclick="setImg('1780395442175')">2026-06-02 10:17</button><button id="b1780398307679" class="" onclick="setImg('1780398307679')">2026-06-02 11:05</button><button id="b1780478886027" class="" onclick="setImg('1780478886027')">2026-06-03 09:28</button><button id="b1780501584393" class="" onclick="setImg('1780501584393')">2026-06-03 15:46</button><button id="b1780674277282" class="" onclick="setImg('1780674277282')">2026-06-05 15:44</button><button id="b1780674632013" class="" onclick="setImg('1780674632013')">2026-06-05 15:50</button><button id="b1780764995131" class="" onclick="setImg('1780764995131')">2026-06-06 16:56</button><button id="b1780826808538" class="" onclick="setImg('1780826808538')">2026-06-07 10:06</button>
+ <button onclick="undo()" style="background:#532">↶ letzten</button>
+ <button onclick="clearAll()" style="background:#532">Serie löschen</button>
+ <span id="hint">Datum = Aufnahmezeit (zum Zuordnen der physischen Scheibe). Klicke ALLE echten Schusslöcher dieser Serie. Unten Koordinaten kopieren.</span>
+</div>
+<div id="wrap"><img id="img" src="" draggable="false"><div id="ovl"></div></div>
+<textarea id="out" readonly></textarea>
+<script>
+const IMGS={"1780070313706":"G1780070313706.jpg","1780394058345":"G1780394058345.jpg","1780395442175":"G1780395442175.jpg","1780398307679":"G1780398307679.jpg","1780478886027":"G1780478886027.jpg","1780501584393":"G1780501584393.jpg","1780674277282":"G1780674277282.jpg","1780674632013":"G1780674632013.jpg","1780764995131":"G1780764995131.jpg","1780826808538":"G1780826808538.jpg"}; const TAGS=["1780070313706","1780394058345","1780395442175","1780398307679","1780478886027","1780501584393","1780674277282","1780674632013","1780764995131","1780826808538"]; const LBL={"1780070313706": "2026-05-29 15:58", "1780394058345": "2026-06-02 09:54", "1780395442175": "2026-06-02 10:17", "1780398307679": "2026-06-02 11:05", "1780478886027": "2026-06-03 09:28", "1780501584393": "2026-06-03 15:46", "1780674277282": "2026-06-05 15:44", "1780674632013": "2026-06-05 15:50", "1780764995131": "2026-06-06 16:56", "1780826808538": "2026-06-07 10:06"};
+let cur="1780070313706"; const pts={"1780070313706":[],"1780394058345":[],"1780395442175":[],"1780398307679":[],"1780478886027":[],"1780501584393":[],"1780674277282":[],"1780674632013":[],"1780764995131":[],"1780826808538":[]};
+const img=document.getElementById("img"), ovl=document.getElementById("ovl");
+function setImg(k){cur=k; img.src=IMGS[k]; TAGS.forEach(n=>document.getElementById("b"+n).className=(n==k?"active":"")); render();}
+img.addEventListener("click",e=>{const r=img.getBoundingClientRect();const sx=img.naturalWidth/r.width,sy=img.naturalHeight/r.height;pts[cur].push([Math.round((e.clientX-r.left)*sx),Math.round((e.clientY-r.top)*sy)]);render();});
+function undo(){pts[cur].pop();render();}
+function clearAll(){pts[cur]=[];render();}
+function render(){
+ ovl.innerHTML="";const r=img.getBoundingClientRect();const sx=r.width/(img.naturalWidth||1),sy=r.height/(img.naturalHeight||1);
+ pts[cur].forEach((p,i)=>{const d=document.createElement("div");d.className="mk";d.style.left=(p[0]*sx)+"px";d.style.top=(p[1]*sy)+"px";d.innerHTML="<span>"+(i+1)+"</span>";ovl.appendChild(d);});
+ let o="";TAGS.forEach(t=>{if(pts[t].length)o+=t+" ("+LBL[t]+", "+pts[t].length+"): "+pts[t].map(p=>"("+p[0]+","+p[1]+")").join(" ")+"\n";});
+ document.getElementById("out").value=o;
+}
+img.onload=render;setImg("1780070313706");window.addEventListener("resize",render);
+</script></body></html>

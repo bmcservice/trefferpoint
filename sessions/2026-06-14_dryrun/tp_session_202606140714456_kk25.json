@@ -1,0 +1,47 @@
+{
+  "version": "2.4.19",
+  "device": "Kamera",
+  "camera": {
+    "type": "Kamera"
+  },
+  "session": {
+    "start_ms": 1781421285610,
+    "start_iso": "2026-06-14T07:14:45.610Z",
+    "rec_start_iso": "2026-06-14T07:14:45.610Z",
+    "rec_start_vid_base": null,
+    "end_ms": 1781421302361,
+    "duration_s": 16.751
+  },
+  "rec": {
+    "video_paths": [],
+    "video_urls": [],
+    "video_path": null,
+    "video_url": null,
+    "cover_url": null,
+    "adb_pull_cmd": null,
+    "adb_pull_all": null
+  },
+  "discipline": "kk25",
+  "calibration": {
+    "cx": 1072,
+    "cy": 496,
+    "a": 231,
+    "b": 230,
+    "angle": 0,
+    "pxPerMm": 2.3049945770001283,
+    "locked": true
+  },
+  "hits": [],
+  "rejected_candidates": [],
+  "rejected_summary": {},
+  "frozen_spots": [],
+  "v24_verifier_log": [],
+  "v24_snr_commit": 6,
+  "shadow_log": [],
+  "stability": {
+    "frames": 0,
+    "frozen": 0,
+    "disturbed": 0,
+    "max_frozen_run": 0
+  }
+}
