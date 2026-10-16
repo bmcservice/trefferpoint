@@ -46,6 +46,24 @@ im Gegenteil: dieselben physikalischen Grenzen, offen dokumentiert.
 Serie laufen lassen (Scheiben-Foto = gemeinsame GT) → deren Erkennung erstmals
 quantifizieren und gegen unsere Zahlen stellen.
 
+## Vermarktungsansatz (Lehrstück für TrefferPoint)
+- **Freemium mit Komfort-Limits:** Gratis-Version ist nutzbar, aber spürbar begrenzt
+  (nur 3 Treffer sichtbar, Zwangspause nach 20) → niedrige Einstiegshürde, Conversion
+  über Komfort statt über Kernfunktion. **Pro als Abo 24,99 €/Jahr** (nicht Einmalkauf).
+- **Community-Go-to-Market:** Beta-Tester-Aufruf direkt im Zielgruppen-Forum
+  (WAFFEN-online), aktive Bitte um Nutzer-Reports (z.B. Outdoor) → kostenlose
+  Feldtests + Early-Adopter-Bindung + Sichtbarkeit ohne Werbebudget.
+- **Ehrliche Erwartungssteuerung als Verkaufsargument:** FAQ nennt Grenzen offen
+  („nicht für offizielle Wertung", kameraabhängig) → weniger Enttäuschung, weniger
+  Support, rechtliche Absicherung.
+- **„Dein Handy reicht"-Positionierung:** Budget-Handys getestet, konkretes günstiges
+  Spektiv (Bresser ~35x) genannt, Setup-Varianten dokumentiert → keine
+  Hardware-Kaufhürde vor dem App-Download.
+- **Für TrefferPoint ableitbar:** 25 €/Jahr als Preisanker; Forum-Beta als Launch-Weg;
+  unser Differenzierer wäre die MESSBARE Ehrlichkeit (wir können belegte
+  Erkennungsraten + Qualitäts-Gate nennen — sie nennen gar keine Zahlen) plus
+  Tablet/APK-Route und ETF150-WLAN-Setup.
+
 ## Quellen
 - https://targetspotter.app/en/ · https://targetspotter.app/?p=51 (Was ist TS)
 - https://targetspotter.app/?page_id=20 (FAQ) · https://targetspotter.app/?page_id=18 (Anleitung)
